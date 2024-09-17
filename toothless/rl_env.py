@@ -1,9 +1,10 @@
+from typing import Callable
 from gymnasium import Env
 from gymnasium.spaces import Discrete
 
 import eggshell
 
-import halide
+import data
 from symbols import Symbol
 
 
@@ -16,6 +17,7 @@ class Sketching(Env):
     max_fraction_sketch: float
     step_limit: int
     symbol_table: dict[str, Symbol]
+    typechecker: Callable[[eggshell.PySketch], bool]
     symbol_table: list[Symbol]
     action_space: Discrete
     render_mode: str
@@ -30,6 +32,7 @@ class Sketching(Env):
         max_fraction_sketch: float,
         step_limit: int,
         symbol_table: dict[str, Symbol],
+        typechecker: Callable[[eggshell.PySketch], bool],
         render_mode="human",
         **kwargs,
     ):
@@ -38,6 +41,7 @@ class Sketching(Env):
         self.max_fraction_sketch = max_fraction_sketch
         self.step_limit = step_limit
         self.symbol_table = symbol_table
+        self.typechecker = typechecker
         self.symbol_list = list(self.symbol_table.values())
         self.action_space = Discrete(len(self.symbol_list))
         self.render_mode = render_mode
@@ -47,6 +51,7 @@ class Sketching(Env):
     def step(self, action: int):
         # Translate index into symbol from the symbol_table
         chosen_symbol = self.symbol_list[action]
+        # print(chosen_symbol)
         # Append Symbol at the current [active] node, aka taking the action
         terminated = self.sketch.append(
             eggshell.PySketch(chosen_symbol.name, chosen_symbol.arity)
@@ -54,7 +59,7 @@ class Sketching(Env):
         # Check the time limit
         truncated = self.steps > self.step_limit
 
-        typechecks = eggshell.halide.typecheck_sketch(self.sketch)
+        typechecks = self.typechecker(self.sketch)
         depth = self.sketch.depth()
         size = self.sketch.size()
         sketch_symbols = self.sketch.sketch_symbols()
@@ -71,11 +76,13 @@ class Sketching(Env):
             self.last_reward -= 20
 
         # Add penalty if an agent uses too many sketch symbols
-        if fraction_sketch <= self.max_fraction_sketch:
+        if fraction_sketch >= self.max_fraction_sketch:
             self.last_reward -= size - self.max_fraction_sketch
 
         # Add penalty if an agent reaches a sketch that does not typecheck
-        if not typechecks:
+        if typechecks:
+            pass  # Here goes the usefulness calculation
+        else:
             self.last_reward -= 50
 
         # # Add penalty if an agnet does not reach in time
@@ -101,7 +108,7 @@ class Sketching(Env):
             self.render()
 
         return (
-            halide.expr2pt(self.sketch, self.symbol_table),
+            data.expr2pt(self.sketch, self.symbol_table),
             self.last_reward,
             terminated,
             truncated,
@@ -119,11 +126,11 @@ class Sketching(Env):
         info = {
             "size": self.sketch.size(),
             "depth": self.sketch.depth(),
-            "typechecks": eggshell.halide.typecheck_sketch(self.sketch),
+            "typechecks": self.typechecker(self.sketch),
             "native": self.sketch,
             "flattened": self.sketch.flat(),
         }
-        return halide.expr2pt(self.sketch, self.symbol_table), info
+        return data.expr2pt(self.sketch, self.symbol_table), info
 
     def render(self):
         print(

@@ -3,7 +3,16 @@ from pathlib import Path
 from dataclasses import dataclass
 from typing import Optional, Self
 
+from torch.nn import functional as F
+import torch
+from torch_geometric.data import Data
+import tqdm
+from torch.utils.data import Dataset
+
+import eggshell
 from eggshell import PyLang
+
+from symbols import Symbol
 
 
 @dataclass
@@ -90,3 +99,167 @@ def load_data(folder: Path) -> list[EGraphData]:
             for datapoint in json_data:
                 data.append(EGraphData.from_json(datapoint))
     return data
+
+
+def normalize_int(x: int, int_range: tuple[int, int]) -> float:
+    return (x - int_range[0]) / (int_range[1] - int_range[0])
+
+
+def check_int(s: str) -> bool:
+    if s[0] == "-" and len(s) > 1:
+        return s[1:].isdigit()
+    return s.isdigit()
+
+
+def expr2pt(
+    expr: eggshell.PyLang | eggshell.PySketch, symbol_table: dict[str, Symbol]
+) -> Data:
+    flat_expr = expr.flat()
+
+    tensor_len = len(symbol_table) + 1
+    nodes = []
+    for n in flat_expr.nodes:
+        if check_int(n.name):
+            t = torch.tensor(tensor_len - 1)
+            one_hot = F.one_hot(t, num_classes=tensor_len).to(torch.float32)
+            int_encode = normalize_int(int(n.name), int_range=(-1024, 1024))
+            position = normalize_int(n.root_distance, int_range=(0, 32))
+
+            nodes.append(
+                torch.cat(
+                    (one_hot, torch.tensor([int_encode]), torch.tensor([position]))
+                )
+            )
+        else:
+            t = torch.tensor(symbol_table[n.name].index)
+            one_hot = F.one_hot(t, num_classes=tensor_len).to(torch.float32)
+
+            position = normalize_int(n.root_distance, int_range=(0, 32))
+            nodes.append(torch.cat((one_hot, torch.zeros(1), torch.tensor([position]))))
+
+    edges = torch.transpose(torch.tensor(flat_expr.edges), 0, 1)
+
+    return nodes, edges
+
+
+def pair2pt(lhs, rhs, symbol_table) -> Data:
+    lhs_nodes, lhs_edges = expr2pt(lhs, symbol_table)
+    lhs_data = Data(x=lhs_nodes, edge_index=lhs_edges)
+    rhs_nodes, rhs_edges = expr2pt(rhs, symbol_table)
+    rhs_data = Data(x=rhs_nodes, edge_index=rhs_edges)
+    return lhs_data, rhs_data
+
+
+class SeedDataset(Dataset):
+    def __init__(self, data_dir, symbol_table, transform=None):
+        egraph_data = load_data(data_dir)
+        term_pairs = []
+        for egraph in egraph_data:
+            end_as_lang = eggshell.PyLang.from_str(str(egraph.truth_value).lower())
+            pair = pair2pt(egraph.seed_expr, end_as_lang, symbol_table)
+            term_pairs.append(pair)
+        self.term_pairs = term_pairs
+        self.transform = transform
+
+    def __len__(self):
+        return len(self.term_pairs)
+
+    def __getitem__(self, idx):
+        lhs, rhs = self.term_pairs[idx]
+        if self.transform:
+            lhs = self.transform(lhs)
+            rhs = self.transform(rhs)
+
+        return lhs, rhs
+
+
+def is_useful_baseline(baseline: BaselineData) -> bool:
+    if baseline.total_iters < 2:
+        return False
+    if baseline.total_time < 1.0:
+        return False
+    return True
+
+
+class BaselineDataset(Dataset):
+    def __init__(self, data_dir, symbol_table, transform=None):
+        egraph_data = load_data(data_dir)
+        term_pairs = []
+        for egraph in tqdm.tqdm(egraph_data):
+            for eclass in egraph.eclass_data:
+                for b in eclass.baselines:
+                    if not is_useful_baseline(b):
+                        continue
+                    pair = pair2pt(
+                        eclass.generated[b.from_id],
+                        eclass.generated[b.to_id],
+                        symbol_table,
+                    )
+                    term_pairs.append(pair)
+        self.term_pairs = term_pairs
+        self.transform = transform
+
+    def __len__(self):
+        return len(self.term_pairs)
+
+    def __getitem__(self, idx):
+        lhs, rhs = self.term_pairs[idx]
+        if self.transform:
+            lhs = self.transform(lhs)
+            rhs = self.transform(rhs)
+
+        return lhs, rhs
+
+
+def is_useful_generated(expr: eggshell.PySketch) -> bool:
+    return expr.size() > 5
+
+
+class GeneratedDataset(Dataset):
+    def __init__(self, data_dir, symbol_table, transform=None):
+        egraph_data = load_data(data_dir)
+        term_pairs = []
+        for egraph in tqdm.tqdm(egraph_data):
+            for eclass in egraph.eclass_data:
+                filtered_data = filter(is_useful_generated, eclass.generated)
+                for lhs, rhs in [
+                    (lhs, rhs)
+                    for lhs in filtered_data
+                    for rhs in filtered_data
+                    if lhs != rhs
+                ]:
+                    pair = pair2pt(lhs, rhs, symbol_table)
+                    term_pairs.append(pair)
+        self.term_pairs = term_pairs
+        self.transform = transform
+
+    def __len__(self):
+        return len(self.term_pairs)
+
+    def __getitem__(self, idx):
+        lhs, rhs = self.term_pairs[idx]
+        if self.transform:
+            lhs = self.transform(lhs)
+            rhs = self.transform(rhs)
+
+        return lhs, rhs
+
+
+# def collate_fn(data):
+#     """
+#     data: is a list of tuples with (example, label, length)
+#           where 'example' is a tensor of arbitrary shape
+#           and label/length are scalars
+#     """
+#     lhss, rhss = zip(*data)
+#     max_len = max(rhss)
+#     n_ftrs = data[0][0].size(1)
+#     features = torch.zeros((len(data), max_len, n_ftrs))
+#     labels = torch.tensor(labels)
+#     lengths = torch.tensor(lengths)
+
+#     for i in range(len(data)):
+#         j, k = data[i][0].size(0), data[i][0].size(1)
+#         features[i] = torch.cat([data[i][0], torch.zeros((max_len - j, k))])
+
+#     return features.float(), labels.long(), lengths.long()

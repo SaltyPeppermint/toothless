@@ -1,10 +1,15 @@
+from pathlib import Path
+import eggshell
 import torch
 from torch import optim
 import torch.nn.functional as F
 from torch.utils.tensorboard import SummaryWriter
-from torch_geometric.datasets import Planetoid
-from torch_geometric.loader import DataLoader
-from torch_geometric.nn import GCNConv
+
+
+import symbols
+from model import SketchNet
+from rl_env import Sketching
+from data import GeneratedDataset
 
 
 def check_mps():
@@ -21,34 +26,6 @@ def check_mps():
             )
     else:
         print("MPS is available.")
-
-
-class MyNet(torch.nn.Module):
-    def __init__(self, internal_size):
-        super().__init__()
-        self.conv1 = GCNConv(dataset.num_node_features, internal_size)
-        self.conv2 = GCNConv(internal_size, internal_size)
-        self.conv3 = GCNConv(internal_size, internal_size)
-        self.conv4 = GCNConv(internal_size, dataset.num_classes)
-
-    def forward(self, data):
-        x, edge_index = data.x, data.edge_index
-
-        x = self.conv1(x, edge_index)
-        x = F.relu(x)
-        x = F.dropout(x, training=self.training)
-        x = self.conv2(x, edge_index)
-        x = F.relu(x)
-        x = F.dropout(x, training=self.training)
-        x = self.conv2(x, edge_index)
-        x = F.relu(x)
-        x = F.dropout(x, training=self.training)
-        x = self.conv3(x, edge_index)
-        x = F.relu(x)
-        x = F.dropout(x, training=self.training)
-        x = self.conv4(x, edge_index)
-
-        return F.log_softmax(x, dim=1)
 
 
 def train(data, model, optimizer):
@@ -74,16 +51,71 @@ def eval(data, model):
     print(f"Accuracy: {acc:.4f}")
 
 
+# if __name__ == "__main__":
+#     check_mps()
+#     device = torch.device("mps")
+
+#     dataset = Planetoid(root="/tmp/Cora", name="Cora")
+#     loader = DataLoader(dataset, batch_size=32, shuffle=True)
+#     data = dataset[0].to(device)
+
+#     model = MyNet(32).to(device)
+#     optimizer = optim.AdamW(model.parameters(), lr=0.01, weight_decay=5e-4)
+
+#     train(data, model, optimizer)
+#     eval(data, model)
+
+DATA_PATH = Path(
+    "data/with_baseline/5k_dataset_2024-09-04_10:02:20-b3e59ffa-b9f7-4807-80e7-3f20ecc18c8f"
+)
+
+
 if __name__ == "__main__":
-    check_mps()
-    device = torch.device("mps")
+    # print(halide_symbols)
+    # print(symbols.symbol_table(halide_symbols))
 
-    dataset = Planetoid(root="/tmp/Cora", name="Cora")
-    loader = DataLoader(dataset, batch_size=32, shuffle=True)
-    data = dataset[0].to(device)
+    # for term in data[4].eclass_data[4].generated:
+    #     print(str(term))
+    #     print(term.flat())
 
-    model = MyNet(32).to(device)
-    optimizer = optim.AdamW(model.parameters(), lr=0.01, weight_decay=5e-4)
+    halide_symbols = symbols.halide_symbols(10, 0)
+    symbol_table = symbols.symbol_table(symbols.add_partial_symbols(halide_symbols))
+    # seed_data = SeedDataset(DATA_PATH, symbol_table)
+    # print(f"Seed dataset: {len(seed_data)}")
+    generated_data = GeneratedDataset(DATA_PATH, symbol_table)
+    print(f"Raw dataset: {len(generated_data)}")
+    # baseline_data = BaselineDataset(DATA_PATH, symbol_table)
+    # print(f"Baseline dataset: {len(baseline_data)}")
 
-    train(data, model, optimizer)
-    eval(data, model)
+    # loader = DataLoader(generated_data, batch_size=1, shuffle=True)
+
+    # lhs = eggshell.PyLang("0", [])
+    # rhs = eggshell.PyLang("1", [])
+    env = Sketching(
+        30,
+        10,
+        0.2,
+        50,
+        symbol_table,
+        eggshell.halide.typecheck_sketch,
+        render_mode=None,
+    )
+
+    n_input = generated_data[0][0].num_node_features
+    model = SketchNet(n_input, 32, len(halide_symbols))
+
+    for lhs, rhs in generated_data:
+        observation, info = env.reset(lhs, rhs)
+        print(lhs)
+        print(rhs)
+        for _ in range(1000):
+            action = (
+                env.action_space.sample()
+            )  # this is where you would insert your policy
+            observation, reward, terminated, truncated, info = env.step(action)
+
+            if terminated or truncated:
+                print("TERMINATED OR TRUNCATED\n")
+                break
+
+    env.close()
