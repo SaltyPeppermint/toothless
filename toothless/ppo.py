@@ -37,6 +37,7 @@ class SketchAgent(nn.Module):
                 hidden_dim=hidden_dim,
             ),
             nn.Linear(hidden_dim, env.action_space.n),
+            nn.Softmax(dim=-1),
         )
         self.critic = nn.Sequential(
             SketchEmbed(
@@ -47,7 +48,7 @@ class SketchAgent(nn.Module):
             nn.Linear(hidden_dim, 1),
         )
 
-    def evaluate(self, observation, action):
+    def evaluate(self, observation: Observation, action):
         action_probs = self.actor(observation)
         dist = Categorical(action_probs)
         action_logprobs = dist.log_prob(action)
@@ -56,7 +57,33 @@ class SketchAgent(nn.Module):
 
         return action_logprobs, state_values, dist_entropy
 
-    def act(self, observation):
+    def eval_multiple(
+        self, observations: list[Observation], actions: list[torch.Tensor]
+    ):
+        action_probs = []
+        for obs in observations:
+            action_probs.append(self.actor(obs))
+        #     print("action_probs for one finished")
+        # print("action_probs for all finished")
+        action_probs = torch.squeeze(torch.stack(action_probs, dim=0))
+
+        dist = Categorical(action_probs)
+
+        actions = torch.squeeze(torch.stack(actions, dim=0))
+        action_logprobs = dist.log_prob(actions)
+        dist_entropy = dist.entropy()
+        # print("action_logprobs finished")
+
+        state_values = []
+        for obs in observations:
+            state_values.append(self.critic(obs))
+            # print("state_values for one finished")
+        state_values = torch.squeeze(torch.stack(state_values, dim=0))
+        # print("state_values for all finished")
+
+        return action_logprobs, state_values, dist_entropy
+
+    def act(self, observation: Observation):
         action_probs = self.actor(observation)
         dist = Categorical(action_probs)
 
@@ -104,8 +131,9 @@ class PPO:
 
     def select_action(self, observation: Observation):
         with torch.no_grad():
-            observation.to(self.device)
-            action, action_logprob, state_val = self.policy_old.act(observation)
+            action, action_logprob, state_val = self.policy_old.act(
+                observation.to(self.device)
+            )
 
         self.buffer.observations.append(observation)
         self.buffer.actions.append(action)
@@ -131,16 +159,23 @@ class PPO:
         rewards = (rewards - rewards.mean()) / (rewards.std() + 1e-7)
 
         # convert list to tensor
-        old_observations = (
-            torch.squeeze(torch.stack(self.buffer.observations, dim=0))
-            .detach()
-            .to(self.device)
-        )
-        old_actions = (
-            torch.squeeze(torch.stack(self.buffer.actions, dim=0))
-            .detach()
-            .to(self.device)
-        )
+        # old_observations = (
+        #     torch.squeeze(torch.stack(self.buffer.observations, dim=0))
+        #     .detach()
+        #     .to(self.device)
+        # )
+        old_observations = [
+            obs.detach().to(self.device) for obs in self.buffer.observations
+        ]
+        # old_actions = (
+        #     torch.squeeze(torch.stack(self.buffer.actions, dim=0))
+        #     .detach()
+        #     .to(self.device)
+        # )
+        old_actions = [
+            action.detach().to(self.device) for action in self.buffer.actions
+        ]
+
         old_logprobs = (
             torch.squeeze(torch.stack(self.buffer.logprobs, dim=0))
             .detach()
@@ -156,9 +191,9 @@ class PPO:
         advantages = rewards.detach() - old_state_values.detach()
 
         # Optimize policy for K epochs
-        for _ in range(self.K_epochs):
+        for k in range(self.K_epochs):
             # Evaluating old actions and values
-            logprobs, state_values, dist_entropy = self.policy.evaluate(
+            logprobs, state_values, dist_entropy = self.policy.eval_multiple(
                 old_observations, old_actions
             )
 
@@ -185,6 +220,8 @@ class PPO:
             self.optimizer.zero_grad()
             loss.mean().backward()
             self.optimizer.step()
+
+            print(f"K_epoch {k+1} of {self.K_epochs} finished")
 
         # Copy new weights into old policy
         self.policy_old.load_state_dict(self.policy.state_dict())

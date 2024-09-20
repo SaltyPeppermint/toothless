@@ -1,10 +1,7 @@
-from tensordict import TensorDict
 import torch
 from torch import nn
-from torch.nn import Linear
-from torch_geometric.nn.pool import global_mean_pool
-from torch_geometric.nn import GATv2Conv
-from torch_geometric.nn.aggr import MeanAggregation
+from torch_geometric.nn import pool
+import torch_geometric.nn as gnn
 from torch_geometric.data import Data
 from gymnasium import spaces
 
@@ -15,15 +12,13 @@ class AstEmbed(nn.Module):
     def __init__(self, input_dim, hidden_dim, embed_dim):
         super(AstEmbed, self).__init__()
 
-        self.in_layer = GATv2Conv(input_dim, hidden_dim)
+        self.in_layer = gnn.GATv2Conv(input_dim, hidden_dim)
 
-        self.hidden_1 = GATv2Conv(hidden_dim, hidden_dim)
-        self.hidden_2 = GATv2Conv(hidden_dim, hidden_dim)
-        self.hidden_3 = GATv2Conv(hidden_dim, hidden_dim)
+        self.hidden_1 = gnn.GATv2Conv(hidden_dim, hidden_dim)
+        self.hidden_2 = gnn.GATv2Conv(hidden_dim, hidden_dim)
+        self.hidden_3 = gnn.GATv2Conv(hidden_dim, hidden_dim)
 
-        self.out_layer = GATv2Conv(hidden_dim, embed_dim)
-
-        self.aggr = MeanAggregation()
+        self.out_layer = gnn.GATv2Conv(hidden_dim, embed_dim)
 
     def forward(self, graph: Data):
         x, edge_index = graph.x, graph.edge_index
@@ -38,7 +33,7 @@ class AstEmbed(nn.Module):
         x = x.relu()
         x = self.out_layer(x, edge_index)
 
-        return global_mean_pool(x, None)
+        return pool.global_mean_pool(x, None)
 
 
 class SketchEmbed(nn.Module):
@@ -65,13 +60,13 @@ class SketchEmbed(nn.Module):
         self.sketch_encoder = AstEmbed(sketch_in_shape, hidden_dim, embed_dim)
 
         self.backbone = nn.Sequential(
-            Linear(3 * embed_dim, hidden_dim),
+            nn.Linear(3 * embed_dim, hidden_dim),
             nn.ReLU(),
             nn.Dropout(),
-            Linear(hidden_dim, hidden_dim),
+            nn.Linear(hidden_dim, hidden_dim),
             nn.ReLU(),
             nn.Dropout(),
-            Linear(hidden_dim, embed_dim),
+            nn.Linear(hidden_dim, embed_dim),
         )
 
     def forward(self, observation: Observation):

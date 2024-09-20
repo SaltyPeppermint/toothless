@@ -20,7 +20,7 @@ device = (
     if torch.cuda.is_available()
     else torch.device("mps")
     if torch.backends.mps.is_available()
-    else torch.device("cpu")
+    else None
 )
 
 
@@ -33,6 +33,7 @@ def make_env(
     data: list[(Data, Data)],
     symbol_list: list[symbols.Symbol],
     symbol_table: dict[str, symbols.Symbol],
+    node_tensor_len: int,
 ) -> gym.Env:
     data = seed_data
 
@@ -46,7 +47,7 @@ def make_env(
         min_size=min_size,
         max_sketch_ratio=max_ratio_sketch,
         symbol_table=symbol_table,
-        actions=halide_sketch_symbols,
+        actions=symbol_list,
         node_tensor_len=node_tensor_len,
         typechecker=eggshell.halide.typecheck_sketch,
         render_mode=None,
@@ -56,7 +57,7 @@ def make_env(
 
 ################################### Training ###################################
 def train(device: torch.DeviceObjType, env: gym.Env):
-    max_ep_len = 1000  # max timesteps in one episode
+    max_ep_len = 100  # max timesteps in one episode
     max_training_timesteps = int(
         3e6
     )  # break training loop if timeteps > max_training_timesteps
@@ -163,11 +164,11 @@ def train(device: torch.DeviceObjType, env: gym.Env):
         for _ in range(1, max_ep_len + 1):
             # select action with policy
             action = ppo_agent.select_action(observation)
-            observation, reward, done, _ = env.step(action)
+            observation, reward, terminated, truncated, _ = env.step(action)
 
             # saving reward and is_terminals
             ppo_agent.buffer.rewards.append(reward)
-            ppo_agent.buffer.is_terminals.append(done)
+            ppo_agent.buffer.is_terminals.append(terminated)
 
             time_step += 1
             episode_len += 1
@@ -194,7 +195,7 @@ def train(device: torch.DeviceObjType, env: gym.Env):
                 )
 
             # break; if the episode is over
-            if done:
+            if terminated:
                 break
 
         logger.add_scalar("Episode Length", episode_len)
@@ -226,5 +227,5 @@ if __name__ == "__main__":
 
     node_tensor_len = len(halide_sketch_symbols) + 5
 
-    env = make_env(seed_data, halide_sketch_symbols, symbol_table)
+    env = make_env(seed_data, halide_sketch_symbols, symbol_table, node_tensor_len)
     train(device, env)

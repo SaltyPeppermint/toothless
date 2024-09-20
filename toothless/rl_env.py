@@ -12,8 +12,7 @@ from gymnasium.envs.registration import register
 import numpy as np
 
 from torch import DeviceObjType, nn
-from tensordict import TensorDict
-from torch_geometric.data import Data
+from torch_geometric.data import Data, HeteroData
 
 
 import eggshell
@@ -42,6 +41,14 @@ class Observation(nn.Module):
         self.lhs.to(device)
         self.rhs.to(device)
         self.sketch.to(device)
+        return self
+
+    # Manual impl of detach since nn doesnt provide it?
+    def detach(self):
+        self.lhs.detach()
+        self.rhs.detach()
+        self.sketch.detach()
+        return self
 
 
 class SketchEnv(Env):
@@ -52,7 +59,7 @@ class SketchEnv(Env):
     max_sketch_ratio: float
     symbol_table: dict[str, Symbol]
     typechecker: Callable[[eggshell.PySketch], bool]
-    symbol_table: list[Symbol]
+    actions: list[Symbol]
     action_space: Discrete
     render_mode: str
     steps: int
@@ -61,7 +68,7 @@ class SketchEnv(Env):
 
     def __init__(
         self,
-        flat_term_pairs,
+        flat_term_pairs: list[tuple[Data, Data]],
         max_size: int,
         min_size: int,
         max_sketch_ratio: float,
@@ -162,6 +169,7 @@ class SketchEnv(Env):
         self, *, seed: int | None = None, options: dict[str, Any] | None = None
     ) -> tuple[Observation, dict[str, Any]]:
         self.sketch = eggshell.PySketch.new_root()
+
         index = np.random.randint(0, len(self.flat_term_pairs))
         self.lhs, self.rhs = self.flat_term_pairs[index]
 
@@ -179,7 +187,7 @@ class SketchEnv(Env):
             f"Step {self.steps}:\n  Last Reward: {self.last_reward}\n  Accumulated Reward: {self.accumulated_reward}\n  Sketch: {self.sketch}\n"
         )
 
-    def _get_obs(self) -> Observation:
+    def _get_obs(self) -> HeteroData:
         sketch_data = data.expr2pt(self.sketch, self.symbol_table)
 
         return Observation(sketch_data, self.lhs, self.rhs)

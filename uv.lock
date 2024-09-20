@@ -188,9 +188,9 @@ wheels = [
 [[package]]
 name = "eggshell"
 version = "0.0.1"
-source = { path = "../eggshell/target/wheels/eggshell-0.0.1-cp312-cp312-macosx_11_0_arm64.whl" }
+source = { path = "../eggshell/target/wheels/eggshell-0.0.1-cp312-cp312-manylinux_2_34_x86_64.whl" }
 wheels = [
-    { filename = "eggshell-0.0.1-cp312-cp312-macosx_11_0_arm64.whl", hash = "sha256:9d894fd6d2cec74cf343d86809c882ceb9793e3c1facbedb6f3e66b458e998af" },
+    { filename = "eggshell-0.0.1-cp312-cp312-manylinux_2_34_x86_64.whl", hash = "sha256:77b338a26a1eb12ef104fc7ec2ad8298e33558304e2af05465c3f271c1c8e9ed" },
 ]
 
 [[package]]
@@ -940,7 +940,7 @@ dependencies = [
 
 [package.metadata]
 requires-dist = [
-    { name = "eggshell", path = "../eggshell/target/wheels/eggshell-0.0.1-cp312-cp312-macosx_11_0_arm64.whl" },
+    { name = "eggshell", path = "../eggshell/target/wheels/eggshell-0.0.1-cp312-cp312-manylinux_2_34_x86_64.whl" },
     { name = "gymnasium", specifier = ">=0.29.1" },
     { name = "matplotlib", specifier = ">=3.9.2" },
     { name = "stable-baselines3", specifier = ">=2.3.2" },
