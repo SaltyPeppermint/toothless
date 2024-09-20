@@ -1,63 +1,84 @@
+from tensordict import TensorDict
 import torch
-import torch.nn.functional as F
-from torch_geometric.nn import global_mean_pool
-from torch.nn import Linear, Softmax
-
+from torch import nn
+from torch.nn import Linear
+from torch_geometric.nn.pool import global_mean_pool
 from torch_geometric.nn import GATv2Conv
+from torch_geometric.nn.aggr import MeanAggregation
+from torch_geometric.data import Data
+from gymnasium import spaces
+
+from rl_env import Observation
 
 
-class AstEmbedding(torch.nn.Module):
-    def __init__(self, input_size, internal_size, output_size):
-        super().__init__()
-        self.conv1 = GATv2Conv(input_size, internal_size)
-        self.conv2 = GATv2Conv(internal_size, internal_size)
-        self.conv3 = GATv2Conv(internal_size, internal_size)
-        self.conv4 = GATv2Conv(internal_size, output_size)
+class AstEmbed(nn.Module):
+    def __init__(self, input_dim, hidden_dim, embed_dim):
+        super(AstEmbed, self).__init__()
 
-    def forward(self, data):
-        x, edge_index = data.x, data.edge_index
+        self.in_layer = GATv2Conv(input_dim, hidden_dim)
 
-        x = self.conv1(x, edge_index)
-        x = F.relu(x)
-        x = F.dropout(x, training=self.training)
-        x = self.conv2(x, edge_index)
-        x = F.relu(x)
-        x = F.dropout(x, training=self.training)
-        x = self.conv2(x, edge_index)
-        x = F.relu(x)
-        x = F.dropout(x, training=self.training)
-        x = self.conv3(x, edge_index)
-        x = F.relu(x)
-        x = F.dropout(x, training=self.training)
-        x = self.conv4(x, edge_index)
+        self.hidden_1 = GATv2Conv(hidden_dim, hidden_dim)
+        self.hidden_2 = GATv2Conv(hidden_dim, hidden_dim)
+        self.hidden_3 = GATv2Conv(hidden_dim, hidden_dim)
 
-        return global_mean_pool(x)
+        self.out_layer = GATv2Conv(hidden_dim, embed_dim)
+
+        self.aggr = MeanAggregation()
+
+    def forward(self, graph: Data):
+        x, edge_index = graph.x, graph.edge_index
+
+        x = self.in_layer(x, edge_index)
+        x = x.relu()
+        x = self.hidden_1(x, edge_index)
+        x = x.relu()
+        x = self.hidden_2(x, edge_index)
+        x = x.relu()
+        x = self.hidden_3(x, edge_index)
+        x = x.relu()
+        x = self.out_layer(x, edge_index)
+
+        return global_mean_pool(x, None)
 
 
-class SketchNet(torch.nn.Module):
-    def __init__(self, input_size, internal_size, output_classes):
-        super().__init__()
-        self.lhs_encoder = AstEmbedding(input_size, internal_size, internal_size)
-        self.rhs_encoder = AstEmbedding(input_size, internal_size, internal_size)
-        self.sketch_encoder = AstEmbedding(input_size, internal_size, internal_size)
-        self.lin1 = Linear(internal_size * 3, internal_size * 3)
-        self.lin2 = Linear(internal_size * 3, internal_size * 3)
-        self.lin3 = Linear(internal_size * 3, output_classes)
-        self.softmax = Softmax()
+class SketchEmbed(nn.Module):
+    """
+    :param observation_space: (gym.Space)
+    :param internal_dim: (int) Size of the internal embedding layer
+    :param features_dim: (int) Number of features extracted.
+        This corresponds to the number of unit for the last layer.
+    """
 
-    def forward(self, lhs, rhs, sketch):
-        lhs_emb = self.lhs_encoder(lhs)
-        rhs_emb = self.rhs_encoder(rhs)
-        sketch_emb = self.sketch_encoder(sketch)
+    def __init__(
+        self,
+        obs_space: spaces.Space,
+        hidden_dim: int = 256,
+        embed_dim: int = 256,
+    ):
+        super(SketchEmbed, self).__init__()
+        lhs_in_shape = obs_space["lhs"].node_space.shape[0]
+        rhs_in_shape = obs_space["lhs"].node_space.shape[0]
+        sketch_in_shape = obs_space["lhs"].node_space.shape[0]
 
-        embs = torch.cat(sketch_emb, lhs_emb, rhs_emb)
+        self.lhs_encoder = AstEmbed(lhs_in_shape, hidden_dim, embed_dim)
+        self.rhs_encoder = AstEmbed(rhs_in_shape, hidden_dim, embed_dim)
+        self.sketch_encoder = AstEmbed(sketch_in_shape, hidden_dim, embed_dim)
 
-        x = self.lin1(embs)
-        x = F.relu(x)
-        x = F.dropout(x, training=self.training)
-        x = self.lin2(x)
-        x = F.relu(x)
-        x = F.dropout(x, training=self.training)
-        x = self.lin3(x)
+        self.backbone = nn.Sequential(
+            Linear(3 * embed_dim, hidden_dim),
+            nn.ReLU(),
+            nn.Dropout(),
+            Linear(hidden_dim, hidden_dim),
+            nn.ReLU(),
+            nn.Dropout(),
+            Linear(hidden_dim, embed_dim),
+        )
 
-        return F.log_softmax(x, dim=1)
+    def forward(self, observation: Observation):
+        lhs_emb = self.lhs_encoder(observation.lhs)
+        rhs_emb = self.rhs_encoder(observation.rhs)
+        sketch_emb = self.sketch_encoder(observation.sketch)
+
+        embs = torch.cat((sketch_emb, lhs_emb, rhs_emb), 1)
+
+        return self.backbone(embs)
