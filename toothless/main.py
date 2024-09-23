@@ -166,6 +166,8 @@ def train(device: torch.DeviceObjType, env: gym.Env):
             action = ppo_agent.select_action(observation)
             observation, reward, terminated, truncated, _ = env.step(action)
 
+            logger.add_scalar("Step Reward", reward, time_step)
+
             # saving reward and is_terminals
             ppo_agent.buffer.rewards.append(reward)
             ppo_agent.buffer.is_terminals.append(terminated)
@@ -198,7 +200,7 @@ def train(device: torch.DeviceObjType, env: gym.Env):
             if terminated:
                 break
 
-        logger.add_scalar("Episode Length", episode_len)
+        logger.add_scalar("Episode Length", episode_len, time_step)
         logger.add_scalar("Episode Reward", current_ep_reward, time_step)
 
         episode_len = 0

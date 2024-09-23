@@ -20,9 +20,7 @@ class AstEmbed(nn.Module):
 
         self.out_layer = gnn.GATv2Conv(hidden_dim, embed_dim)
 
-    def forward(self, graph: Data):
-        x, edge_index = graph.x, graph.edge_index
-
+    def forward(self, x, edge_index):
         x = self.in_layer(x, edge_index)
         x = x.relu()
         x = self.hidden_1(x, edge_index)
@@ -70,9 +68,11 @@ class SketchEmbed(nn.Module):
         )
 
     def forward(self, observation: Observation):
-        lhs_emb = self.lhs_encoder(observation.lhs)
-        rhs_emb = self.rhs_encoder(observation.rhs)
-        sketch_emb = self.sketch_encoder(observation.sketch)
+        lhs_emb = self.lhs_encoder(observation.x_lhs, observation.edge_index_lhs)
+        rhs_emb = self.rhs_encoder(observation.x_rhs, observation.edge_index_rhs)
+        sketch_emb = self.sketch_encoder(
+            observation.x_sketch, observation.edge_index_sketch
+        )
 
         embs = torch.cat((sketch_emb, lhs_emb, rhs_emb), 1)
 

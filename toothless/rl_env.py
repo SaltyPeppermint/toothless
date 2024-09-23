@@ -1,4 +1,3 @@
-from dataclasses import dataclass
 from typing import Any, Callable
 
 from gymnasium import Env
@@ -11,8 +10,7 @@ from gymnasium.spaces import (
 from gymnasium.envs.registration import register
 import numpy as np
 
-from torch import DeviceObjType, nn
-from torch_geometric.data import Data, HeteroData
+from torch_geometric.data import Data
 
 
 import eggshell
@@ -29,26 +27,15 @@ register(
 )
 
 
-class Observation(nn.Module):
-    def __init__(self, lhs, rhs, sketch):
-        super(Observation, self).__init__()
-        self.lhs = lhs
-        self.rhs = rhs
-        self.sketch = sketch
-
-    # Manual impl of to since nn doesnt provide it?
-    def to(self, device: DeviceObjType):
-        self.lhs.to(device)
-        self.rhs.to(device)
-        self.sketch.to(device)
-        return self
-
-    # Manual impl of detach since nn doesnt provide it?
-    def detach(self):
-        self.lhs.detach()
-        self.rhs.detach()
-        self.sketch.detach()
-        return self
+class Observation(Data):
+    def __inc__(self, key, value, *args, **kwargs):
+        if key == "edge_index_lhs":
+            return self.x_lhs.size(0)
+        if key == "edge_index_rhs":
+            return self.x_rhs.size(0)
+        if key == "edge_index_sketch":
+            return self.x_sketch.size(0)
+        return super().__inc__(key, value, *args, **kwargs)
 
 
 class SketchEnv(Env):
@@ -76,7 +63,7 @@ class SketchEnv(Env):
         actions: list[Symbol],
         node_tensor_len: int,
         typechecker: Callable[[eggshell.PySketch], bool],
-        render_mode: str,
+        render_mode: str = "human",
         **kwargs,
     ):
         self.flat_term_pairs = flat_term_pairs
@@ -86,7 +73,7 @@ class SketchEnv(Env):
         self.symbol_table = symbol_table
         self.symbol_list = actions
         self.typechecker = typechecker
-        self.render_mode = render_mode if render_mode is not None else "human"
+        self.render_mode = render_mode
 
         self.action_space = Discrete(len(actions))
         # # We are essentially lying here because nested spaces and graphs are not supported
@@ -134,25 +121,25 @@ class SketchEnv(Env):
 
         # Add penalty if an agent goes over the size limit
         if size > self.max_size:
-            self.last_reward -= 5
+            self.last_reward -= 5 * (self.max_size - size)
 
         # Add penalty if an agent uses too many sketch symbols
         if fraction_sketch >= self.max_sketch_ratio:
-            self.last_reward -= 5
+            self.last_reward -= 100 * (fraction_sketch - self.max_sketch_ratio)
 
         # Add a reward if an agent finsihes a sketch
         if terminated:
             # But only if it is big enough
             if size < self.min_size:
-                self.last_reward -= 5
+                self.last_reward -= 5 * (size - self.min_size)
             else:
-                self.last_reward += 20
+                self.last_reward += 50
 
         # Add penalty if an agent reaches a sketch that does not typecheck
         if typechecks:
             pass  # Here goes the usefulness calculation
         else:
-            self.last_reward -= 50
+            self.last_reward -= 100
 
         self.accumulated_reward += self.last_reward
         self.steps += 1
@@ -187,10 +174,17 @@ class SketchEnv(Env):
             f"Step {self.steps}:\n  Last Reward: {self.last_reward}\n  Accumulated Reward: {self.accumulated_reward}\n  Sketch: {self.sketch}\n"
         )
 
-    def _get_obs(self) -> HeteroData:
+    def _get_obs(self) -> Observation:
         sketch_data = data.expr2pt(self.sketch, self.symbol_table)
 
-        return Observation(sketch_data, self.lhs, self.rhs)
+        return Observation(
+            x_lhs=self.lhs.x,
+            edge_index_lhs=self.lhs.edge_index,
+            x_rhs=self.rhs.x,
+            edge_index_rhs=self.rhs.edge_index,
+            x_sketch=sketch_data.x,
+            edge_index_sketch=sketch_data.edge_index,
+        )
 
     def _get_info(self):
         return {
