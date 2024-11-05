@@ -164,9 +164,11 @@ def train(device: torch.DeviceObjType, env: gym.Env):
         for _ in range(1, max_ep_len + 1):
             # select action with policy
             action = ppo_agent.select_action(observation)
-            observation, reward, terminated, truncated, _ = env.step(action)
+            observation, reward, terminated, truncated, info = env.step(action)
 
             logger.add_scalar("Step Reward", reward, time_step)
+            if terminated:
+                logger.add_text("Generated Sketch", str(info["sketch"]), time_step)
 
             # saving reward and is_terminals
             ppo_agent.buffer.rewards.append(reward)
@@ -202,6 +204,9 @@ def train(device: torch.DeviceObjType, env: gym.Env):
 
         logger.add_scalar("Episode Length", episode_len, time_step)
         logger.add_scalar("Episode Reward", current_ep_reward, time_step)
+        logger.add_scalar(
+            "Episode Reward per Step", current_ep_reward / episode_len, time_step
+        )
 
         episode_len = 0
 

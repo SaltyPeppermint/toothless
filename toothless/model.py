@@ -2,7 +2,6 @@ import torch
 from torch import nn
 from torch_geometric.nn import pool
 import torch_geometric.nn as gnn
-from torch_geometric.data import Data
 from gymnasium import spaces
 
 from rl_env import Observation
@@ -20,7 +19,7 @@ class AstEmbed(nn.Module):
 
         self.out_layer = gnn.GATv2Conv(hidden_dim, embed_dim)
 
-    def forward(self, x, edge_index):
+    def forward(self, x, edge_index, root_index):
         x = self.in_layer(x, edge_index)
         x = x.relu()
         x = self.hidden_1(x, edge_index)
@@ -31,7 +30,7 @@ class AstEmbed(nn.Module):
         x = x.relu()
         x = self.out_layer(x, edge_index)
 
-        return pool.global_mean_pool(x, None)
+        return x[root_index]
 
 
 class SketchEmbed(nn.Module):
@@ -68,12 +67,16 @@ class SketchEmbed(nn.Module):
         )
 
     def forward(self, observation: Observation):
-        lhs_emb = self.lhs_encoder(observation.x_lhs, observation.edge_index_lhs)
-        rhs_emb = self.rhs_encoder(observation.x_rhs, observation.edge_index_rhs)
+        lhs_emb = self.lhs_encoder(
+            observation.x_lhs, observation.edge_index_lhs, observation.lhs_root
+        )
+        rhs_emb = self.rhs_encoder(
+            observation.x_rhs, observation.edge_index_rhs, observation.rhs_root
+        )
         sketch_emb = self.sketch_encoder(
-            observation.x_sketch, observation.edge_index_sketch
+            observation.x_sketch, observation.edge_index_sketch, observation.sketch_root
         )
 
-        embs = torch.cat((sketch_emb, lhs_emb, rhs_emb), 1)
+        embs = torch.cat((sketch_emb, lhs_emb, rhs_emb), -1)
 
         return self.backbone(embs)

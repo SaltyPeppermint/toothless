@@ -35,6 +35,13 @@ class Observation(Data):
             return self.x_rhs.size(0)
         if key == "edge_index_sketch":
             return self.x_sketch.size(0)
+        if key == "lhs_root":
+            return 1
+        if key == "rhs_root":
+            return 1
+        if key == "sketch_root":
+            return 1
+
         return super().__inc__(key, value, *args, **kwargs)
 
 
@@ -50,7 +57,7 @@ class SketchEnv(Env):
     action_space: Discrete
     render_mode: str
     steps: int
-    last_reward: int
+    reward: int
     accumulated_reward: int
 
     def __init__(
@@ -117,31 +124,35 @@ class SketchEnv(Env):
         sketch_symbols = self.sketch.sketch_symbols()
         fraction_sketch = sketch_symbols / size
 
-        self.last_reward = 0
+        if typechecks is False:
+            terminated = True
+
+        self.reward = -5
 
         # Add penalty if an agent goes over the size limit
-        if size > self.max_size:
-            self.last_reward -= 5 * (self.max_size - size)
+        # In essence, the agent must not build sketches forever
+        if typechecks and size < self.max_size:
+            self.reward += 5
 
-        # Add penalty if an agent uses too many sketch symbols
-        if fraction_sketch >= self.max_sketch_ratio:
-            self.last_reward -= 100 * (fraction_sketch - self.max_sketch_ratio)
+            # Reward agent if it has not too many sketch symbols
+            if fraction_sketch < self.max_sketch_ratio:
+                self.reward += 5
 
         # Add a reward if an agent finsihes a sketch
         if terminated:
-            # But only if it is big enough
-            if size < self.min_size:
-                self.last_reward -= 5 * (size - self.min_size)
-            else:
-                self.last_reward += 50
+            if (
+                typechecks
+                and size < self.max_size
+                and size > self.min_size
+                and fraction_sketch < self.max_sketch_ratio
+            ):
+                self.reward += 100
+                # if size > self.min_size:
+                #     # Add reward if the sketch is above a minimum size
+                #     self.last_reward += 5 * self.steps
+                # HERE GOES SKETCH QUALITY TEST
 
-        # Add penalty if an agent reaches a sketch that does not typecheck
-        if typechecks:
-            pass  # Here goes the usefulness calculation
-        else:
-            self.last_reward -= 100
-
-        self.accumulated_reward += self.last_reward
+        self.accumulated_reward += self.reward
         self.steps += 1
 
         observation = self._get_obs()
@@ -150,7 +161,7 @@ class SketchEnv(Env):
         if self.render_mode == "human":
             self.render()
 
-        return observation, self.last_reward, terminated, False, info
+        return observation, self.reward, terminated, False, info
 
     def reset(
         self, *, seed: int | None = None, options: dict[str, Any] | None = None
@@ -161,7 +172,7 @@ class SketchEnv(Env):
         self.lhs, self.rhs = self.flat_term_pairs[index]
 
         self.steps = 0
-        self.last_reward = 0
+        self.reward = 0
         self.accumulated_reward = 0
 
         observation = self._get_obs()
@@ -171,7 +182,7 @@ class SketchEnv(Env):
 
     def render(self):
         print(
-            f"Step {self.steps}:\n  Last Reward: {self.last_reward}\n  Accumulated Reward: {self.accumulated_reward}\n  Sketch: {self.sketch}\n"
+            f"Step {self.steps}:\n  Last Reward: {self.reward}\n  Accumulated Reward: {self.accumulated_reward}\n  Sketch: {self.sketch}\n"
         )
 
     def _get_obs(self) -> Observation:
@@ -180,19 +191,22 @@ class SketchEnv(Env):
         return Observation(
             x_lhs=self.lhs.x,
             edge_index_lhs=self.lhs.edge_index,
+            lhs_root=0,
             x_rhs=self.rhs.x,
             edge_index_rhs=self.rhs.edge_index,
+            rhs_root=0,
             x_sketch=sketch_data.x,
             edge_index_sketch=sketch_data.edge_index,
+            sketch_root=0,
         )
 
     def _get_info(self):
         return {
-            "reward": self.last_reward,
+            "reward": self.reward,
             "size": self.sketch.size(),
             "depth": self.sketch.depth(),
             "typechecks": self.typechecker(self.sketch),
-            "native": self.sketch,
+            "sketch": self.sketch,
             "flattened": self.sketch.flat(),
             "accumulated_reward": self.accumulated_reward,
             "step": self.step,
