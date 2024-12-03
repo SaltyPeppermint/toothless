@@ -5,7 +5,6 @@ description = "RL on GNN for EGraphs"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
-    "eggshell",
     "gymnasium>=0.29.1",
     "matplotlib>=3.9.2",
     "stable-baselines3>=2.3.2",
@@ -15,6 +14,7 @@ dependencies = [
     "torch-tb-profiler>=0.4.3",
     "torch>=2.4.0",
     "tqdm>=4.66.5",
+    "eggshell",
 ]
 
 [tool.uv.sources]
