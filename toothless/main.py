@@ -1,108 +1,85 @@
 from collections import defaultdict
 from pathlib import Path
 import json
-from multiprocessing import Pool
-import logging
+import itertools
 
+import pandas as pd
 import sklearn.ensemble
 import sklearn.tree
-from sklearn import metrics
-import wandb
-import pandas as pd
-import sklearn
-import numpy as np
+from sklearn.linear_model import Ridge
+from sklearn.tree import DecisionTreeRegressor
+from sklearn.ensemble import RandomForestRegressor
+from sklearn.metrics import root_mean_squared_error, mean_absolute_error, r2_score
+import sklearn.model_selection
 
-import eggshell
-from eggshell import EggshellException
-import wandb.sklearn
-# from eggshell.rise import PyAst
+from eggshell import rise
 
-DATA = Path("data/formatted.json")
-
-logger = logging.getLogger(__name__)
-logger.setLevel(logging.INFO)
-
-# device = (
-#     torch.device(0)
-#     if torch.cuda.is_available()
-#     else torch.device("mps")
-#     if torch.backends.mps.is_available()
-#     else None
-# )
-
-VARIABLE_NAMES = [
-    "f1",
-    "f2",
-    "f3",
-    "f4",
-    "f5",
-    "x0",
-    "x1",
-    "x2",
-    "x3",
-    "map",
-    "mapSeq",
-    "iterateStream",
-    "split",
-    "join",
-    "transpose",
-    "toMem",
-]
+import plotting
 
 
-def pp(sample):
-    try:
-        sample_expr = eggshell.rise.PyAst(sample, featurizer)
-    except EggshellException as err:
-        print(err)
-        raise ValueError(f"EggshellException! {err}")
-
-    return sample_expr.feature_vec_simple(VARIABLE_NAMES)
+IGNORE_UNKNOWN = True
 
 
-def ridge_regression():
-    model = sklearn.linear_model.Ridge(alpha=0.5)
-    name = "Ridge Regression"
-    return (model, name)
+def get_symbol_names(blinded):
+    if blinded:
+        return [
+            "map",
+            "mapSeq",
+            "iterateStream",
+            "split",
+            "join",
+            "transpose",
+            "toMem",
+        ]
+    else:
+        return [
+            "f1",
+            "f2",
+            "f3",
+            "f4",
+            "f5",
+            "x0",
+            "x1",
+            "x2",
+            "x3",
+            "map",
+            "mapSeq",
+            "iterateStream",
+            "split",
+            "join",
+            "transpose",
+            "toMem",
+        ]
 
 
-def svm():
-    model = sklearn.svm.SVR()
-    name = "SVM"
-    return (model, name)
-
-
-def random_forest():
-    model = sklearn.ensemble.RandomForestRegressor()
-    name = "Random Forest"
-    return (model, name)
-
-
-def decision_tree():
-    model = sklearn.tree.DecisionTreeRegressor()
-    name = "Decision Tree"
-    return (model, name)
-
-
-if __name__ == "__main__":
-    # load and process data
-
-    with open(DATA) as f:
+def load_data(data_path, symbol_names):
+    with open(data_path) as f:
         dataset = json.load(f)
 
-    logger.info("DATA LOADED")
-
-    featurizer = eggshell.rise.PyFeaturizer(VARIABLE_NAMES)
+    featurizer = rise.PyFeaturizer(symbol_names, ignore_unknown=IGNORE_UNKNOWN)
 
     X = pd.DataFrame(
-        eggshell.rise.many_featurize_simple(
+        rise.many_featurize_simple(
             [x["sample"] for x in dataset["sample_data"]], featurizer
         )
     )
 
     y = pd.Series([float(x["generation"]) for x in dataset["sample_data"]])
 
-    feature_names = featurizer.feature_names_simple()
+    return featurizer.feature_names_simple(), X, y
+
+
+def run(dataset_name, data_path, names_blinded):
+    prefix = (
+        Path("viz")
+        / f"{dataset_name}_{"names_blinded" if names_blinded else "with_names"}_term"
+    )
+    prefix.mkdir(parents=True, exist_ok=True)
+    feature_names, X, y = load_data(data_path, get_symbol_names(names_blinded))
+
+    basic_metrics = defaultdict(dict)
+    mae_by_label = defaultdict(dict)
+    rmse_by_label = defaultdict(dict)
 
     test_size = 0.2
     random_state = 42
@@ -110,78 +87,60 @@ if __name__ == "__main__":
         X, y, test_size=test_size, random_state=random_state
     )
 
-    print(X.head())
-
-    logger.info("PP DONE")
-
-    for model, model_type in [
-        ridge_regression(),
-        svm(),
-        decision_tree(),
-        random_forest(),
+    for model in [
+        Ridge(alpha=0.5),
+        DecisionTreeRegressor(),
+        RandomForestRegressor(),
     ]:
+        model_type = type(model).__name__
+
         model.fit(X_train, y_train)
 
         # get predictions
         y_pred = model.predict(X_test)
 
-        # start a new wandb run and add your model hyperparameters
-        wandb.init(
-            project="egraph-distance-measure",
-            config=model.get_params(),
-            tags=["classical", "simple_features", model_type],
-        )
-
-        # Add additional configs to wandb
-        wandb.config.update(
-            {"test_size": test_size, "train_len": len(X_train), "test_len": len(X_test)}
-        )
-
-        wandb.run.summary["r2"] = metrics.r2_score(y_test, y_pred)
-        wandb.run.summary["mae"] = metrics.mean_absolute_error(y_test, y_pred)
-        wandb.run.summary["rmse"] = metrics.root_mean_squared_error(y_test, y_pred)
-
-        if hasattr(model, "feature_importances_"):
-            importances = model.feature_importances_
-
-            importances = model.feature_importances_
-            std = np.std(
-                [tree.feature_importances_ for tree in model.estimators_], axis=0
-            )
-
-        wandb.sklearn.plot_feature_importances(model, feature_names=feature_names)
-        wandb.sklearn.plot_outlier_candidates(model, X_train, y_train)
-        wandb.sklearn.plot_class_proportions(y_train, y_test)
+        basic_metrics[model_type]["r2"] = r2_score(y_test, y_pred)
+        basic_metrics[model_type]["mae"] = mean_absolute_error(y_test, y_pred)
+        basic_metrics[model_type]["rmse"] = root_mean_squared_error(y_test, y_pred)
 
         by_value = defaultdict(list)
         for label, pred in zip(y_test, y_pred):
             by_value[label].append(pred)
 
-        by_value_mae = [
-            [label, metrics.mean_absolute_error([label] * len(pred), pred)]
-            for (label, pred) in by_value.items()
-        ]
-        table = wandb.Table(data=by_value_mae, columns=["label", "mae"])
-        wandb.log(
-            {
-                "mae_by_label": wandb.plot.bar(
-                    table, "label", "mae", title="Mean absolute error by label"
-                )
-            }
-        )
+        mae_by_label[model_type] = {
+            int(label): mean_absolute_error([label] * len(pred), pred)
+            for label, pred in by_value.items()
+        }
+        rmse_by_label[model_type] = {
+            int(label): root_mean_squared_error([label] * len(pred), pred)
+            for label, pred in by_value.items()
+        }
 
-        by_value_rmse = [
-            [label, metrics.root_mean_squared_error([label] * len(pred), pred)]
-            for (label, pred) in by_value.items()
-        ]
-        table = wandb.Table(data=by_value_rmse, columns=["label", "rmse"])
-        wandb.log(
-            {
-                "rmse_by_label": wandb.plot.bar(
-                    table, "label", "rmse", title="Root mean squared error by label"
-                )
-            }
-        )
+        if isinstance(model, DecisionTreeRegressor):
+            plotting.plot_decision_tree(prefix, feature_names, model)
 
-        # [optional] finish the wandb run, necessary in notebooks
-        wandb.finish()
+        if isinstance(model, RandomForestRegressor):
+            plotting.plot_random_forest(prefix, feature_names, model)
+
+        if isinstance(model, Ridge):
+            plotting.plot_ridge_regression(prefix, feature_names, model)
+
+    plotting.plot_metrics(
+        prefix,
+        basic_metrics,
+        mae_by_label,
+        rmse_by_label,
+    )
+
+
+if __name__ == "__main__":
+    # load and process data
+    datasets = [
+        ("start", Path("data/start_and_goal_no_new_vars/0.json")),
+        ("goal", Path("data/start_and_goal_no_new_vars/1.json")),
+    ]
+
+    for (dataset_name, data_path), names_blinded in itertools.product(
+        datasets, [True, False]
+    ):
+        run(dataset_name, data_path, names_blinded)
