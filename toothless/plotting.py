@@ -1,3 +1,4 @@
+from pathlib import Path
 import plotly.express as px
 import pandas as pd
 import numpy as np
@@ -46,7 +47,10 @@ def plot_basic_metrics(prefix, metrics):
     fig.write_image(f"{prefix}/rmse.png", scale=3)
 
 
-def plot_ridge_regression(prefix, feature_names, regression):
+def plot_ridge_regression(model_name, feature_names, regression):
+    path_prefix = Path("viz") / model_name
+    path_prefix.mkdir(parents=True, exist_ok=True)
+
     coef_df = pd.DataFrame(
         {
             "Feature": feature_names,
@@ -60,10 +64,13 @@ def plot_ridge_regression(prefix, feature_names, regression):
         title="Ridge Regression Coefficients",
         labels={"Coefficient": "Coefficient", "Feature": "Feature"},
     )
-    fig.write_image(f"{prefix}/ridge_regression_coefficients.png", scale=3)
+    fig.write_image(f"{path_prefix}/ridge_regression_coefficients.png", scale=3)
 
 
-def plot_random_forest(prefix, feature_names, model):
+def plot_random_forest(model_name, feature_names, model):
+    path_prefix = Path("viz") / model_name
+    path_prefix.mkdir(parents=True, exist_ok=True)
+
     importances = model.feature_importances_
     std_devs = np.std([tree.feature_importances_ for tree in model.estimators_], axis=0)
     importance_df = pd.DataFrame(
@@ -81,10 +88,13 @@ def plot_random_forest(prefix, feature_names, model):
         title="Feature Importances in Random Forest",
         error_y="StdDev",
     )
-    fig.write_image(f"{prefix}/random_forest_feature_importance.png", scale=3)
+    fig.write_image(f"{path_prefix}/random_forest_feature_importance.png", scale=3)
 
 
-def plot_decision_tree(prefix, feature_names, model):
+def plot_decision_tree(model_name, feature_names, model):
+    path_prefix = Path("viz") / model_name
+    path_prefix.mkdir(parents=True, exist_ok=True)
+
     importances = model.feature_importances_
     importance_df = pd.DataFrame(
         {
@@ -99,4 +109,4 @@ def plot_decision_tree(prefix, feature_names, model):
         y="Importance",
         title="Feature Importances in Decision Tree",
     )
-    fig.write_image(f"{prefix}/decision_tree_feature_importance.png", scale=3)
+    fig.write_image(f"{path_prefix}/decision_tree_feature_importance.png", scale=3)
