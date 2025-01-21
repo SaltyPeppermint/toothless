@@ -26,7 +26,4 @@ venv = ".venv"
 [tool.uv.sources]
 eggshell = { path = "../eggshell/target/wheels/eggshell-0.0.1-cp312-cp312-manylinux_2_34_x86_64.whl" }
 
-[dependency-groups]
-dev = [
-    "pyright>=1.1.391",
-]
+
