@@ -2,6 +2,7 @@ data/
 runs/
 viz/
 csv/
+cache/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

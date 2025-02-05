@@ -1,39 +1,64 @@
 import json
+from pathlib import Path
 
-import pandas as pd
+import polars as pl
 
 from eggshell import rise  # type: ignore
 
 
 DATASETS = {
-    "start": "data/start_and_goal_multi_size/0.json",
-    "goal": "data/start_and_goal_multi_size/1.json",
+    "start": "data/start_goal_with_expl/start_and_goal-2025-01-29-b33b4ba4-ee88-48b5-981b-c2b809d6504f/0",
+    "goal": "data/start_goal_with_expl/start_and_goal-2025-01-29-b33b4ba4-ee88-48b5-981b-c2b809d6504f/1",
 }
 
 
-def load_data(
-    data_path: str, var_names: list[str], ignore_unknown: bool
-) -> pd.DataFrame:
-    with open(data_path) as f:
-        dataset = json.load(f)
-    print("JSON loaded")
+def load_data(data_path: str, var_names: list[str], ignore_unknown: bool) -> pl.DataFrame:
+    all_dfs = []
+    for data_file in sorted(Path(data_path).glob("*.json")):
+        df = load_fragment(data_file, var_names, ignore_unknown)
+        all_dfs.append(df)
 
-    exprs = rise.PyRecExpr.many_new([x["sample"] for x in dataset["sample_data"]])
-    print("Expr PyAst gen done")
-    data = pd.DataFrame(
-        rise.many_featurize_simple(exprs, var_names, ignore_unknown),
-        columns=rise.feature_names_simple(var_names),
+    print("All data fragments loading, now concating...")
+    all_data = pl.concat(all_dfs, parallel=True)
+    print("Data concatenated")
+    print(all_data.columns)
+    print(all_data.estimated_size(unit="gb"))
+    return all_data
+
+
+def load_fragment(data_file: Path, var_names: list[str], ignore_unknown: bool) -> pl.DataFrame:
+    with open(data_file) as f:
+        json_content = json.load(f)
+
+    exprs = rise.PyRecExpr.many_new([x["sample"] for x in json_content["sample_data"]])
+    features = rise.many_featurize_simple(exprs, var_names, ignore_unknown)
+    schema = rise.feature_names_simple(var_names)
+
+    df = pl.DataFrame(features, schema=schema, orient="row")
+
+    expl_chain = pl.Series(
+        name="explanation_chain",
+        values=[[y["rec_expr"] for y in x["explanation"]["explanation_chain"]] for x in json_content["sample_data"]],
     )
-    print("Featurize done")
+    generation = pl.Series(name="generation", values=[i["generation"] for i in json_content["sample_data"]])
+    expr_str = pl.Series(name="expression", values=[str(i) for i in exprs])
+    df = df.with_columns([generation, expl_chain, expr_str])
+    df = df.with_columns(
+        pl.col("explanation_chain").map_elements(find_middle, return_dtype=pl.String).alias("middle_item")
+    )
 
-    data["generation"] = pd.Series([i["generation"] for i in dataset["sample_data"]])
-    data["generation"] = data["generation"].astype(int)
-    data["expression"] = pd.Series([str(i) for i in exprs])
-
-    return data
+    print(f"Loaded data fragment {data_file}")
+    return df
 
 
-def update_csv(var_names: list[str], ignore_unknown: bool = True):
+def find_middle(x: list[str]) -> str:
+    return x[len(x) // 2]
+
+
+def update_cache(var_names: list[str], ignore_unknown: bool = True):
+    print("Updating Cache...")
     for name, path in DATASETS.items():
         data = load_data(path, var_names, ignore_unknown)
-        data.to_csv(f"csv/{name}.csv", index=False)
+        data.write_parquet(f"cache/{name}.parquet")
+
+    print("Cache updated!")

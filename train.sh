@@ -1,0 +1,23 @@
+uv run torchrun --nproc_per_node 1 --nnodes 1 --node_rank 0 --master_addr localhost --master_port 6601 toothless/train.py \
+    --model_name_or_path "Qwen/Qwen2.5-Coder-1.5B-Instruct" \
+    --data_path "cache/start.parquet" \
+    --bf16 True \
+    --output_dir "output_qwen" \
+    --num_train_epochs 5 \
+    --per_device_train_batch_size 1 \
+    --per_device_eval_batch_size 1 \
+    --gradient_accumulation_steps 16 \
+    --evaluation_strategy "no" \
+    --tmax 0.2 \
+    --save_strategy "steps" \
+    --save_steps 1000 \
+    --save_total_limit 10 \
+    --learning_rate 1e-5 \
+    --weight_decay 0.1 \
+    --adam_beta2 0.95 \
+    --warmup_ratio 0.01 \
+    --lr_scheduler_type "cosine" \
+    --logging_steps 1 \
+    --report_to "none" \
+    --model_max_length 512 \
+    --ds_config "deepspeed/ds_config_zero2.json"

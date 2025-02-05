@@ -1,7 +1,7 @@
 from pathlib import Path
 import plotly.express as px
-import pandas as pd
 import numpy as np
+import polars as pl
 
 
 def plot_metrics(
@@ -10,17 +10,9 @@ def plot_metrics(
     mae_by_label,
     rmse_by_label,
 ):
-    basic_metrics = pd.DataFrame.from_dict(basic_metrics, orient="index").sort_index(
-        axis=1
-    )
-
-    mae_by_label = pd.DataFrame.from_dict(mae_by_label, orient="index").sort_index(
-        axis=1
-    )
-
-    rmse_by_label = pd.DataFrame.from_dict(rmse_by_label, orient="index").sort_index(
-        axis=1
-    )
+    basic_metrics = pl.from_dict(basic_metrics)
+    mae_by_label = pl.from_dict(mae_by_label)
+    rmse_by_label = pl.from_dict(rmse_by_label)
 
     plot_basic_metrics(prefix, basic_metrics)
     plot_by_label(prefix, mae_by_label, "MAE")
@@ -51,12 +43,12 @@ def plot_ridge_regression(model_name, feature_names, regression):
     path_prefix = Path("viz") / model_name
     path_prefix.mkdir(parents=True, exist_ok=True)
 
-    coef_df = pd.DataFrame(
+    coef_df = pl.from_dict(
         {
             "Feature": feature_names,
             "Coefficient": regression.coef_,
         }
-    ).sort_values(by="Coefficient", ascending=False)
+    ).sort(by="Coefficient", descending=True)
     fig = px.bar(
         coef_df,
         x="Feature",
@@ -73,13 +65,13 @@ def plot_random_forest(model_name, feature_names, model):
 
     importances = model.feature_importances_
     std_devs = np.std([tree.feature_importances_ for tree in model.estimators_], axis=0)
-    importance_df = pd.DataFrame(
+    importance_df = pl.from_dict(
         {
             "Feature": feature_names,
             "Importance": importances,
             "StdDev": std_devs,
         }
-    ).sort_values(by="Importance", ascending=False)
+    ).sort(by="Importance", descending=True)
 
     fig = px.bar(
         importance_df,
@@ -96,12 +88,12 @@ def plot_decision_tree(model_name, feature_names, model):
     path_prefix.mkdir(parents=True, exist_ok=True)
 
     importances = model.feature_importances_
-    importance_df = pd.DataFrame(
+    importance_df = pl.from_dict(
         {
             "Feature": feature_names,
             "Importance": importances,
         }
-    ).sort_values(by="Importance", ascending=False)
+    ).sort(by="Importance", descending=True)
 
     fig = px.bar(
         importance_df,
