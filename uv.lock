@@ -184,7 +184,7 @@ name = "eggshell"
 version = "0.0.1"
 source = { path = "cache/eggshell-0.0.1-cp313-cp313-manylinux_2_34_x86_64.whl" }
 wheels = [
-    { filename = "eggshell-0.0.1-cp313-cp313-manylinux_2_34_x86_64.whl", hash = "sha256:102dfeba07b071f10c441324176ab54f5ca82bded3aa2ebd7a9aca136332ce1b" },
+    { filename = "eggshell-0.0.1-cp313-cp313-manylinux_2_34_x86_64.whl", hash = "sha256:c7dfec61aaf7247d38a8c16ae66b8a0ab9b06f8fe597aae919deb0da2d66e5de" },
 ]
 
 [[package]]
@@ -803,6 +803,15 @@ wheels = [
 ]
 
 [[package]]
+name = "python-dotenv"
+version = "1.0.1"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/bc/57/e84d88dfe0aec03b7a2d4327012c1627ab5f03652216c63d49846d7a6c58/python-dotenv-1.0.1.tar.gz", hash = "sha256:e324ee90a023d808f1959c46bcbc04446a10ced277783dc6ee09987c37ec10ca", size = 39115 }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/6a/3e/b68c118422ec867fa7ab88444e1274aa40681c606d59ac27de5a5588f082/python_dotenv-1.0.1-py3-none-any.whl", hash = "sha256:f7b63ef50f1b690dddf550d03497b66d609393b40b564ed0d674909a68ebf16a", size = 19863 },
+]
+
+[[package]]
 name = "pytz"
 version = "2024.2"
 source = { registry = "https://pypi.org/simple" }
@@ -956,6 +965,15 @@ wheels = [
 ]
 
 [[package]]
+name = "standard-imghdr"
+version = "3.13.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/1a/8d/ab2620fbe2e348483c9cb776c3b7b3cc407899291a041d7fa026469b7cd1/standard_imghdr-3.13.0.tar.gz", hash = "sha256:8d9c68058d882f6fc3542a8d39ef9ff94d2187dc90bd0c851e0902776b7b7a42", size = 5511 }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/df/cb/e1da7e340586a078404c7e4328bfefc930867ace8a9a55916fd220cf9547/standard_imghdr-3.13.0-py3-none-any.whl", hash = "sha256:30a1bff5465605bb496f842a6ac3cc1f2131bf3025b0da28d4877d6d4b7cc8e9", size = 4639 },
+]
+
+[[package]]
 name = "sympy"
 version = "1.13.1"
 source = { registry = "https://pypi.org/simple" }
@@ -1086,8 +1104,10 @@ dependencies = [
     { name = "matplotlib" },
     { name = "plotly" },
     { name = "polars" },
+    { name = "python-dotenv" },
     { name = "scikit-learn" },
     { name = "scipy" },
+    { name = "standard-imghdr" },
     { name = "tensorboard" },
     { name = "tensordict" },
     { name = "tiktoken" },
@@ -1107,8 +1127,10 @@ requires-dist = [
     { name = "matplotlib", specifier = ">=3" },
     { name = "plotly", specifier = ">=5.24.1" },
     { name = "polars", specifier = ">=1.21.0" },
+    { name = "python-dotenv", specifier = ">=1.0.1" },
     { name = "scikit-learn", specifier = ">=1.5.2" },
     { name = "scipy", specifier = ">=1.15.1" },
+    { name = "standard-imghdr", specifier = ">=3.13.0" },
     { name = "tensorboard", specifier = ">=2" },
     { name = "tensordict", specifier = ">=0.5" },
     { name = "tiktoken", specifier = ">=0.8.0" },

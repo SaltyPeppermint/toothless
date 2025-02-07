@@ -21,6 +21,8 @@ dependencies = [
     "scipy>=1.15.1",
     "transformers-stream-generator>=0.0.5",
     "tiktoken>=0.8.0",
+    "python-dotenv>=1.0.1",
+    "standard-imghdr>=3.13.0",
     "eggshell",
 ]
 

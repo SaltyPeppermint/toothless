@@ -1,22 +1,24 @@
 from typing import Dict, Tuple
 import os
 
+from dotenv import load_dotenv
 
 import torch
+from torch.utils.data import DataLoader, Dataset
+from torch.utils.data.distributed import DistributedSampler
+import torch.optim as optim
+from torch.utils.tensorboard.writer import SummaryWriter
+from torch.optim.lr_scheduler import CosineAnnealingLR
 import torch.distributed as dist
 import torch.multiprocessing as mp
-import torch.optim as optim
-from torch.utils.data import DataLoader, Dataset
-from torch.optim.lr_scheduler import CosineAnnealingLR
-from torch.utils.data.distributed import DistributedSampler
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 
 import transformers
 from transformers.trainer_pt_utils import LabelSmoother
 from transformers import PreTrainedTokenizer, PreTrainedTokenizerFast
+from huggingface_hub import login
 
 import polars as pl
-import polars.selectors as cs
 import sklearn.model_selection
 from tqdm.auto import tqdm
 
@@ -68,8 +70,8 @@ def preprocess(
         input_id, target = tokenize_single(tokenizer, max_len, system_message, im_start, im_end, nl_tokens, row)
         input_ids.append(input_id[:max_len])
         targets.append(target[:max_len])
-    input_ids = torch.tensor(input_ids, dtype=torch.int)
-    targets = torch.tensor(targets, dtype=torch.int)
+    input_ids = torch.tensor(input_ids, dtype=torch.int64)
+    targets = torch.tensor(targets, dtype=torch.int64)
 
     return dict(
         input_ids=input_ids,
@@ -164,7 +166,7 @@ class LazySupervisedDataset(Dataset):
         if i in self.cached_data_dict:
             return self.cached_data_dict[i]
 
-        ret = preprocess(self.raw_data.select(cs.by_index(i)), self.tokenizer, self.max_len)
+        ret = preprocess(pl.from_dict(self.raw_data.row(i, named=True)), self.tokenizer, self.max_len)
         ret = dict(
             input_ids=ret["input_ids"][0],
             labels=ret["labels"][0],
@@ -250,20 +252,20 @@ def data_loaders(
     return train_dataloader, eval_dataloader
 
 
-def train(rank, model, optimizer, train_args, train_dataloader, epoch, sampler=None):
+def train(rank, model, optimizer, train_args, train_dataloader, epoch, sampler=None, writer=None):
     model.train()
     ddp_loss = torch.zeros(2).to(rank)
     if sampler:
         sampler.set_epoch(epoch)
-    for batch in tqdm(train_dataloader, desc=f"Epoch {epoch + 1}/{train_args.num_train_epochs}"):
+    for batch_idx, batch in enumerate(tqdm(train_dataloader, desc=f"Epoch {epoch + 1}/{train_args.num_train_epochs}")):
         # Move batch to device
         batch = {k: v.to(rank) for k, v in batch.items()}
         # Reset Optimizer
         optimizer.zero_grad()
 
         # Forward pass
-        outputs = model(**batch)
-        loss = outputs.loss
+        output = model(input_ids=batch["input_ids"], labels=batch["labels"], attention_mask=batch["attention_mask"])
+        loss = output.loss
 
         # Backward pass
         loss.backward()
@@ -271,12 +273,17 @@ def train(rank, model, optimizer, train_args, train_dataloader, epoch, sampler=N
         # Update weights
         optimizer.step()
 
+        if writer:
+            writer.add_scalar("Loss/train", loss, batch_idx * (epoch + 1) * (len(train_dataloader)))
+
         # Record loss
         ddp_loss[0] += loss.item()
         ddp_loss[1] += len(batch)
 
     dist.all_reduce(ddp_loss, op=dist.ReduceOp.SUM)
-    rank0_print(rank, "Epoch: {} \tLoss: {:.6f}".format(epoch, ddp_loss[0] / ddp_loss[1]))
+    if writer:
+        writer.add_scalar("Loss/epoch", ddp_loss[0] / ddp_loss[1], epoch + 1)
+    rank0_print(rank, "Epoch: {} \tLoss: {:.6f}".format(epoch + 1, ddp_loss[0] / ddp_loss[1]))
 
 
 def eval(rank, model, eval_dataloader, epoch):
@@ -356,16 +363,19 @@ def fsdp_main(
     lr_scheduler = CosineAnnealingLR(optimizer, T_max=train_args.tmax)
     rank0_print(rank, "Optimizer and LR Scheduler ready")
 
+    if rank == 0:
+        writer = SummaryWriter()
+    else:
+        writer = None
+
     rank0_print(rank, "Starting training!")
-    model.train()
     for epoch in range(train_args.num_train_epochs):
-        train(rank, model, optimizer, train_args, train_dataloader, epoch)
+        train(rank, model, optimizer, train_args, train_dataloader, epoch, writer=writer)
 
         # Optionally, evaluate the model on the validation set after each epoch
         if train_args.eval_each_epoch:
             eval(rank, model, eval_dataloader, epoch)
 
-        model.train()
         lr_scheduler.step()
 
     rank0_print(rank, "Training finished!")
@@ -391,6 +401,11 @@ def fsdp_main(
 if __name__ == "__main__":
     if "INVALIDATE_CACHE" in os.environ:
         loading.update_cache(VAR_NAMES, IGNORE_UNKNOWN)
+
+    load_dotenv()
+    hf_token = os.getenv("HUGGINGFACE_TOKEN")
+
+    login(token=hf_token)
 
     parser = transformers.HfArgumentParser((ModelArguments, DataArguments, TrainingArguments))  # type: ignore
     (
