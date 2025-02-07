@@ -1,6 +1,4 @@
-from pathlib import Path
 import sys
-import pandas as pd
 from sklearn.dummy import DummyClassifier
 from sklearn.linear_model import RidgeClassifier
 from sklearn.tree import DecisionTreeClassifier

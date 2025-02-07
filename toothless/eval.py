@@ -1,13 +1,10 @@
 from collections import defaultdict
-from pathlib import Path
 import pprint
 
 import polars as pl
 from sklearn.metrics import root_mean_squared_error, mean_absolute_error, r2_score
 
 from eggshell import rise  # type: ignore
-
-import plotting
 
 
 def score_models(models, test: pl.DataFrame, cols_to_drop):

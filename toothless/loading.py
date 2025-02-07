@@ -33,6 +33,7 @@ def load_fragment(data_file: Path, var_names: list[str], ignore_unknown: bool) -
     exprs = rise.PyRecExpr.many_new([x["sample"] for x in json_content["sample_data"]])
     features = rise.many_featurize_simple(exprs, var_names, ignore_unknown)
     schema = rise.feature_names_simple(var_names)
+    start_term = rise.PyRecExpr(json_content["start_expr"])
 
     df = pl.DataFrame(features, schema=schema, orient="row")
 
@@ -41,11 +42,12 @@ def load_fragment(data_file: Path, var_names: list[str], ignore_unknown: bool) -
         values=[[y["rec_expr"] for y in x["explanation"]["explanation_chain"]] for x in json_content["sample_data"]],
     )
     generation = pl.Series(name="generation", values=[i["generation"] for i in json_content["sample_data"]])
-    expr_str = pl.Series(name="expression", values=[str(i) for i in exprs])
-    df = df.with_columns([generation, expl_chain, expr_str])
+    goal_expr = pl.Series(name="goal_expr", values=[str(i) for i in exprs])
+    df = df.with_columns([generation, expl_chain, goal_expr])
     df = df.with_columns(
-        pl.col("explanation_chain").map_elements(find_middle, return_dtype=pl.String).alias("middle_item")
+        pl.col("explanation_chain").map_elements(find_middle, return_dtype=pl.String).alias("middle_expr")
     )
+    df = df.with_columns(pl.lit(str(start_term)).alias("start_expr"))
 
     print(f"Loaded data fragment {data_file}")
     return df

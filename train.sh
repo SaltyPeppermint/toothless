@@ -15,9 +15,10 @@ uv run torchrun --nproc_per_node 1 --nnodes 1 --node_rank 0 --master_addr localh
     --learning_rate 1e-5 \
     --weight_decay 0.1 \
     --adam_beta2 0.95 \
-    --warmup_ratio 0.01 \
-    --lr_scheduler_type "cosine" \
     --logging_steps 1 \
     --report_to "none" \
     --model_max_length 512 \
-    --ds_config "deepspeed/ds_config_zero2.json"
+    --lazy_preprocess True
+#   --warmup_ratio 0.01 \
+#   --lr_scheduler_type "cosine" \
+#   --ds_config "deepspeed/ds_config_zero2.json" \

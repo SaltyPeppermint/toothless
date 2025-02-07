@@ -15,13 +15,12 @@ class DataArguments:
     data_path: str | None = field(default="cache/start.parquet", metadata={"help": "Path to the training data."})
     test_size: Optional[float] = field(default=0.2)
     random_state: Optional[int] = field(default=42)
-    update_cache: bool = False
-    lazy_preprocess: bool = True
+    lazy_preprocess: bool = False
 
 
 @dataclass
 class TrainingArguments:
-    ds_config: str = field(metadata={"help": "Deepspeed config is required"})
+    # ds_config: str = field(metadata={"help": "Deepspeed config is required"})
     cache_dir: Optional[str] = field(default=None)
     model_max_length: int = field(
         default=8192,
@@ -37,9 +36,10 @@ class TrainingArguments:
     save_total_limit: Optional[int] = field(default=10)
     learning_rate: Optional[float] = field(default=1e-5)
     weight_decay: Optional[float] = field(default=0.1)
+    adam_beta1: Optional[float] = field(default=0.9)
     adam_beta2: Optional[float] = field(default=0.95)
-    warmup_ratio: Optional[float] = field(default=0.01)
-    lr_scheduler_type: Optional[str] = field(default="cosine")
+    # warmup_ratio: Optional[float] = field(default=0.01)
+    # lr_scheduler_type: Optional[str] = field(default="cosine")
     logging_steps: Optional[int] = field(default=1)
     report_to: Optional[str] = field(default="none")
     gradient_checkpointing: bool = False

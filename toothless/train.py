@@ -1,16 +1,18 @@
-import sys
 import json
 from typing import Dict, Tuple
+import os
+
 
 import torch
 import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import DataLoader, Dataset
-from torch.optim.lr_scheduler import StepLR
+import torch.distributed as dist
+from torch.optim.lr_scheduler import CosineAnnealingLR
+from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
+
 import transformers
 from transformers.trainer_pt_utils import LabelSmoother
-from deepspeed.runtime.lr_schedules import WarmupLR
-import deepspeed
 
 import polars as pl
 import polars.selectors as cs
@@ -47,7 +49,7 @@ def preprocess(
     examples_df: pl.DataFrame,
     tokenizer: transformers.PreTrainedTokenizer,
     max_len: int,
-    system_message: str = "You are a helpful assistant.",
+    system_message: str = "You are a helpful assistant. Provide an intermediate term in a sequence of rewrites from the Start Expression to the Goal Expression.",
 ) -> Dict:
     im_start = tokenizer("<|im_start|>").input_ids[0]
     im_end = tokenizer("<|im_end|>").input_ids[0]
@@ -55,44 +57,13 @@ def preprocess(
     _system = tokenizer("system").input_ids + nl_tokens
     _user = tokenizer("user").input_ids + nl_tokens
     _assistant = tokenizer("assistant").input_ids + nl_tokens
+    system_message = [im_start] + _system + tokenizer(system_message).input_ids + [im_end] + nl_tokens
 
     # Apply prompt templates
     input_ids, targets = [], []
+
     for row in examples_df.iter_rows(named=True):
-        input_id, target = [], []
-        system = [im_start] + _system + tokenizer(system_message).input_ids + [im_end] + nl_tokens
-        input_id += system
-        target += [im_start] + [IGNORE_TOKEN_ID] * (len(system) - 3) + [im_end] + nl_tokens
-        assert len(input_id) == len(target)
-
-        # First user asks
-        role = "<|im_start|>user"
-        # goal_term = example["goal"]  # TODO ACTUAL
-        user_input_id = (
-            tokenizer(role).input_ids + nl_tokens + tokenizer(row["expression"]).input_ids + [im_end] + nl_tokens
-        )
-        input_id += user_input_id
-        target += [im_start] + [IGNORE_TOKEN_ID] * (len(user_input_id) - 3) + [im_end] + nl_tokens
-
-        # Then asssistant responds
-        role = "<|im_start|>assistant"
-        # middle_sketch = example["sketch"]  # TODO EXPAND RESPONSE
-        assistant_input_id = (
-            tokenizer(role).input_ids + nl_tokens + tokenizer(row["middle_item"]).input_ids + [im_end] + nl_tokens
-        )
-        input_id += assistant_input_id
-
-        target += (
-            [im_start]
-            + [IGNORE_TOKEN_ID] * len(tokenizer(role).input_ids)
-            + assistant_input_id[len(tokenizer(role).input_ids) + 1 : -2]
-            + [im_end]
-            + nl_tokens
-        )
-
-        assert len(input_id) == len(target)
-        input_id += [tokenizer.pad_token_id] * (max_len - len(input_id))
-        target += [IGNORE_TOKEN_ID] * (max_len - len(target))
+        input_id, target = tokenize_single(tokenizer, max_len, system_message, im_start, im_end, nl_tokens, row)
         input_ids.append(input_id[:max_len])
         targets.append(target[:max_len])
     input_ids = torch.tensor(input_ids, dtype=torch.int)
@@ -103,6 +74,48 @@ def preprocess(
         labels=targets,
         attention_mask=input_ids.ne(tokenizer.pad_token_id),  # type: ignore
     )
+
+
+def tokenize_single(tokenizer, max_len: int, system_message, im_start, im_end, nl_tokens, row):
+    input_id, target = [], []
+    input_id += system_message
+    target += [im_start] + [IGNORE_TOKEN_ID] * (len(system_message) - 3) + [im_end] + nl_tokens
+    assert len(input_id) == len(target)
+
+    # First user asks
+    role = "<|im_start|>user"
+    # goal_term = example["goal"]  # TODO ACTUAL
+    user_input_id = (
+        tokenizer(role).input_ids
+        + nl_tokens
+        + tokenizer("Start Term: " + row["start_expr"]).input_ids
+        + nl_tokens
+        + tokenizer("Goal Term: " + row["goal_expr"]).input_ids
+        + [im_end]
+        + nl_tokens
+    )
+    input_id += user_input_id
+    target += [im_start] + [IGNORE_TOKEN_ID] * (len(user_input_id) - 3) + [im_end] + nl_tokens
+
+    # Then asssistant responds
+    role = "<|im_start|>assistant"
+    assistant_input_id = (
+        tokenizer(role).input_ids + nl_tokens + tokenizer(row["middle_expr"]).input_ids + [im_end] + nl_tokens
+    )
+    input_id += assistant_input_id
+
+    target += (
+        [im_start]
+        + [IGNORE_TOKEN_ID] * len(tokenizer(role).input_ids)
+        + assistant_input_id[len(tokenizer(role).input_ids) + 1 : -2]
+        + [im_end]
+        + nl_tokens
+    )
+
+    assert len(input_id) == len(target)
+    input_id += [tokenizer.pad_token_id] * (max_len - len(input_id))
+    target += [IGNORE_TOKEN_ID] * (max_len - len(target))
+    return input_id, target
 
 
 def rank0_print(*args):
@@ -166,10 +179,10 @@ class LazySupervisedDataset(Dataset):
 
 
 def load_df(data_path) -> Tuple[pl.DataFrame, pl.DataFrame]:
-    df = pl.read_parquet(data_path).select(["expression", "middle_item"])
+    df = pl.read_parquet(data_path).select(["goal_expr", "middle_expr", "start_expr"])
 
-    print(df.head())
-    print("Data loading goal done")
+    # print(df.head())
+    print("Data loaded")
 
     test_size = 0.2
     random_state = 42
@@ -187,10 +200,12 @@ def make_supervised_data_module(
 
     dataset_cls = LazySupervisedDataset if data_args.lazy_preprocess else SupervisedDataset
     rank0_print("Loading data...")
+
     train_df, eval_df = load_df(data_args.data_path)
 
     train_dataset = dataset_cls(train_df, tokenizer=tokenizer, max_len=max_len)
     eval_dataset = dataset_cls(eval_df, tokenizer=tokenizer, max_len=max_len)
+    print("Data tokenized and preprocessed")
 
     return dict(train_dataset=train_dataset, eval_dataset=eval_dataset)
 
@@ -216,9 +231,20 @@ def make_supervised_data_module(
 #         }
 
 
+def setup(rank, world_size):
+    os.environ["MASTER_ADDR"] = "localhost"
+    os.environ["MASTER_PORT"] = "12355"
+
+    # initialize the process group
+    dist.init_process_group("gloo", rank=rank, world_size=world_size)
+
+
+def cleanup():
+    dist.destroy_process_group()
+
+
 def train():
     global local_rank
-    # Load model and tokenizer
 
     parser = transformers.HfArgumentParser((ModelArguments, DataArguments, TrainingArguments))  # type: ignore
     (
@@ -227,35 +253,7 @@ def train():
         training_args,
     ) = parser.parse_args_into_dataclasses()
 
-    if data_args.update_cache:
-        loading.update_cache(VAR_NAMES, IGNORE_UNKNOWN)
-
-    # # This serves for single-gpu qlora.
-    # if getattr(training_args, "deepspeed", None) and int(os.environ.get("WORLD_SIZE", 1)) == 1:
-    #     training_args.distributed_state.distributed_type = DistributedType.DEEPSPEED
-    # Load DeepSpeed config
-    with open(training_args.ds_config) as f:
-        ds_config = json.load(f)
-
-    # Load model and tokenizer
-    config = transformers.AutoConfig.from_pretrained(
-        model_args.model_name_or_path,
-        cache_dir=training_args.cache_dir,
-        trust_remote_code=True,
-    )
-    config.use_cache = False
-
-    model = transformers.AutoModelForCausalLM.from_pretrained(
-        model_args.model_name_or_path,
-        config=config,
-        cache_dir=training_args.cache_dir,
-        # device_map=device_map,
-        trust_remote_code=True,
-        # quantization_config=GPTQConfig(bits=4, disable_exllama=True)
-        # if training_args.use_lora and lora_args.q_lora
-        # else None,
-        # **model_load_kwargs,
-    )
+    # Load Tokenizer
 
     tokenizer = transformers.AutoTokenizer.from_pretrained(
         model_args.model_name_or_path,
@@ -273,37 +271,47 @@ def train():
         tokenizer=tokenizer, data_args=data_args, max_len=training_args.model_max_length
     )
     # Load dataset
-
-    # def tokenize_fn(examples):
-    #     return tokenizer(examples["text"], padding="max_length", truncation=True)
-
     # Create data loaders
     train_dataloader = DataLoader(data_module["train_dataset"], batch_size=8, shuffle=True)
     eval_dataloader = DataLoader(data_module["eval_dataset"], batch_size=8)
 
+    # Load Model
+
+    model_config = transformers.AutoConfig.from_pretrained(
+        model_args.model_name_or_path,
+        cache_dir=training_args.cache_dir,
+        trust_remote_code=True,
+    )
+    model_config.use_cache = False
+
+    sharded_module = transformers.AutoModelForCausalLM.from_pretrained(
+        model_args.model_name_or_path,
+        config=model_config,
+        cache_dir=training_args.cache_dir,
+        trust_remote_code=True,
+    )
+    # FSDP model
+    sharded_module = FSDP(sharded_module)
+
     # Define optimizer and loss function
-    optimizer = optim.AdamW(model.parameters(), lr=5e-5)
-    lr_scheduler = WarmupLR(optimizer)
+    optimizer = optim.AdamW(
+        sharded_module.parameters(),
+        lr=training_args.learning_rate,
+        betas=(training_args.adam_beta1, training_args.adam_beta2),
+        weight_decay=training_args.weight_decay,
+    )
+    lr_scheduler = CosineAnnealingLR(optimizer, T_max=training_args.tmax)
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    # Initialize DeepSpeed
-    ds_config["gradient_accumulation_steps"] = training_args.gradient_accumulation_steps
-    ds_config["train_micro_batch_size_per_gpu"] = training_args.per_device_train_batch_size
-    ds_config["train_batch_size"] = (
-        training_args.per_device_train_batch_size * training_args.gradient_accumulation_steps
-    )
-
-    model, optimizer, _, _ = deepspeed.initialize(model=model, optimizer=optimizer, config_params=ds_config)
-
-    model.train()
+    sharded_module.train()
     for epoch in range(training_args.epochs):
         for batch in tqdm(train_dataloader, desc=f"Epoch {epoch + 1}/{training_args.epochs}"):
             # Move batch to device
             batch = {k: v.to(device) for k, v in batch.items()}
 
             # Forward pass
-            outputs = model(**batch)
+            outputs = sharded_module(**batch)
             loss = outputs.loss
 
             # Backward pass
@@ -315,22 +323,22 @@ def train():
             optimizer.zero_grad()
 
         # Optionally, evaluate the model on the validation set after each epoch
-        model.eval()
+        sharded_module.eval()
         eval_loss = 0
         for batch in eval_dataloader:
             batch = {k: v.to(device) for k, v in batch.items()}
             with torch.no_grad():
-                outputs = model(**batch)
+                outputs = sharded_module(**batch)
             eval_loss += outputs.loss.item()
 
         eval_loss /= len(eval_dataloader)
         print(f"Epoch {epoch + 1}: Validation Loss = {eval_loss}")
 
-        model.train()
+        sharded_module.train()
 
 
 if __name__ == "__main__":
-    # model_dir = snapshot_download("Qwen/Qwen-1_8B-Chat", cache_dir="cache", revision="master")
-    update_cache = sys.argv[1] == "--update-cache" if len(sys.argv) >= 2 else False
+    if "INVALIDATE_CACHE" in os.environ:
+        loading.update_cache(VAR_NAMES, IGNORE_UNKNOWN)
 
     train()
