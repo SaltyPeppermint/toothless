@@ -3,6 +3,7 @@ runs/
 viz/
 csv/
 cache/
+*.sif
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

@@ -1,0 +1,11 @@
+Bootstrap: docker
+From: python:3.13
+
+%files
+    $PWD/cache/requirements.txt cache/requirements.txt
+    $PWD/cache/eggshell-0.0.1-cp313-cp313-manylinux_2_34_x86_64.whl cache/eggshell-0.0.1-cp313-cp313-manylinux_2_34_x86_64.whl
+
+%post
+    # chmod 1777 /tmp  # necessary in case one wants to use apt on our cluster (this can also be done outside the .def file)
+    pip install --root-user-action=ignore -r cache/requirements.txt
+    # pip install --root-user-action=ignore cache/eggshell-0.0.1-cp313-cp313-manylinux_2_34_x86_64.whl

@@ -1,2 +1,2 @@
 # toothless
-Neural Network for Reinforcement Learning on E-Graphs
+Machine Learning on E-Graphs

@@ -11,7 +11,8 @@ remove_eggshell:
     uv remove eggshell
 
 install_eggshell:
-    uv add ../eggshell/target/wheels/eggshell-0.0.1-cp312-cp312-manylinux_2_34_x86_64.whl
+    cp ../eggshell/target/wheels/eggshell-0.0.1-cp313-cp313-manylinux_2_34_x86_64.whl cache/
+    uv add cache/eggshell-0.0.1-cp313-cp313-manylinux_2_34_x86_64.whl
 
 alias ri := reinstall_run
 
