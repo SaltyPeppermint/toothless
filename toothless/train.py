@@ -1,18 +1,19 @@
-import json
 from typing import Dict, Tuple
 import os
 
 
 import torch
-import torch.nn as nn
+import torch.distributed as dist
+import torch.multiprocessing as mp
 import torch.optim as optim
 from torch.utils.data import DataLoader, Dataset
-import torch.distributed as dist
 from torch.optim.lr_scheduler import CosineAnnealingLR
+from torch.utils.data.distributed import DistributedSampler
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 
 import transformers
 from transformers.trainer_pt_utils import LabelSmoother
+from transformers import PreTrainedTokenizer, PreTrainedTokenizerFast
 
 import polars as pl
 import polars.selectors as cs
@@ -22,8 +23,6 @@ from tqdm.auto import tqdm
 
 import loading
 from args import ModelArguments, DataArguments, TrainingArguments
-
-local_rank = None
 
 
 NAMES_BLINDED = True
@@ -43,6 +42,11 @@ VAR_NAMES = [
 COLS_TO_DROP = ["generation", "expression", "explanation_chain"]
 
 IGNORE_TOKEN_ID = LabelSmoother.ignore_index
+
+
+def rank0_print(rank, *args):
+    if rank == 0:
+        print(*args)
 
 
 def preprocess(
@@ -118,18 +122,13 @@ def tokenize_single(tokenizer, max_len: int, system_message, im_start, im_end, n
     return input_id, target
 
 
-def rank0_print(*args):
-    if local_rank == 0:
-        print(*args)
-
-
 class SupervisedDataset(Dataset):
     """Dataset for supervised fine-tuning."""
 
-    def __init__(self, raw_data: pl.DataFrame, tokenizer: transformers.PreTrainedTokenizer, max_len: int):
+    def __init__(self, raw_data: pl.DataFrame, tokenizer: transformers.PreTrainedTokenizer, max_len: int, rank: int):
         super(SupervisedDataset, self).__init__()
 
-        rank0_print("Formatting inputs...")
+        rank0_print(rank, "Formatting inputs...")
         data_dict = preprocess(raw_data, tokenizer, max_len)
 
         self.input_ids = data_dict["input_ids"]
@@ -150,12 +149,12 @@ class SupervisedDataset(Dataset):
 class LazySupervisedDataset(Dataset):
     """Dataset for supervised fine-tuning."""
 
-    def __init__(self, raw_data: pl.DataFrame, tokenizer: transformers.PreTrainedTokenizer, max_len: int):
+    def __init__(self, raw_data: pl.DataFrame, tokenizer: transformers.PreTrainedTokenizer, max_len: int, rank: int):
         super(LazySupervisedDataset, self).__init__()
         self.tokenizer = tokenizer
         self.max_len = max_len
 
-        rank0_print("Formatting inputs...Skip in lazy mode")
+        rank0_print(rank, "Formatting inputs...Skip in lazy mode")
         self.tokenizer = tokenizer
         self.raw_data = raw_data
         self.cached_data_dict = {}
@@ -182,7 +181,6 @@ def load_df(data_path) -> Tuple[pl.DataFrame, pl.DataFrame]:
     df = pl.read_parquet(data_path).select(["goal_expr", "middle_expr", "start_expr"])
 
     # print(df.head())
-    print("Data loaded")
 
     test_size = 0.2
     random_state = 42
@@ -195,70 +193,125 @@ def make_supervised_data_module(
     tokenizer,
     data_args,
     max_len,
-) -> Dict:
+    rank,
+) -> Tuple[Dataset, Dataset]:
     """Make dataset and collator for supervised fine-tuning."""
 
     dataset_cls = LazySupervisedDataset if data_args.lazy_preprocess else SupervisedDataset
-    rank0_print("Loading data...")
 
+    rank0_print(rank, "Loading raw data...")
     train_df, eval_df = load_df(data_args.data_path)
+    rank0_print(rank, "Raw data loaded")
 
-    train_dataset = dataset_cls(train_df, tokenizer=tokenizer, max_len=max_len)
-    eval_dataset = dataset_cls(eval_df, tokenizer=tokenizer, max_len=max_len)
-    print("Data tokenized and preprocessed")
+    rank0_print(rank, "Tokenizing and preprocessing data...")
+    train_dataset = dataset_cls(train_df, tokenizer=tokenizer, max_len=max_len, rank=rank)
+    eval_dataset = dataset_cls(eval_df, tokenizer=tokenizer, max_len=max_len, rank=rank)
+    rank0_print(rank, "Data tokenized and preprocessed")
 
-    return dict(train_dataset=train_dataset, eval_dataset=eval_dataset)
-
-
-# # Load dataset from JSON file
-# class JSONDataset(Dataset):
-#     def __init__(self, file_path, tokenizer):
-#         with open(file_path, "r") as f:
-#             self.data = json.load(f)
-#         self.tokenizer = tokenizer
-
-#     def __len__(self):
-#         return len(self.data)
-
-#     def __getitem__(self, idx):
-#         text = self.data[idx]["text"]
-#         label = self.data[idx]["label"]
-#         encoding = self.tokenizer(text, padding="max_length", truncation=True, return_tensors="pt")
-#         return {
-#             "input_ids": encoding["input_ids"].squeeze(),
-#             "attention_mask": encoding["attention_mask"].squeeze(),
-#             "label": torch.tensor(label, dtype=torch.long),
-#         }
+    return train_dataset, eval_dataset
 
 
 def setup(rank, world_size):
-    os.environ["MASTER_ADDR"] = "localhost"
-    os.environ["MASTER_PORT"] = "12355"
+    rank0_print(rank, "Setting up process group...")
+    # os.environ["MASTER_ADDR"] = "localhost"
+    # os.environ["MASTER_PORT"] = "12355"
 
     # initialize the process group
-    dist.init_process_group("gloo", rank=rank, world_size=world_size)
+    dist.init_process_group("nccl", rank=rank, world_size=world_size)
+    print("Process group created")
 
 
 def cleanup():
     dist.destroy_process_group()
 
 
-def train():
-    global local_rank
+def data_loaders(
+    rank: int,
+    world_size: int,
+    data_args: DataArguments,
+    train_args: TrainingArguments,
+    tokenizer: PreTrainedTokenizer | PreTrainedTokenizerFast,
+):
+    train_dataset, eval_dataset = make_supervised_data_module(
+        tokenizer=tokenizer, data_args=data_args, max_len=train_args.model_max_length, rank=rank
+    )
+    # Load dataset
+    # Create data loaders
 
-    parser = transformers.HfArgumentParser((ModelArguments, DataArguments, TrainingArguments))  # type: ignore
-    (
-        model_args,
-        data_args,
-        training_args,
-    ) = parser.parse_args_into_dataclasses()
+    train_sampler = DistributedSampler(train_dataset, rank=rank, num_replicas=world_size, shuffle=True)
+    eval_sampler = DistributedSampler(eval_dataset, rank=rank, num_replicas=world_size)
+
+    train_kwargs = {"batch_size": train_args.per_device_train_batch_size, "sampler": train_sampler}
+    eval_kwargs = {"batch_size": train_args.per_device_eval_batch_size, "sampler": eval_sampler}
+    cuda_kwargs = {"num_workers": 2, "pin_memory": True, "shuffle": False}
+    train_kwargs.update(cuda_kwargs)
+    eval_kwargs.update(cuda_kwargs)
+
+    train_dataloader = DataLoader(train_dataset, **train_kwargs)
+    eval_dataloader = DataLoader(eval_dataset, **eval_kwargs)
+    return train_dataloader, eval_dataloader
+
+
+def train(rank, model, optimizer, train_args, train_dataloader, epoch, sampler=None):
+    model.train()
+    ddp_loss = torch.zeros(2).to(rank)
+    if sampler:
+        sampler.set_epoch(epoch)
+    for batch in tqdm(train_dataloader, desc=f"Epoch {epoch + 1}/{train_args.num_train_epochs}"):
+        # Move batch to device
+        batch = {k: v.to(rank) for k, v in batch.items()}
+        # Reset Optimizer
+        optimizer.zero_grad()
+
+        # Forward pass
+        outputs = model(**batch)
+        loss = outputs.loss
+
+        # Backward pass
+        loss.backward()
+
+        # Update weights
+        optimizer.step()
+
+        # Record loss
+        ddp_loss[0] += loss.item()
+        ddp_loss[1] += len(batch)
+
+    dist.all_reduce(ddp_loss, op=dist.ReduceOp.SUM)
+    rank0_print(rank, "Epoch: {} \tLoss: {:.6f}".format(epoch, ddp_loss[0] / ddp_loss[1]))
+
+
+def eval(rank, model, eval_dataloader, epoch):
+    model.eval()
+    ddp_loss = torch.zeros(3).to(rank)
+    for batch in eval_dataloader:
+        batch = {k: v.to(rank) for k, v in batch.items()}
+        with torch.no_grad():
+            outputs = model(**batch)
+            ddp_loss[0] += outputs.loss
+            ddp_loss[1] += len(eval_dataloader)
+
+            # eval_loss += outputs.loss.item()
+
+    dist.all_reduce(ddp_loss, op=dist.ReduceOp.SUM)
+    eval_loss = ddp_loss[0] / ddp_loss[1]
+    rank0_print(rank, f"Epoch {epoch + 1}: Validation loss: {eval_loss:.4f}")
+
+
+def fsdp_main(
+    rank: int, world_size: int, model_args: ModelArguments, data_args: DataArguments, train_args: TrainingArguments
+):
+    setup(rank, world_size)
+    rank0_print(rank, "Distributed Network ready")
+
+    torch.cuda.set_device(rank)
 
     # Load Tokenizer
 
     tokenizer = transformers.AutoTokenizer.from_pretrained(
         model_args.model_name_or_path,
-        cache_dir=training_args.cache_dir,
-        model_max_length=training_args.model_max_length,
+        cache_dir=train_args.cache_dir,
+        model_max_length=train_args.model_max_length,
         padding_side="right",
         use_fast=False,
         trust_remote_code=True,
@@ -267,78 +320,85 @@ def train():
     tokenizer.pad_token_id = tokenizer.pad_token_id
 
     # Load data
-    data_module = make_supervised_data_module(
-        tokenizer=tokenizer, data_args=data_args, max_len=training_args.model_max_length
-    )
-    # Load dataset
-    # Create data loaders
-    train_dataloader = DataLoader(data_module["train_dataset"], batch_size=8, shuffle=True)
-    eval_dataloader = DataLoader(data_module["eval_dataset"], batch_size=8)
+    train_dataloader, eval_dataloader = data_loaders(rank, world_size, data_args, train_args, tokenizer)
+    rank0_print(rank, "DataLoaders ready")
 
     # Load Model
-
+    rank0_print(rank, "Loading model from disk...")
     model_config = transformers.AutoConfig.from_pretrained(
         model_args.model_name_or_path,
-        cache_dir=training_args.cache_dir,
+        cache_dir=train_args.cache_dir,
         trust_remote_code=True,
     )
     model_config.use_cache = False
 
-    sharded_module = transformers.AutoModelForCausalLM.from_pretrained(
+    init_start_event = torch.cuda.Event(enable_timing=True)
+    init_end_event = torch.cuda.Event(enable_timing=True)
+
+    model = transformers.AutoModelForCausalLM.from_pretrained(
         model_args.model_name_or_path,
         config=model_config,
-        cache_dir=training_args.cache_dir,
+        cache_dir=train_args.cache_dir,
         trust_remote_code=True,
     )
+    model.to(rank)
+    rank0_print(rank, "Model loaded")
+
     # FSDP model
-    sharded_module = FSDP(sharded_module)
+    model = FSDP(model)
+    rank0_print(rank, "FSDP Model ready")
 
     # Define optimizer and loss function
     optimizer = optim.AdamW(
-        sharded_module.parameters(),
-        lr=training_args.learning_rate,
-        betas=(training_args.adam_beta1, training_args.adam_beta2),
-        weight_decay=training_args.weight_decay,
+        model.parameters(),
+        lr=train_args.learning_rate,
+        betas=(train_args.adam_beta1, train_args.adam_beta2),
+        weight_decay=train_args.weight_decay,
     )
-    lr_scheduler = CosineAnnealingLR(optimizer, T_max=training_args.tmax)
+    lr_scheduler = CosineAnnealingLR(optimizer, T_max=train_args.tmax)
+    rank0_print(rank, "Optimizer and LR Scheduler ready")
 
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
-    sharded_module.train()
-    for epoch in range(training_args.epochs):
-        for batch in tqdm(train_dataloader, desc=f"Epoch {epoch + 1}/{training_args.epochs}"):
-            # Move batch to device
-            batch = {k: v.to(device) for k, v in batch.items()}
-
-            # Forward pass
-            outputs = sharded_module(**batch)
-            loss = outputs.loss
-
-            # Backward pass
-            loss.backward()
-
-            # Update weights
-            optimizer.step()
-            lr_scheduler.step()
-            optimizer.zero_grad()
+    rank0_print(rank, "Starting training!")
+    model.train()
+    for epoch in range(train_args.num_train_epochs):
+        train(rank, model, optimizer, train_args, train_dataloader, epoch)
 
         # Optionally, evaluate the model on the validation set after each epoch
-        sharded_module.eval()
-        eval_loss = 0
-        for batch in eval_dataloader:
-            batch = {k: v.to(device) for k, v in batch.items()}
-            with torch.no_grad():
-                outputs = sharded_module(**batch)
-            eval_loss += outputs.loss.item()
+        if train_args.eval_each_epoch:
+            eval(rank, model, eval_dataloader, epoch)
 
-        eval_loss /= len(eval_dataloader)
-        print(f"Epoch {epoch + 1}: Validation Loss = {eval_loss}")
+        model.train()
+        lr_scheduler.step()
 
-        sharded_module.train()
+    rank0_print(rank, "Training finished!")
+    eval(rank, model, eval_dataloader, train_args.num_train_epochs)
+
+    init_end_event.record()  # type: ignore
+
+    if rank == 0:
+        init_end_event.synchronize()
+        print(f"CUDA event elapsed time: {init_start_event.elapsed_time(init_end_event) / 1000}sec")
+        print(f"{model}")
+
+    if train_args.save_model_end:
+        # use a barrier to make sure training is done on all ranks
+        dist.barrier()
+        states = model.state_dict()
+        if rank == 0:
+            torch.save(states, f"{model_args.output_dir}/mymodel.pt")
+
+    cleanup()
 
 
 if __name__ == "__main__":
     if "INVALIDATE_CACHE" in os.environ:
         loading.update_cache(VAR_NAMES, IGNORE_UNKNOWN)
 
-    train()
+    parser = transformers.HfArgumentParser((ModelArguments, DataArguments, TrainingArguments))  # type: ignore
+    (
+        model_args,
+        data_args,
+        train_args,
+    ) = parser.parse_args_into_dataclasses()
+    world_size = torch.cuda.device_count()
+    mp.spawn(fsdp_main, args=(world_size, model_args, data_args, train_args), nprocs=world_size, join=True)  # type: ignore
