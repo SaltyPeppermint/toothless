@@ -25,7 +25,6 @@ import loading
 from args import ModelArguments, DataArguments, TrainingArguments
 
 
-NAMES_BLINDED = True
 IGNORE_UNKNOWN = True
 VAR_NAMES = [
     "f1",
@@ -39,7 +38,6 @@ VAR_NAMES = [
     "x3",
 ]
 
-COLS_TO_DROP = ["generation", "expression", "explanation_chain"]
 
 IGNORE_TOKEN_ID = LabelSmoother.ignore_index
 
