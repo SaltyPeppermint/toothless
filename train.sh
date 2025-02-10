@@ -5,7 +5,7 @@ uv run torchrun --nproc_per_node 1 --nnodes 1 --node_rank 0 --master_addr localh
     --output_dir "cache/saved_models" \
     --num_train_epochs 5 \
     --per_device_train_batch_size 8 \
-    --per_device_eval_batch_size 32 \
+    --per_device_eval_batch_size 8 \
     --tmax 30 \
     --learning_rate 1e-5 \
     --weight_decay 0.1 \

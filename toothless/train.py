@@ -274,7 +274,7 @@ def train(rank, model, optimizer, train_args, train_dataloader, epoch, sampler=N
         optimizer.step()
 
         if writer:
-            writer.add_scalar("Loss/train", loss, batch_idx * (epoch + 1) * (len(train_dataloader)))
+            writer.add_scalar("Loss/train-batch", loss, batch_idx * (epoch + 1) * len(batch))
 
         # Record loss
         ddp_loss[0] += loss.item()
@@ -282,11 +282,11 @@ def train(rank, model, optimizer, train_args, train_dataloader, epoch, sampler=N
 
     dist.all_reduce(ddp_loss, op=dist.ReduceOp.SUM)
     if writer:
-        writer.add_scalar("Loss/epoch", ddp_loss[0] / ddp_loss[1], epoch + 1)
+        writer.add_scalar("Loss/train-epoch", ddp_loss[0] / ddp_loss[1], epoch + 1)
     rank0_print(rank, "Epoch: {} \tLoss: {:.6f}".format(epoch + 1, ddp_loss[0] / ddp_loss[1]))
 
 
-def eval(rank, model, eval_dataloader, epoch):
+def eval(rank, model, eval_dataloader, epoch, writer=None):
     model.eval()
     ddp_loss = torch.zeros(3).to(rank)
     for batch in eval_dataloader:
@@ -294,12 +294,12 @@ def eval(rank, model, eval_dataloader, epoch):
         with torch.no_grad():
             outputs = model(**batch)
             ddp_loss[0] += outputs.loss
-            ddp_loss[1] += len(eval_dataloader)
-
-            # eval_loss += outputs.loss.item()
+            ddp_loss[1] += len(batch)
 
     dist.all_reduce(ddp_loss, op=dist.ReduceOp.SUM)
     eval_loss = ddp_loss[0] / ddp_loss[1]
+    if writer:
+        writer.add_scalar("Loss/eval-epoch", eval_loss, epoch + 1)
     rank0_print(rank, f"Epoch {epoch + 1}: Validation loss: {eval_loss:.4f}")
 
 
@@ -374,12 +374,12 @@ def fsdp_main(
 
         # Optionally, evaluate the model on the validation set after each epoch
         if train_args.eval_each_epoch:
-            eval(rank, model, eval_dataloader, epoch)
+            eval(rank, model, eval_dataloader, epoch, writer=writer)
 
         lr_scheduler.step()
 
     rank0_print(rank, "Training finished!")
-    eval(rank, model, eval_dataloader, train_args.num_train_epochs)
+    # eval(rank, model, eval_dataloader, train_args.num_train_epochs, writer=writer)
 
     init_end_event.record()  # type: ignore
 
