@@ -274,16 +274,17 @@ def train(rank, model, optimizer, train_args, train_dataloader, epoch, sampler=N
         optimizer.step()
 
         if writer:
-            writer.add_scalar("Loss/train-batch", loss, batch_idx * (epoch + 1) * len(batch))
+            writer.add_scalar("Loss/train-batch", loss, batch_idx + epoch * len(train_dataloader))
 
         # Record loss
         ddp_loss[0] += loss.item()
         ddp_loss[1] += len(batch)
 
     dist.all_reduce(ddp_loss, op=dist.ReduceOp.SUM)
+    train_loss = ddp_loss[0] / ddp_loss[1]
     if writer:
-        writer.add_scalar("Loss/train-epoch", ddp_loss[0] / ddp_loss[1], epoch + 1)
-    rank0_print(rank, "Epoch: {} \tLoss: {:.6f}".format(epoch + 1, ddp_loss[0] / ddp_loss[1]))
+        writer.add_scalar("Loss/train-epoch", train_loss, epoch + 1)
+    rank0_print(rank, "Epoch: {} \tLoss: {:.6f}".format(epoch + 1, train_loss))
 
 
 def eval(rank, model, eval_dataloader, epoch, writer=None):
@@ -331,9 +332,7 @@ def fsdp_main(
     # Load Model
     rank0_print(rank, "Loading model from disk...")
     model_config = transformers.AutoConfig.from_pretrained(
-        model_args.model_name_or_path,
-        cache_dir=train_args.cache_dir,
-        trust_remote_code=True,
+        model_args.model_name_or_path, cache_dir=train_args.cache_dir, trust_remote_code=True
     )
     model_config.use_cache = False
 
@@ -369,6 +368,9 @@ def fsdp_main(
         writer = None
 
     rank0_print(rank, "Starting training!")
+
+    init_start_event.record(torch.cuda.current_stream())
+
     for epoch in range(train_args.num_train_epochs):
         train(rank, model, optimizer, train_args, train_dataloader, epoch, writer=writer)
 
@@ -381,7 +383,7 @@ def fsdp_main(
     rank0_print(rank, "Training finished!")
     # eval(rank, model, eval_dataloader, train_args.num_train_epochs, writer=writer)
 
-    init_end_event.record()  # type: ignore
+    init_end_event.record(torch.cuda.current_stream())
 
     if rank == 0:
         init_end_event.synchronize()
@@ -393,7 +395,7 @@ def fsdp_main(
         dist.barrier()
         states = model.state_dict()
         if rank == 0:
-            torch.save(states, f"{model_args.output_dir}/mymodel.pt")
+            torch.save(states, f"{model_args.output_dir}/mygpt2.pt")
 
     cleanup()
 

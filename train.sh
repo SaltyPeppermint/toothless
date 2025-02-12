@@ -12,7 +12,8 @@ uv run torchrun --nproc_per_node 1 --nnodes 1 --node_rank 0 --master_addr localh
     --adam_beta2 0.95 \
     --logging_steps 1 \
     --model_max_length 512 \
-    --lazy_preprocess True
+    --lazy_preprocess True \
+    --save_model_end True
 # --gradient_accumulation_steps 16 \
 # --evaluation_strategy "no" \
 # --report_to "none" \
