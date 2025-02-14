@@ -12,10 +12,19 @@ DATASETS = {
 }
 
 
-def load_data(data_path: str, var_names: list[str], ignore_unknown: bool) -> pl.DataFrame:
+def update_cache(var_names: list[str], ignore_unknown: bool = True):
+    print("Updating Cache...")
+    for name, path in DATASETS.items():
+        data = load_df(Path(path), var_names, ignore_unknown)
+        data.write_parquet(f"cache/{name}.parquet")
+
+    print("Cache updated!")
+
+
+def load_df(data_path: Path, var_names: list[str], ignore_unknown: bool = True) -> pl.DataFrame:
     all_dfs = []
     for data_file in sorted(Path(data_path).glob("*.json")):
-        df = load_fragment(data_file, var_names, ignore_unknown)
+        df = _load_fragment(data_file, var_names, ignore_unknown)
         all_dfs.append(df)
 
     print("All data fragments loading, now concating...")
@@ -26,13 +35,13 @@ def load_data(data_path: str, var_names: list[str], ignore_unknown: bool) -> pl.
     return all_data
 
 
-def load_fragment(data_file: Path, var_names: list[str], ignore_unknown: bool) -> pl.DataFrame:
+def _load_fragment(data_file: Path, var_names: list[str], ignore_unknown: bool) -> pl.DataFrame:
     with open(data_file) as f:
         json_content = json.load(f)
 
-    exprs = rise.PyRecExpr.many_new([x["sample"] for x in json_content["sample_data"]])
-    features = rise.many_featurize_simple(exprs, var_names, ignore_unknown)
-    schema = rise.feature_names_simple(var_names)
+    exprs = rise.PyRecExpr.batch_new([x["sample"] for x in json_content["sample_data"]])
+    features = rise.PyRecExpr.batch_simple_features(exprs, var_names, ignore_unknown)
+    schema = rise.PyRecExpr.simple_feature_names(var_names, ignore_unknown)
     start_term = rise.PyRecExpr(json_content["start_expr"])
 
     df = pl.DataFrame(features, schema=schema, orient="row")
@@ -45,22 +54,9 @@ def load_fragment(data_file: Path, var_names: list[str], ignore_unknown: bool) -
     goal_expr = pl.Series(name="goal_expr", values=[str(i) for i in exprs])
     df = df.with_columns([generation, expl_chain, goal_expr])
     df = df.with_columns(
-        pl.col("explanation_chain").map_elements(find_middle, return_dtype=pl.String).alias("middle_expr")
+        pl.col("explanation_chain").map_elements(lambda x: x[len(x) // 2], return_dtype=pl.String).alias("middle_expr")
     )
     df = df.with_columns(pl.lit(str(start_term)).alias("start_expr"))
 
     print(f"Loaded data fragment {data_file}")
     return df
-
-
-def find_middle(x: list[str]) -> str:
-    return x[len(x) // 2]
-
-
-def update_cache(var_names: list[str], ignore_unknown: bool = True):
-    print("Updating Cache...")
-    for name, path in DATASETS.items():
-        data = load_data(path, var_names, ignore_unknown)
-        data.write_parquet(f"cache/{name}.parquet")
-
-    print("Cache updated!")

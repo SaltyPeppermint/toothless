@@ -14,12 +14,12 @@ def plot_metrics(
     mae_by_label = pl.from_dict(mae_by_label)
     rmse_by_label = pl.from_dict(rmse_by_label)
 
-    plot_basic_metrics(prefix, basic_metrics)
-    plot_by_label(prefix, mae_by_label, "MAE")
-    plot_by_label(prefix, rmse_by_label, "RMSE")
+    _plot_basic_metrics(prefix, basic_metrics)
+    _plot_by_label(prefix, mae_by_label, "MAE")
+    _plot_by_label(prefix, rmse_by_label, "RMSE")
 
 
-def plot_by_label(prefix, metrics, name):
+def _plot_by_label(prefix, metrics, name):
     metrics.index.name = "Model"
     fig = px.bar(metrics, barmode="group", title=f"{name} by Label")
     fig.update_yaxes(title=name)
@@ -27,7 +27,7 @@ def plot_by_label(prefix, metrics, name):
     fig.write_image(f"{prefix}/{str.lower(name)}_by_label.png", scale=3)
 
 
-def plot_basic_metrics(prefix, metrics):
+def _plot_basic_metrics(prefix, metrics):
     fig = px.bar(metrics, y="r2")
     fig.update_xaxes(title="Model")
     fig.write_image(f"{prefix}/r2.png", scale=3)

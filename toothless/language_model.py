@@ -23,30 +23,13 @@ import sklearn.model_selection
 from tqdm.auto import tqdm
 
 
-import loading
-from args import ModelArguments, DataArguments, TrainingArguments
-
-
-IGNORE_UNKNOWN = True
-VAR_NAMES = [
-    "f1",
-    "f2",
-    "f3",
-    "f4",
-    "f5",
-    "x0",
-    "x1",
-    "x2",
-    "x3",
-]
+import utils.loading as loading
+from utils.args import ModelArguments, DataArguments, TrainingArguments
+from utils.train import cleanup_process_group, setup_process_group, rank0_print
+from utils.consts import VAR_NAMES, IGNORE_UNKNOWN
 
 
 IGNORE_TOKEN_ID = LabelSmoother.ignore_index
-
-
-def rank0_print(rank, *args):
-    if rank == 0:
-        print(*args)
 
 
 def preprocess(
@@ -211,20 +194,6 @@ def make_supervised_data_module(
     return train_dataset, eval_dataset
 
 
-def setup(rank, world_size):
-    rank0_print(rank, "Setting up process group...")
-    # os.environ["MASTER_ADDR"] = "localhost"
-    # os.environ["MASTER_PORT"] = "12355"
-
-    # initialize the process group
-    dist.init_process_group("nccl", rank=rank, world_size=world_size)
-    print("Process group created")
-
-
-def cleanup():
-    dist.destroy_process_group()
-
-
 def data_loaders(
     rank: int,
     world_size: int,
@@ -307,7 +276,7 @@ def eval(rank, model, eval_dataloader, epoch, writer=None):
 def fsdp_main(
     rank: int, world_size: int, model_args: ModelArguments, data_args: DataArguments, train_args: TrainingArguments
 ):
-    setup(rank, world_size)
+    setup_process_group(rank, world_size)
     rank0_print(rank, "Distributed Network ready")
 
     torch.cuda.set_device(rank)
@@ -397,7 +366,7 @@ def fsdp_main(
         if rank == 0:
             torch.save(states, f"{model_args.output_dir}/mygpt2.pt")
 
-    cleanup()
+    cleanup_process_group()
 
 
 if __name__ == "__main__":
