@@ -203,7 +203,10 @@ if __name__ == "__main__":
     data_path = Path("data/start_goal_with_expl/start_and_goal-2025-01-29-b33b4ba4-ee88-48b5-981b-c2b809d6504f/0")
 
     dataset = data.PairDataset(data_path, 5, VAR_NAMES, IGNORE_UNKNOWN, 42)
-    print(len(dataset))
+    # print(len(dataset))
+    train_loader, test_loader = dataset.to_dataloader(8)
+    print(train_loader)
+    print(test_loader)
     # parser = transformers.HfArgumentParser((ModelArguments, DataArguments, TrainingArguments))  # type: ignore
     # (
     #     model_args,

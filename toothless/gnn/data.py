@@ -1,14 +1,14 @@
+from functools import lru_cache
 from pathlib import Path
-from typing import Self
 import json
+import math
 
 import torch
 import torch.nn.functional as F
 from torch_geometric.data import Data
 from torch_geometric.loader import DataLoader
-from torch_geometric.data import InMemoryDataset
+from torch_geometric.data import Dataset
 
-from sklearn.model_selection import train_test_split
 import polars as pl
 
 from eggshell import rise  # type: ignore
@@ -26,34 +26,29 @@ class PairData(Data):
     @staticmethod
     def from_tripple(a: rise.PyRecExpr, b: rise.PyRecExpr, distance: int, var_names: list[str], ignore_unknown: bool):
         "Alternative constructor. Cannot annotate return type because Python reasons"
-        x_s, edge_index_s = _pyrec_to_feature_vec(a, var_names, ignore_unknown)
-        x_t, edge_index_t = _pyrec_to_feature_vec(b, var_names, ignore_unknown)
+        x_s, edge_index_s = PairData._pyrec_to_feature_vec(a, var_names, ignore_unknown)
+        x_t, edge_index_t = PairData._pyrec_to_feature_vec(b, var_names, ignore_unknown)
         return PairData(x_s=x_s, edge_index_s=edge_index_s, x_t=x_t, edge_index_t=edge_index_t, y=distance)
 
+    @staticmethod
+    def _pyrec_to_feature_vec(
+        expr: rise.PyRecExpr, var_names: list[str], ignore_unknown: bool
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        graph_data = rise.PyGraphData(expr, var_names, ignore_unknown)
+        node_types = F.one_hot(
+            torch.tensor(graph_data.nodes, dtype=torch.long),
+            num_classes=rise.PyGraphData.num_node_types(var_names, ignore_unknown),
+        )
+        const_values = torch.tensor([[x] if x else [0] for x in graph_data.const_values])
+        nodes = torch.hstack((node_types, const_values))
 
-def _pyrec_to_feature_vec(
-    expr: rise.PyRecExpr, var_names: list[str], ignore_unknown: bool
-) -> tuple[torch.Tensor, torch.Tensor]:
-    graph_data = rise.PyGraphData(expr, var_names, ignore_unknown)
-    node_types = F.one_hot(
-        torch.tensor(graph_data.nodes, dtype=torch.long),
-        num_classes=rise.PyGraphData.num_node_types(var_names, ignore_unknown),
-    )
-    const_values = torch.tensor([[x] if x else [0] for x in graph_data.const_values])
-    nodes = torch.hstack((node_types, const_values))
-
-    return nodes, torch.tensor(graph_data.edges, dtype=torch.long)
-
-
-def _pick_indices(max_index: int, n: int) -> set[tuple[int, int]]:
-    indices = torch.randint(0, max_index, (n * 2,))
-    first_half = indices[: len(indices) // 2]
-    second_half = indices[len(indices) // 2 :]
-
-    return set((int(x), int(y)) if x < y else (int(y), int(x)) for x, y in zip(first_half, second_half))
+        return nodes, torch.tensor(graph_data.edges, dtype=torch.long)
 
 
-class PairDataset(InMemoryDataset):
+torch.serialization.add_safe_globals([PairData])
+
+
+class PairDataset(Dataset):
     def __init__(
         self,
         json_root: Path,
@@ -74,7 +69,9 @@ class PairDataset(InMemoryDataset):
         self.random_state = random_state
         self.chunks = chunks
 
+        self.ds_size_memo = None
         self.len_memo = None
+        self.data_cache = {}
         self.cache_dir = Path("cache") / Path(*self.json_root.parts[2:])
 
         super().__init__(str(self.cache_dir), transform, pre_transform, pre_filter)
@@ -86,6 +83,7 @@ class PairDataset(InMemoryDataset):
     @property
     def processed_file_names(self):
         return [f"data_{i}.pt" for i in range(self.chunks)] + ["meta.json"]
+        # return ["data.pt"]
 
     def download(self):
         df = loading.load_df(self.json_root, self.var_names)
@@ -100,14 +98,12 @@ class PairDataset(InMemoryDataset):
         expl_chains = [rise.PyRecExpr.batch_new(i) for i in expl_chains]
         print("Parallel processing done")
 
-        total_pairs = 0
+        picked_pairs = [self._pick_indices(len(chain)) for chain in expl_chains]
 
-        picked_pairs = [_pick_indices(len(chain), self.pairs_per_expl) for chain in expl_chains]
+        self.len_memo = self.ds_size_memo = sum([len(chain_pairs) for chain_pairs in picked_pairs])
 
-        total_pairs = sum([len(chain_pairs) for chain_pairs in picked_pairs])
-        print(f"Total pairs: {total_pairs}")
-        max_chunk_size = -(-total_pairs // self.chunks)  # Get number of full chunks -> round up
-        print(f"Chunk size: {max_chunk_size}")
+        print(f"Total pairs: {self.len_memo}")
+        print(f"Chunk size: {self.max_chunk_size()}")
 
         save_buffer = []
         spill_buffer = []
@@ -125,14 +121,13 @@ class PairDataset(InMemoryDataset):
             if self.pre_transform is not None:
                 pairs = [self.pre_transform(data) for data in pairs]
 
-            remaining_space = max_chunk_size - len(save_buffer)
-            save_buffer.extend(pairs[0:remaining_space])
+            remaining_space = self.max_chunk_size() - len(save_buffer)
+            save_buffer.extend(pairs[:remaining_space])
             spill_buffer.extend(pairs[remaining_space:])
 
             if remaining_space == 0:
-                total_pairs += len(save_buffer)
-                print(f"Saving chunk {idx} in {self.processed_paths[idx]}")
-                self.save(save_buffer, self.processed_paths[idx])
+                print(f"Saving {len(save_buffer)} pairs in {self.processed_paths[idx]}")
+                torch.save(save_buffer, self.processed_paths[idx])
 
                 save_buffer = spill_buffer
                 spill_buffer = []
@@ -140,14 +135,16 @@ class PairDataset(InMemoryDataset):
 
         # Save last few in the buffer if exist
         if len(save_buffer) != 0:
-            total_pairs += len(save_buffer)
-            print(f"Saving rest in chunk {idx} in {self.processed_paths[idx]}")
-            self.save(save_buffer, self.processed_paths[idx])
+            print(f"Saving the last {len(save_buffer)} pairs in {self.processed_paths[idx]}")
+            torch.save(save_buffer, self.processed_paths[idx])
 
-        print(f"Total lenght: {total_pairs}")
         meta_path = Path(self.processed_dir) / Path("meta.json")
         with open(meta_path, mode="w", encoding="utf-8") as f:
-            json.dump({"len": total_pairs, "max_chunk_size": max_chunk_size}, f)
+            json.dump({"len": len(self), "max_chunk_size": self.max_chunk_size()}, f)
+
+    def max_chunk_size(self):
+        # Get number of full chunks -> round up
+        return -(-self.ds_size() // self.chunks)
 
     def len(self):
         if self.len_memo is None:
@@ -158,13 +155,37 @@ class PairDataset(InMemoryDataset):
         else:
             return self.len_memo
 
-    def get(self, idx):
-        max_chunk_size = -(-self.len() // self.chunks)  # Size of a full chunk
-        chunk = torch.load(Path(self.processed_paths[idx // max_chunk_size]))
+    def ds_size(self) -> int:
+        if self.ds_size_memo is None:
+            with open(Path(self.processed_dir) / Path("meta.json")) as f:
+                j = json.load(f)
+                self.len_memo = j["len"]
+                return j["len"]
+        else:
+            return self.ds_size_memo
+
+    def get(self, idx) -> PairData:
+        max_chunk_size = self.max_chunk_size()
+        chunk_path = Path(self.processed_paths[idx // max_chunk_size])
+        chunk = _load_chunk(chunk_path)
         return chunk[idx % max_chunk_size]
 
-    def to_dataloader(self, batch_size: int, shuffle: bool = False):
-        return DataLoader(data_list, follow_batch=["x_s", "x_t"], batch_size=batch_size, shuffle=shuffle)
+    def to_dataloader(self, batch_size: int, shuffle: bool = False) -> tuple[DataLoader, DataLoader]:
+        split_idx = math.floor(0.9 * len(self))
+
+        train_loader = DataLoader(self[:split_idx], follow_batch=["x_s", "x_t"], batch_size=batch_size, shuffle=shuffle)  # type: ignore
+        test_loader = DataLoader(self[split_idx:], follow_batch=["x_s", "x_t"], batch_size=batch_size, shuffle=shuffle)  # type: ignore
+        return train_loader, test_loader
+
+    def _pick_indices(self, max_index: int) -> set[tuple[int, int]]:
+        xs = torch.randint(0, max_index, (self.pairs_per_expl,))
+        ys = torch.randint(0, max_index, (self.pairs_per_expl,))
+        return set((int(x), int(y)) if x < y else (int(y), int(x)) for x, y in zip(xs, ys))
+
+
+@lru_cache(maxsize=100)
+def _load_chunk(chunk_path: Path):
+    return torch.load(chunk_path, weights_only=False)
 
 
 if __name__ == "__main__":
@@ -200,6 +221,6 @@ if __name__ == "__main__":
     print(batch)
 
     expr = rise.PyRecExpr("(app (app zip (var a)) 1)))")
-    x_s, edge_index_s = _pyrec_to_feature_vec(expr, ["a"], True)
+    x_s, edge_index_s = PairData._pyrec_to_feature_vec(expr, ["a"], True)
     print(x_s)
     print(edge_index_s)
