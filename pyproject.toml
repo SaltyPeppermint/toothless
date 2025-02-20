@@ -8,7 +8,6 @@ dependencies = [
     "matplotlib>=3",
     "tensorboard>=2",
     "tensordict>=0.5",
-    "torch-geometric>=2",
     "torch-tb-profiler>=0.4",
     "torch>=2",
     "tqdm>=4",

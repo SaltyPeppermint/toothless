@@ -24,8 +24,8 @@ from tqdm.auto import tqdm
 
 
 import utils.loading as loading
-from utils.args import ModelArguments, DataArguments, TrainingArguments
-from utils.train import cleanup_process_group, setup_process_group, rank0_print
+from toothless.language_model.args import ModelArguments, DataArguments, TrainingArguments
+from toothless.utils.dist_helper import cleanup_process_group, setup_process_group, rank0_print
 from utils.consts import VAR_NAMES, IGNORE_UNKNOWN
 
 
