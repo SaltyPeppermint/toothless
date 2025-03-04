@@ -1,5 +1,3 @@
-from pathlib import Path
-
 import torch
 import torch.nn as nn
 import torch.optim as optim
@@ -17,9 +15,9 @@ import transformers
 
 from toothless.utils.dist_helper import cleanup_process_group, setup_process_group, rank0_print
 from toothless.utils.consts import VAR_NAMES, IGNORE_UNKNOWN
-from toothless.tree_autoencoder.data import PairDataset
-from toothless.tree_autoencoder.model import AutoencoderWithAux, Decoder, DistanceNet, GuidanceEncoder
-from toothless.tree_autoencoder.args import DataArguments, TrainingArguments, ModelArguments
+from toothless.tree_model.data import PairDataset
+from toothless.tree_model.model import FastASTTrans
+from toothless.tree_model.args import DataArguments, TrainingArguments, ModelArguments
 
 
 def mk_loaders(rank: int, world_size: int, dataset: PairDataset, data_args: DataArguments):
@@ -143,11 +141,7 @@ def fsdp_main(
     init_start_event = torch.cuda.Event(enable_timing=True)
     init_end_event = torch.cuda.Event(enable_timing=True)
 
-    model = AutoencoderWithAux(
-        GuidanceEncoder(dataset.node_features, model_args.hidden_channels),
-        Decoder(dataset.node_features, model_args.hidden_channels),
-        DistanceNet(model_args.embedding_size),
-    )
+    model = FastASTTrans(0, 0, 0, 0, 0, 0, "0", 0, 0, 0)  # FIXME
     model.to(rank)
     rank0_print(rank, "Model loaded")
 

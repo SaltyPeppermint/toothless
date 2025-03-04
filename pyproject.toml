@@ -22,6 +22,9 @@ dependencies = [
     "tiktoken>=0.8.0",
     "python-dotenv>=1.0.1",
     "standard-imghdr>=3.13.0",
+    "torch-geometric>=2.6.1",
+    "wordninja>=2.0.0",
+    "tokenizers>=0.21.0",
     "eggshell",
 ]
 

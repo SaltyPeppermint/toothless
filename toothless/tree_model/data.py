@@ -1,25 +1,20 @@
-from dataclasses import dataclass
 from functools import lru_cache
-import math
 from pathlib import Path
 import json
 
 import torch
 from torch import Tensor
-from torch.utils.data import Dataset
+from torch.utils import data
 import torch.nn.functional as F
-from torch import nn
-
-from tensordict import TensorDict
 
 import polars as pl
 
-
 from eggshell import rise  # type: ignore
+from eggshell import TreeData
 from toothless.utils import loading
 
 
-class PairDataset(Dataset):
+class PairDataset(data.Dataset):
     def __init__(
         self,
         json_root: Path,
@@ -217,7 +212,7 @@ class PairDataset(Dataset):
 
     @property
     def node_features(self):
-        return rise.PyGraphData.num_node_types(self.var_names, self.ignore_unknown) + 1
+        return len(rise.PyRecExpr.named_symbols()) + len(self.var_names) + int(self.ignore_unknown) + 1
 
 
 @lru_cache(maxsize=100)
@@ -226,10 +221,10 @@ def _load_shard(chunk_path: Path):
 
 
 def pyrec_to_tensor(expr: rise.PyRecExpr, var_names: list[str], ignore_unknown: bool) -> tuple[Tensor, Tensor]:
-    graph_data = rise.PyGraphData(expr, var_names, ignore_unknown)
+    graph_data = expr.to_data(var_names, ignore_unknown)
     node_types = F.one_hot(
         torch.tensor(graph_data.nodes, dtype=torch.long),
-        num_classes=rise.PyGraphData.num_node_types(var_names, ignore_unknown),
+        num_classes=len(rise.PyRecExpr.named_symbols()) + len(var_names) + int(ignore_unknown),
     )
     const_values = torch.tensor([[x] if x else [0] for x in graph_data.const_values])
     nodes = torch.hstack((node_types, const_values)).to_sparse()
