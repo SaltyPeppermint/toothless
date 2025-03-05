@@ -18,6 +18,9 @@ class DataArguments:
     split_size: float = field(default=0.9)
     random_state: int = field(default=42)
     batch_size: int = field(default=8)
+    max_rel_pos: int = field(default=100)
+    max_src_len: int = field(default=1000)
+    max_tgt_len: int = field(default=1000)
 
 
 @dataclass

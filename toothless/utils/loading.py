@@ -12,19 +12,19 @@ DATASETS = {
 }
 
 
-def update_cache(var_names: list[str], ignore_unknown: bool = True):
+def update_cache():
     print("Updating Cache...")
     for name, path in DATASETS.items():
-        data = load_df(Path(path), var_names, ignore_unknown)
+        data = load_df(Path(path))
         data.write_parquet(f"cache/{name}.parquet")
 
     print("Cache updated!")
 
 
-def load_df(data_path: Path, var_names: list[str], ignore_unknown: bool = True) -> pl.DataFrame:
+def load_df(data_path: Path) -> pl.DataFrame:
     all_dfs = []
     for data_file in sorted(Path(data_path).glob("*.json")):
-        df = _load_fragment(data_file, var_names, ignore_unknown)
+        df = _load_fragment(data_file)
         all_dfs.append(df)
 
     print("All data fragments loading, now concating...")
@@ -35,16 +35,17 @@ def load_df(data_path: Path, var_names: list[str], ignore_unknown: bool = True) 
     return all_data
 
 
-def _load_fragment(data_file: Path, var_names: list[str], ignore_unknown: bool) -> pl.DataFrame:
+def _load_fragment(data_file: Path) -> pl.DataFrame:
     with open(data_file) as f:
         json_content = json.load(f)
 
     exprs = rise.PyRecExpr.batch_new([x["sample"] for x in json_content["sample_data"]])
-    features = rise.PyRecExpr.batch_simple_features(exprs, var_names, ignore_unknown)
-    schema = rise.PyRecExpr.simple_feature_names(var_names, ignore_unknown)
+    # features = rise.PyRecExpr.batch_simple_features(exprs, var_names, ignore_unknown)
+    # schema = rise.PyRecExpr.simple_feature_names(var_names, ignore_unknown)
     start_term = rise.PyRecExpr(json_content["start_expr"])
 
-    df = pl.DataFrame(features, schema=schema, orient="row")
+    # df = pl.DataFrame(features, schema=schema, orient="row")
+    df = pl.DataFrame()
 
     expl_chain = pl.Series(
         name="explanation_chain",

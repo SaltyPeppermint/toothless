@@ -1,11 +1,23 @@
 import copy
+from dataclasses import dataclass
+
 import torch.nn as nn
 import torch
 from torch import Tensor
 import torch.nn.functional as F
 
-from embeddings import FastRelEmbeddings
-from toothless.tree_model.model import MHAConfig
+from toothless.tree_model.embeddings import FastRelEmbeddings
+
+
+@dataclass
+class MHAConfig(nn.Module):
+    simple_heads: int = 0
+    ancestor_heads: int = 0
+    sibling_heads: int = 0
+    depth_heads: int = 0
+
+    def total_heads(self) -> int:
+        return self.simple_heads + self.ancestor_heads + self.sibling_heads + self.depth_heads
 
 
 class FastASTEncoderLayer(nn.Module):

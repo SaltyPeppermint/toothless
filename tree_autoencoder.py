@@ -14,13 +14,12 @@ from tqdm.auto import tqdm
 import transformers
 
 from toothless.utils.dist_helper import cleanup_process_group, setup_process_group, rank0_print
-from toothless.utils.consts import VAR_NAMES, IGNORE_UNKNOWN
-from toothless.tree_model.data import PairDataset
-from toothless.tree_model.model import FastASTTrans
+from toothless.tree_model.data import CustomDataset
+from toothless.tree_model.model import FastASTTrans, MHAConfig
 from toothless.tree_model.args import DataArguments, TrainingArguments, ModelArguments
 
 
-def mk_loaders(rank: int, world_size: int, dataset: PairDataset, data_args: DataArguments):
+def mk_loaders(rank: int, world_size: int, dataset: CustomDataset, data_args: DataArguments):
     # Create and load dataset
     # split_idx = int(data_args.split_size * len(dataset))
     train_dataset, test_dataset = torch.utils.data.random_split(
@@ -127,7 +126,7 @@ def fsdp_main(
     torch.cuda.set_device(rank)
 
     # Load Data
-    dataset = PairDataset(data_args.data_path, 5, VAR_NAMES, IGNORE_UNKNOWN, data_args.random_state)
+    dataset = CustomDataset(data_args.data_path, 5, data_args.random_state)
     train_dataloader, eval_dataloader = mk_loaders(rank, world_size, dataset, data_args)
     rank0_print(rank, "DataLoaders ready")
 
@@ -141,7 +140,9 @@ def fsdp_main(
     init_start_event = torch.cuda.Event(enable_timing=True)
     init_end_event = torch.cuda.Event(enable_timing=True)
 
-    model = FastASTTrans(0, 0, 0, 0, 0, 0, "0", 0, 0, 0)  # FIXME
+    mha_config = MHAConfig(4, 4, 4, 4)
+
+    model = FastASTTrans(0, 0, 0, mha_config, 0, "0", 0, 0, 0.0)  # FIXME
     model.to(rank)
     rank0_print(rank, "Model loaded")
 

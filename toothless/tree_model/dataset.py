@@ -11,7 +11,7 @@ from tqdm import tqdm
 import numpy as np
 
 import string
-from utils import PAD, UNK
+from toothless.tree_model.utils import PAD, UNK
 
 punc = string.punctuation
 
