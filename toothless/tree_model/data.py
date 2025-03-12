@@ -1,17 +1,15 @@
 from functools import lru_cache
 from pathlib import Path
 import json
-from typing import Any, Iterator
+from typing import Iterator
 
 import torch
 from torch import Tensor
 from torch.utils import data
 
-from tokenizers import Tokenizer, Regex
+from tokenizers import Tokenizer
 from tokenizers.models import BPE
-from tokenizers.trainers import BpeTrainer
-from tokenizers.pre_tokenizers import Sequence as PretokenizerSequence, Split
-from tokenizers.normalizers import Sequence as NormalizerSequence, Replace, BertNormalizer, Strip
+
 
 import polars as pl
 
@@ -35,11 +33,13 @@ class CustomDataset(data.Dataset):
         self,
         json_root: Path,
         pairs_per_expl: int,
+        max_distance: int = 32,
         random_state: int = 42,
         force_reload: bool = False,
     ):
         self.json_root = Path(json_root)
         self.pairs_per_expl = pairs_per_expl
+        self.max_distance = max_distance
         self.force_reload = force_reload
         torch.manual_seed(random_state)
 
@@ -47,7 +47,8 @@ class CustomDataset(data.Dataset):
         self.cache_dir.mkdir(parents=True, exist_ok=True)
 
         self._process_raw()
-        self.length, self.n_chunks, self.tokenizer = self._process()
+        self.tokenizer = self._build_tokenizer()
+        self.length, self.n_chunks = self._process()
 
     def __len__(self) -> int:
         return self.length
@@ -69,14 +70,12 @@ class CustomDataset(data.Dataset):
         df.write_parquet(self.raw_path)
         return
 
-    def _process(self) -> tuple[int, int, Tokenizer]:
+    def _process(self) -> tuple[int, int]:
         if self.is_processed():
             with open(self.meta_path) as f:
                 j = json.load(f)
                 length = j["len"]
-            tokenizer = Tokenizer(BPE(unk_token=UNK_TOKEN))
-            tokenizer.from_file(self.tokenizer_path)
-            return j["len"], j["n_chunks"], tokenizer
+            return j["len"], j["n_chunks"]
 
         raw_expl_chains = pl.read_parquet(self.raw_path).get_column("explanation_chain")
 
@@ -88,14 +87,12 @@ class CustomDataset(data.Dataset):
         length = sum([len(chain_pairs) for chain_pairs in picked_tripples])
         print(f"Total pairs: {length}")
 
-        tokenizer = self._train_tokenizer(expl_chains, picked_tripples)
-
         save_buffer = []
         spill_buffer = []
         n_chunks = 0
         for chain, tripple in zip(expl_chains, picked_tripples):
             pairs = [
-                self._vectorize(chain[left], chain[middle], chain[right], middle / (right - left), tokenizer)
+                self._vectorize(chain[left], chain[middle], chain[right], middle / (right - left))
                 for left, middle, right in tripple
             ]
 
@@ -116,34 +113,34 @@ class CustomDataset(data.Dataset):
             print(f"Saving the last {len(save_buffer)} pairs in {self.processed_paths(n_chunks)}")
             torch.save(save_buffer, self.processed_paths(n_chunks))
 
-        meta_path = Path(self.processed_dir) / Path("meta.json")
-        with open(meta_path, mode="w", encoding="utf-8") as f:
+        with open(Path(self.processed_dir) / Path("meta.json"), mode="w", encoding="utf-8") as f:
             json.dump({"len": length, "n_chunks": n_chunks}, f)
 
         print("Data processed!")
-        return length, n_chunks, tokenizer
+        return length, n_chunks
 
-    def _train_tokenizer(self, expl_chains, picked_tripples) -> Tokenizer:
-        if self.tokenizer_path.exists() and not self.force_reload:
-            return Tokenizer.from_file(str(self.tokenizer_path))
+    def _build_tokenizer(self) -> Tokenizer:
+        # def _tokenizer(self, expl_chains, picked_tripples) -> Tokenizer:
+        # if self.tokenizer_path.exists() and not self.force_reload:
+        #     return Tokenizer.from_file(str(self.tokenizer_path))
 
         tokenizer = Tokenizer(BPE(unk_token=UNK_TOKEN))
-        tokenizer.normalizer = NormalizerSequence(
-            [
-                Strip(),
-                BertNormalizer(clean_text=True, strip_accents=True, lowercase=True),
-            ]  # type: ignore
-        )  # type: ignore
-        tokenizer.pre_tokenizer = PretokenizerSequence([Split(" ", behavior="removed")])  # type: ignore
+        # tokenizer.normalizer = NormalizerSequence(
+        #     [
+        #         Strip(),
+        #         BertNormalizer(clean_text=True, strip_accents=True, lowercase=True),
+        #     ]  # type: ignore
+        # )  # type: ignore
+        # tokenizer.pre_tokenizer = PretokenizerSequence([Split(" ", behavior="removed")])  # type: ignore
 
-        trainer = BpeTrainer(
-            vocab_size=1000,  # type: ignore
-            special_tokens=[UNK_TOKEN, BOS_TOKEN, EOS_TOKEN, SEP_TOKEN, PAD_TOKEN, MASK_TOKEN],  # type: ignore
-        )
-        iterator = self._gen(expl_chains, picked_tripples)
-        tokenizer.train_from_iterator(
-            iterator=iterator, trainer=trainer, length=len(expl_chains) * 3 * self.pairs_per_expl * 50
-        )
+        # trainer = BpeTrainer(
+        #     vocab_size=1000,  # type: ignore
+        #     special_tokens=[UNK_TOKEN, BOS_TOKEN, EOS_TOKEN, SEP_TOKEN, PAD_TOKEN, MASK_TOKEN],  # type: ignore
+        # )
+        # iterator = self._gen(expl_chains, picked_tripples)
+        # tokenizer.train_from_iterator(
+        #     iterator=iterator, trainer=trainer, length=len(expl_chains) * 3 * self.pairs_per_expl * 50
+        # )
         tokenizer.add_tokens(rise.operators())
         tokenizer.add_tokens(["[constant]", "[variable]"])
         tokenizer.save(str(self.tokenizer_path))
@@ -168,12 +165,10 @@ class CustomDataset(data.Dataset):
 
         return r
 
-    def _vectorize(
-        self, left: rise.PyRecExpr, middle: rise.PyRecExpr, right: rise.PyRecExpr, distance: float, tokenizer: Tokenizer
-    ) -> dict:
-        x_l, v_l, adjacency_s = self._pyrec_to_tensor(left, tokenizer)
-        x_m, v_m, adjacency_m = self._pyrec_to_tensor(middle, tokenizer)
-        x_r, v_r, adjacency_r = self._pyrec_to_tensor(right, tokenizer)
+    def _vectorize(self, left: rise.PyRecExpr, middle: rise.PyRecExpr, right: rise.PyRecExpr, distance: float) -> dict:
+        x_l, v_l, adjacency_s = self._pyrec_to_tensor(left)
+        x_m, v_m, adjacency_m = self._pyrec_to_tensor(middle)
+        x_r, v_r, adjacency_r = self._pyrec_to_tensor(right)
 
         return {
             "x_l": x_l,
@@ -188,26 +183,32 @@ class CustomDataset(data.Dataset):
             "distance": torch.tensor([distance]),
         }
 
-    def _pyrec_to_tensor(self, expr: rise.PyRecExpr, tokenizer: Tokenizer) -> tuple[Tensor, Any, Tensor]:
+    def _pyrec_to_tensor(self, expr: rise.PyRecExpr) -> tuple[Tensor, Tensor, Tensor]:
         graph_data = expr.to_data()
-        node_ids = torch.tensor([node.id for node in graph_data.nodes], dtype=torch.int32)
-        tokenized_values = [
-            tokenizer.encode(BOS_TOKEN + node.name + SEP_TOKEN + node.value + EOS_TOKEN)
-            if node.value
-            else tokenizer.encode(BOS_TOKEN + node.name + EOS_TOKEN)
-            for node in graph_data.nodes
-        ]
+        # n_edges = graph_data.size()
 
-        adjacency = graph_data.transposed_adjacency()
-        n_edges = len(adjacency[0])
-        adjacency_matrix = torch.sparse_coo_tensor(
-            torch.tensor(adjacency),
-            torch.full((n_edges,), True, dtype=torch.bool),
-            dtype=torch.bool,
-            size=torch.Size((150, 150)),
+        # node_ids = torch.tensor([node.id for node in graph_data.nodes], dtype=torch.int32)
+        # tokenized_values = [
+        #     tokenizer.encode(BOS_TOKEN + node.name + SEP_TOKEN + node.value + EOS_TOKEN)
+        #     if node.value
+        #     else tokenizer.encode(BOS_TOKEN + node.name + EOS_TOKEN)
+        #     for node in graph_data.nodes
+        # ]
+        tokenized_values = torch.tensor(
+            [self.tokenizer.token_to_id(node.name) for node in graph_data.nodes], dtype=torch.int32
         )
+        #     for node in graph_data.nodes]
 
-        return node_ids, tokenized_values, adjacency_matrix
+        # adjacency_matrix = torch.sparse_coo_tensor(
+        #     torch.tensor(graph_data.transposed_adjacency()),
+        #     torch.full((n_edges,), True, dtype=torch.bool),
+        #     dtype=torch.bool,
+        #     size=torch.Size((150, 150)),
+        # )
+        anc_matrix = torch.tensor(graph_data.anc_matrix(self.max_distance), dtype=torch.int32)
+        sib_matrix = torch.tensor(graph_data.sib_matrix(self.max_distance), dtype=torch.int32)
+
+        return tokenized_values, anc_matrix, sib_matrix
 
     def is_processed(self) -> bool:
         if not self.meta_path.is_file():

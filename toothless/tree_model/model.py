@@ -2,9 +2,9 @@ import torch
 from torch import nn
 import torch.nn.functional as F
 
-from toothless.tree_model.components import FastASTEncoder, FastASTEncoderLayer, MHAConfig
+from toothless.tree_model.components.encoder import ASTEncoder, ASTEncoderLayer
+from toothless.tree_model.components.utils import MHAConfig
 from toothless.tree_model.dataset import make_std_mask
-from toothless.tree_model.utils import PAD, UNK, BOS
 from toothless.tree_model.embeddings import Embeddings
 
 
@@ -30,8 +30,11 @@ class FastASTTrans(nn.Module):
         self.src_embedding = Embeddings(d_model, src_vocab_size, dropout=dropout, with_pos=False)
         self.tgt_embedding = Embeddings(d_model, tgt_vocab_size, dropout=dropout, with_pos=True)
 
-        encoder_layer = FastASTEncoderLayer(d_model, self.num_heads, dim_feed_forward, dropout)
-        self.encoder = FastASTEncoder(
+        encoder_layer = ASTEncoderLayer(d_model, self.num_heads, dim_feed_forward, dropout)
+        self.l_encoder = ASTEncoder(
+            encoder_layer, num_layers, mha_config, self.pos_type, max_rel_pos, d_model, dropout=dropout
+        )
+        self.r_encoder = ASTEncoder(
             encoder_layer, num_layers, mha_config, self.pos_type, max_rel_pos, d_model, dropout=dropout
         )
 
@@ -50,16 +53,16 @@ class FastASTTrans(nn.Module):
         else:
             self.load_state_dict(state_dict)
 
-    def base_process(self, data):
+    def base_process(self, data, pad_token):
         self.process_data(data)
 
         src_seq = data.src_seq
-        data.src_mask = src_seq.eq(PAD)
+        data.src_mask = src_seq.eq(pad_token)
         data.src_emb = self.src_embedding(src_seq)
 
         if data.tgt_seq is not None:
             tgt_seq = data.tgt_seq
-            data.tgt_mask = make_std_mask(tgt_seq, PAD)
+            data.tgt_mask = make_std_mask(tgt_seq, pad_token)
             data.tgt_emb = self.tgt_embedding(tgt_seq)
 
     @staticmethod
@@ -75,24 +78,32 @@ class FastASTTrans(nn.Module):
     def forward(self, data):
         self.process_data(data)
 
-        encoder_outputs = self.encode(data)
-        decoder_outputs, attn_weights = self.decode(data, encoder_outputs)
+        l_encoder_outputs = self.l_encode(data)
+        r_encoder_outputs = self.r_encode(data)
+        decoder_outputs, attn_weights = self.decode(data, l_encoder_outputs, r_encoder_outputs)
         out = self.generator(decoder_outputs)
         return out
 
-    def encode(self, data):
-        return self.encoder(data)
+    def l_encode(self, data):
+        return self.l_encoder(data)
 
-    def decode(self, data, encoder_outputs):
+    def r_encode(self, data):
+        return self.r_encoder(data)
+
+    def decode(self, data, l_encoder_outputs, r_encoder_outputs):
         tgt_emb = data.tgt_emb
         tgt_mask = data.tgt_mask
         src_mask = data.src_mask
 
         tgt_emb = tgt_emb.permute(1, 0, 2)
-        encoder_outputs = encoder_outputs.permute(1, 0, 2)
         tgt_mask = tgt_mask.repeat(self.num_heads, 1, 1)
+
+        l_encoder_outputs = l_encoder_outputs.permute(1, 0, 2)
+        r_encoder_outputs = r_encoder_outputs.permute(1, 0, 2)
+
+        # TODO: adapt decoder to accept two encoder inputs
         outputs, attn_weights = self.decoder(
-            tgt=tgt_emb, memory=encoder_outputs, tgt_mask=tgt_mask, memory_key_padding_mask=src_mask
+            tgt=tgt_emb, memory=l_encoder_outputs, tgt_mask=tgt_mask, memory_key_padding_mask=src_mask
         )
         outputs = outputs.permute(1, 0, 2)
         return outputs, attn_weights
@@ -112,29 +123,33 @@ class Generator(nn.Module):
 
 
 class GreedyGenerator(nn.Module):
-    def __init__(self, model: FastASTTrans, max_tgt_len: int):  # smth about multi gpu and model.module?
+    def __init__(
+        self, model: FastASTTrans, max_tgt_len: int, bos_token: int, unk_token
+    ):  # smth about multi gpu and model.module?
         super(GreedyGenerator, self).__init__()
 
         self.model = model
         self.max_tgt_len = max_tgt_len
-        self.start_pos = BOS
-        self.unk_pos = UNK
+        self.start_pos = bos_token
+        self.unk_pos = unk_token
 
     def forward(self, data):
         data.tgt_seq = None
         self.model.process_data(data)
 
-        encoder_outputs = self.model.encode(data)
+        l_encoder_outputs = self.model.l_encode(data)
+        r_encoder_outputs = self.model.r_encode(data)
 
-        batch_size = encoder_outputs.size(0)
-        ys = torch.ones(batch_size, 1, requires_grad=False).fill_(self.start_pos).long().to(encoder_outputs.device)
+        batch_size = r_encoder_outputs.size(0)
+        ys = torch.ones(batch_size, 1, requires_grad=False).fill_(self.start_pos).long().to(r_encoder_outputs.device)
         for i in range(self.max_tgt_len - 1):
             data.tgt_mask = make_std_mask(ys, 0)
             data.tgt_emb = self.model.tgt_embedding(ys)
-            decoder_outputs, decoder_attn = self.model.decode(data, encoder_outputs)
+            decoder_outputs, decoder_attn = self.model.decode(data, l_encoder_outputs, r_encoder_outputs)
+
             out = self.model.generator(decoder_outputs)
             out = out[:, -1, :]
             _, next_word = torch.max(out, dim=1)
-            ys = torch.cat([ys, next_word.unsqueeze(1).long().to(encoder_outputs.device)], dim=1)
+            ys = torch.cat([ys, next_word.unsqueeze(1).long().to(r_encoder_outputs.device)], dim=1)
 
         return ys[:, 1:]
