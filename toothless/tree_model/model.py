@@ -3,7 +3,6 @@ from torch import nn
 import torch.nn.functional as F
 
 from toothless.tree_model.components.encoder import ASTEncoder, ASTEncoderLayer
-from toothless.tree_model.components.utils import MHAConfig
 from toothless.tree_model.dataset import make_std_mask
 from toothless.tree_model.embeddings import Embeddings
 
@@ -14,7 +13,8 @@ class FastASTTrans(nn.Module):
         src_vocab_size: int,
         tgt_vocab_size: int,
         d_model: int,
-        mha_config: MHAConfig,
+        n_anc_heads: int,
+        n_sib_heads: int,
         max_rel_pos: int,
         pos_type: str,
         num_layers: int,
@@ -23,7 +23,7 @@ class FastASTTrans(nn.Module):
         state_dict=None,
     ):
         super(FastASTTrans, self).__init__()
-        self.num_heads = mha_config.total_heads()
+        self.num_heads = n_anc_heads + n_sib_heads
 
         self.pos_type = pos_type.split("_")
 
@@ -32,10 +32,10 @@ class FastASTTrans(nn.Module):
 
         encoder_layer = ASTEncoderLayer(d_model, self.num_heads, dim_feed_forward, dropout)
         self.l_encoder = ASTEncoder(
-            encoder_layer, num_layers, mha_config, self.pos_type, max_rel_pos, d_model, dropout=dropout
+            encoder_layer, num_layers, n_anc_heads, n_sib_heads, self.pos_type, max_rel_pos, d_model, dropout=dropout
         )
         self.r_encoder = ASTEncoder(
-            encoder_layer, num_layers, mha_config, self.pos_type, max_rel_pos, d_model, dropout=dropout
+            encoder_layer, num_layers, n_anc_heads, n_sib_heads, self.pos_type, max_rel_pos, d_model, dropout=dropout
         )
 
         decoder_layer = nn.TransformerDecoderLayer(

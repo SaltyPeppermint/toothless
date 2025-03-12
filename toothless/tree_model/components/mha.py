@@ -23,11 +23,12 @@ class FastMultiHeadedAttention(nn.Module):
         query: Tensor,
         key: Tensor,
         value: Tensor,
-        start_nodes: Tensor | None = None,
-        end_nodes: Tensor | None = None,
+        pos_enc: Tensor,
+        pos_pad: Tensor,
         rel_q: Tensor | None = None,
         rel_k: Tensor | None = None,
         rel_v: Tensor | None = None,
+        attn_mask: Tensor | None = None,
     ) -> Tensor:
         """relative q shape [1, 2k+1, dim]"""
         """relative v shape [1, 2k+1, dim]"""
@@ -37,7 +38,7 @@ class FastMultiHeadedAttention(nn.Module):
         ]
 
         output = self.rel_attn(
-            query, key, value, start_nodes=start_nodes, end_nodes=end_nodes, rel_q=rel_q, rel_k=rel_k, rel_v=rel_v
+            query, key, value, pos_enc, pos_pad, rel_q=rel_q, rel_k=rel_k, rel_v=rel_v, attn_mask=attn_mask
         )
 
         output = output.permute(0, 2, 1, 3).contiguous()
@@ -48,39 +49,48 @@ class FastMultiHeadedAttention(nn.Module):
         return output
 
     @staticmethod
-    def rel_attn(q, k, v, start_nodes, end_nodes, rel_q, rel_k, rel_v):
+    def rel_attn(
+        q: Tensor,
+        k: Tensor,
+        v: Tensor,
+        pos_enc: Tensor,
+        pos_pad: Tensor,
+        rel_q: Tensor | None,
+        rel_k: Tensor | None,
+        rel_v: Tensor | None,
+        attn_mask: Tensor | None = None,
+    ):
         """
         :param q: [batch_size, num_heads, seq_len, d_k]
         :param k: [batch_size, num_heads, seq_len, d_k]
         :param v: [batch_size, num_heads, seq_len, d_k]
-        :param start_nodes: [batch_size, num_heads, k+1, seq_len]
-        :param end_nodes: [batch_size, num_heads, k+1, seq_len]
+        :param pos_enc: [batch_size, num_heads, k+1, seq_len]
+        :param pos_padding: [batch_size, num_heads, k+1, seq_len]
         :param rel_q: [1, num_heads, 2k+2, d_k]
         :param rel_k: [1, num_heads, 2k+2, d_k]
         :param rel_v: [1, num_heads, 2k+2, d_k]
         :return:
         """
         batch_size, num_heads, seq_len, d_k = q.size()
-        max_rel_pos = start_nodes.size(2)
         scale_factor = 1
 
         q_weights = q.contiguous().view(-1, d_k)
         k_weights = k.contiguous().view(-1, d_k)
         v_weights = v.contiguous().view(-1, d_k)
 
-        start_node_mask = start_nodes.eq(-1)
+        pos_enc_mask = pos_enc.eq(-1)
 
-        start_nodes += start_node_mask
-        mask_matrix = torch.cat([start_node_mask, start_node_mask], dim=-2)
+        pos_enc += pos_enc_mask
+        mask_matrix = torch.cat([pos_enc_mask, pos_enc_mask], dim=-2)
         mask_matrix = mask_matrix.view(batch_size, num_heads, -1)
 
         mask_matrix[:, :, :seq_len] = True
 
-        map_pos = torch.arange(batch_size * num_heads, dtype=torch.long, device=start_nodes.device)
+        map_pos = torch.arange(batch_size * num_heads, dtype=torch.long, device=pos_enc.device)
         map_pos = map_pos.unsqueeze(-1) * seq_len
 
-        query_indexes = torch.cat([end_nodes, start_nodes], dim=-2)
-        key_indexes = torch.cat([start_nodes, end_nodes], dim=-2)
+        query_indexes = torch.cat([pos_pad, pos_enc], dim=-2)
+        key_indexes = torch.cat([pos_enc, pos_pad], dim=-2)
 
         query_indexes = query_indexes.view(batch_size * num_heads, -1)
         key_indexes = key_indexes.view(batch_size * num_heads, -1)

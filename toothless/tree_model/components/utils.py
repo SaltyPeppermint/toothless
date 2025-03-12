@@ -1,20 +1,9 @@
 import copy
-from dataclasses import dataclass
-import math
 
 import torch.nn as nn
 import torch
 from torch import Tensor
 import torch.nn.functional as F
-
-
-@dataclass
-class MHAConfig(nn.Module):
-    anc_heads: int = 0
-    sib_heads: int = 0
-
-    def total_heads(self) -> int:
-        return self.anc_heads + self.sib_heads
 
 
 class FeedForward(nn.Module):
