@@ -37,3 +37,6 @@ line-length = 120
 
 [tool.uv.sources]
 eggshell = { path = "cache/eggshell-0.0.1-cp313-cp313-manylinux_2_34_x86_64.whl" }
+
+[dependency-groups]
+dev = []

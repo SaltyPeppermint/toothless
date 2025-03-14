@@ -3,7 +3,7 @@ import torch
 from torch import Tensor
 import torch.nn.functional as F
 
-from toothless.tree_model.components.mha import FastMultiHeadedAttention
+from toothless.tree_model.components.mha import MHSelfAttn
 from toothless.tree_model.components.utils import (
     FeedForward,
     SublayerConnection,
@@ -19,7 +19,7 @@ class ASTEncoderLayer(nn.Module):
         self.num_heads = num_heads
         self.d_model = d_model
 
-        self.self_attn = FastMultiHeadedAttention(d_model, num_heads, dropout=dropout)
+        self.self_attn = MHSelfAttn(d_model, num_heads, dropout=dropout)
         self.feed_forward = FeedForward(d_model, dim_feed_forward, dropout=dropout, activation=activation)
 
         self.sublayers = stack_modules(SublayerConnection(d_model, dropout), 2)

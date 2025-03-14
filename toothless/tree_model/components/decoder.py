@@ -4,7 +4,7 @@ import torch
 from torch import Tensor
 import torch.nn.functional as F
 
-from toothless.tree_model.components.mha import FastMultiHeadedAttention
+from toothless.tree_model.components.mha import FastMultiHeadedAttention, MHCrossAttn, MHSelfAttn
 from toothless.tree_model.components.utils import (
     FeedForward,
     SublayerConnection,
@@ -20,9 +20,9 @@ class ASTDecoderLayer(nn.Module):
         self.num_heads = num_heads
         self.d_model = d_model
 
-        self.self_attn = FastMultiHeadedAttention(d_model, num_heads, dropout=dropout)
-        self.l_multihead_attn = FastMultiHeadedAttention(d_model, num_heads, dropout=dropout)
-        self.r_multihead_attn = FastMultiHeadedAttention(d_model, num_heads, dropout=dropout)
+        self.self_attn = MHSelfAttn(d_model, num_heads, dropout=dropout)
+        self.l_cross_attn = MHCrossAttn(d_model, num_heads, dropout=dropout)
+        self.r_cross_attn = MHCrossAttn(d_model, num_heads, dropout=dropout)
         self.feed_forward = FeedForward(d_model, dim_feed_forward, dropout=dropout, activation=activation)
         self.dropout = nn.Dropout(dropout)
 
@@ -58,14 +58,14 @@ class ASTDecoderLayer(nn.Module):
 
         tgt = self.sublayers[1](
             tgt,
-            lambda x: self.l_multihead_attn(
+            lambda x: self.l_cross_attn(
                 x, l_mem, l_mem, l_mem_pos, l_mem_pos_pad, rel_q, rel_k, rel_v, attn_mask=tgt_mask
             ),
         )
 
         tgt = self.sublayers[2](
             tgt,
-            lambda x: self.r_multihead_attn(
+            lambda x: self.r_cross_attn(
                 x, r_mem, r_mem, r_mem_pos, r_mem_pos_pad, rel_q, rel_k, rel_v, attn_mask=tgt_mask
             ),
         )
