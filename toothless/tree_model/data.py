@@ -166,20 +166,20 @@ class CustomDataset(data.Dataset):
         return r
 
     def _vectorize(self, left: rise.PyRecExpr, middle: rise.PyRecExpr, right: rise.PyRecExpr, distance: float) -> dict:
-        x_l, v_l, adjacency_s = self._pyrec_to_tensor(left)
-        x_m, v_m, adjacency_m = self._pyrec_to_tensor(middle)
-        x_r, v_r, adjacency_r = self._pyrec_to_tensor(right)
+        l_tok, l_anc, l_sib = self._pyrec_to_tensor(left)
+        x_tok, x_anc, x_sib = self._pyrec_to_tensor(middle)
+        r_tok, r_anc, r_sib = self._pyrec_to_tensor(right)
 
         return {
-            "x_l": x_l,
-            "v_l": v_l,
-            "adjacency_l": adjacency_s,
-            "x_m": x_m,
-            "v_m": v_m,
-            "adjacency_m": adjacency_m,
-            "x_r": x_r,
-            "v_r": v_r,
-            "adjacency_r": adjacency_r,
+            "l_tok": l_tok,
+            "l_anc": l_anc,
+            "l_sib": l_sib,
+            "x_tok": x_tok,
+            "x_anc": x_anc,
+            "x_sib": x_sib,
+            "r_tok": r_tok,
+            "r_anc": r_anc,
+            "r_sib": r_sib,
             "distance": torch.tensor([distance]),
         }
 

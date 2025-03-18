@@ -79,22 +79,6 @@ class RelEmbeddings(nn.Module):
             return None
 
 
-class DebertaRelEmbeddings(RelEmbeddings):
-    def __init__(self, d_model: int, num_heads: int, k: int, pos_type, dropout: float = 0.0):
-        super(DebertaRelEmbeddings, self).__init__(d_model, num_heads, k, pos_type, dropout)
-
-    def forward(self, inputs: Tensor) -> tuple[Tensor | None, Tensor | None, Tensor | None]:
-        rel_q, rel_k, rel_v = None, None, None
-        if "p2q" in self.pos_type:
-            rel_q = self.get_rel_weights(self.rel_emb_q.weight)
-        if "p2k" in self.pos_type:
-            rel_k = self.get_rel_weights(self.rel_emb_k.weight)
-        if "p2v" in self.pos_type:
-            rel_v = self.get_p2v_emb(inputs)
-
-        return rel_q, rel_k, rel_v
-
-
 class FastRelEmbeddings(RelEmbeddings):
     def __init__(self, d_model: int, num_heads: int, k, pos_type: list[str], dropout: float = 0.0):
         super(FastRelEmbeddings, self).__init__(d_model, num_heads, k, pos_type, dropout)

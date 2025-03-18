@@ -4,7 +4,7 @@ import torch
 from torch import Tensor
 import torch.nn.functional as F
 
-from toothless.tree_model.components.mha import FastMultiHeadedAttention, MHCrossAttn, MHSelfAttn
+from toothless.tree_model.components.mha import MHCrossAttn, MHSelfAttn
 from toothless.tree_model.components.utils import (
     FeedForward,
     SublayerConnection,
