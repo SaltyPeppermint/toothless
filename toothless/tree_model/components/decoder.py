@@ -4,12 +4,12 @@ import torch
 from torch import Tensor
 import torch.nn.functional as F
 
-from toothless.tree_model.components.mha import MHCrossAttn, MHSelfAttn
+from toothless.tree_model.components.mha import FastMultiHeadedAttention
 from toothless.tree_model.components.utils import (
     FeedForward,
     SublayerConnection,
     concat_vec,
-    stack_modules,
+    stack_layers,
 )
 from toothless.tree_model.embeddings import FastRelEmbeddings
 
@@ -20,13 +20,13 @@ class ASTDecoderLayer(nn.Module):
         self.num_heads = num_heads
         self.d_model = d_model
 
-        self.self_attn = MHSelfAttn(d_model, num_heads, dropout=dropout)
-        self.l_cross_attn = MHCrossAttn(d_model, num_heads, dropout=dropout)
-        self.r_cross_attn = MHCrossAttn(d_model, num_heads, dropout=dropout)
+        self.self_attn = FastMultiHeadedAttention(d_model, num_heads, dropout=dropout, cross_attn=False)
+        self.l_cross_attn = FastMultiHeadedAttention(d_model, num_heads, dropout=dropout, cross_attn=True)
+        self.r_cross_attn = FastMultiHeadedAttention(d_model, num_heads, dropout=dropout, cross_attn=True)
         self.feed_forward = FeedForward(d_model, dim_feed_forward, dropout=dropout, activation=activation)
         self.dropout = nn.Dropout(dropout)
 
-        self.sublayers = stack_modules(SublayerConnection(d_model, dropout), 4)
+        self.sublayers = stack_layers(SublayerConnection(d_model, dropout), 4)
 
     # def forward(self, src, start_nodes, end_nodes, rel_q, rel_k, rel_v):
     #     src, attn_weights = self.sublayers[0](
@@ -87,7 +87,7 @@ class ASTDecoder(nn.Module):
         dropout: float = 0.2,
     ):
         super(ASTDecoder, self).__init__()
-        self.layers = stack_modules(decoder_layer, num_layers)
+        self.layers = stack_layers(decoder_layer, num_layers)
         self.norm = nn.LayerNorm(d_model)
 
         self.n_anc_heads = n_anc_heads
@@ -189,7 +189,7 @@ class DecoderLayer(nn.Module):
         self.self_attn = nn.MultiheadAttention(d_model, num_heads, dropout=dropout)
         self.multihead_attn = nn.MultiheadAttention(d_model, num_heads, dropout=dropout)
         self.feed_forward = FeedForward(d_model, dim_feed_forward, dropout=dropout)
-        self.sublayers = stack_modules(SublayerConnection(d_model, dropout), 3)
+        self.sublayers = stack_layers(SublayerConnection(d_model, dropout), 3)
 
         self.activation = activation
 
@@ -222,7 +222,7 @@ class BaseDecoder(nn.Module):
 
     def __init__(self, decoder_layer: nn.Module, num_layers: int, norm: nn.LayerNorm | None = None):
         super(BaseDecoder, self).__init__()
-        self.layers = stack_modules(decoder_layer, num_layers)
+        self.layers = stack_layers(decoder_layer, num_layers)
         self.num_layers = num_layers
         self.norm = norm
 

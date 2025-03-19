@@ -3,26 +3,33 @@ import torch
 from torch import Tensor
 import torch.nn.functional as F
 
-from toothless.tree_model.components.mha import MHSelfAttn
+from toothless.tree_model.components.mha import FastMultiHeadedAttention
 from toothless.tree_model.components.utils import (
     FeedForward,
     SublayerConnection,
     concat_vec,
-    stack_modules,
+    stack_layers,
 )
 from toothless.tree_model.embeddings import FastRelEmbeddings
 
 
 class ASTEncoderLayer(nn.Module):
-    def __init__(self, d_model: int, num_heads: int, dim_feed_forward: int, dropout: float = 0.2, activation=F.gelu):
+    def __init__(
+        self,
+        d_model: int,
+        num_heads: int,
+        dim_feed_forward: int,
+        dropout: float = 0.2,
+        activation=F.gelu,
+    ):
         super(ASTEncoderLayer, self).__init__()
         self.num_heads = num_heads
         self.d_model = d_model
 
-        self.self_attn = MHSelfAttn(d_model, num_heads, dropout=dropout)
+        self.self_attn = FastMultiHeadedAttention(d_model, num_heads, dropout=dropout, cross_attn=False)
         self.feed_forward = FeedForward(d_model, dim_feed_forward, dropout=dropout, activation=activation)
 
-        self.sublayers = stack_modules(SublayerConnection(d_model, dropout), 2)
+        self.sublayers = stack_layers(SublayerConnection(d_model, dropout), 2)
 
     def forward(self, src, pos_enc, pos_enc_padding, rel_q, rel_k, rel_v) -> Tensor:
         src = self.sublayers[0](src, lambda x: self.self_attn(x, x, x, pos_enc, pos_enc_padding, rel_q, rel_k, rel_v))
@@ -43,7 +50,7 @@ class ASTEncoder(nn.Module):
         dropout: float = 0.2,
     ):
         super(ASTEncoder, self).__init__()
-        self.layers = stack_modules(encoder_layer, num_layers)
+        self.layers = stack_layers(encoder_layer, num_layers)
         self.norm = nn.LayerNorm(d_model)
 
         self.n_anc_heads = n_anc_heads

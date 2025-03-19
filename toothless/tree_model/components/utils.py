@@ -37,7 +37,7 @@ def concat_vec(vec1, vec2, dim):
     return torch.cat([vec1, vec2], dim=dim)
 
 
-def stack_modules(module: nn.Module, N: int):
+def stack_layers(module: nn.Module, N: int):
     return nn.ModuleList([copy.deepcopy(module) for i in range(N)])
 
 

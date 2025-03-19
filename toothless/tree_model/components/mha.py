@@ -22,14 +22,158 @@ class FastMultiHeadedAttention(nn.Module):
         self.cross_attn = cross_attn
         self.num_heads = num_heads
 
-        self.dropout = dropout
+        self.dropout = nn.Dropout(dropout)
 
         # self._qkv_same_embed_dim = self.kdim == embed_dim and self.vdim == embed_dim
 
-        self.q_proj = nn.Linear(d_model, d_model, bias=False, *factory_kwargs)
-        self.k_proj = nn.Linear(d_model, d_model, bias=False, *factory_kwargs)
-        self.v_proj = nn.Linear(d_model, d_model, bias=False, *factory_kwargs)
-        self.out_proj = nn.Linear(d_model, d_model, bias=False, *factory_kwargs)
+        self.q_proj = nn.Linear(d_model, d_model, bias=True, *factory_kwargs)
+        self.k_proj = nn.Linear(d_model, d_model, bias=True, *factory_kwargs)
+        self.v_proj = nn.Linear(d_model, d_model, bias=True, *factory_kwargs)
+
+        self.pos_key_proj = nn.Linear(d_model, d_model, bias=True, *factory_kwargs)
+        self.pos_kv_proj = nn.Linear(d_model, d_model, bias=True, *factory_kwargs)
+
+        self.out_proj = nn.Linear(d_model, d_model, bias=True, *factory_kwargs)
+
+    def forward(
+        self,
+        query: Tensor,
+        key: Tensor,
+        value: Tensor,
+        pos_indices: Tensor,
+        pad_indices: Tensor,
+        cross_pos_indices: Tensor | None = None,
+        cross_pad_indices: Tensor | None = None,
+        rel_q: Tensor | None = None,
+        rel_k: Tensor | None = None,
+        rel_v: Tensor | None = None,
+    ) -> Tensor:
+        """relative q shape [1, 2k+1, dim]"""
+        """relative v shape [1, 2k+1, dim]"""
+        """"""
+
+        if self.cross_attn and cross_pad_indices is None or self.cross_attn and cross_pos_indices is None:
+            raise ValueError("Need cross pos indices!")
+
+        query = transpose_for_scores(self.q_proj(query), self.num_heads)
+        key = transpose_for_scores(self.k_proj(key), self.num_heads)
+        value = transpose_for_scores(self.v_proj(value), self.num_heads)
+
+        mask, pos_enc = self.make_mask(pos_indices)
+        output, _ = self.rel_attn(query, key, value, pos_enc, pad_indices, rel_q, rel_k, rel_v, mask)
+
+        return self.finalize_output(output)
+
+    def make_mask(self, pos_enc: Tensor) -> tuple[Tensor, Tensor]:
+        # Get positions where pos_enc is -1 aka inf
+        mask_matrix = pos_enc.eq(-1)
+
+        batch_size = pos_enc.size(0)
+        seq_len = pos_enc.size(-1)
+
+        # Since we will mask out those positions later, it does not
+        # matter what their value is. For possible computationally efficiency reasons
+        # (sparse) we set those to 0 but remember the mask
+        # Shape: [batch_size, num_heads, k+1, seq_len]
+        pos_enc += mask_matrix
+        # Shape: [batch_size, num_heads, 2(k+1) * seq_len]
+        mask_matrix = mask_matrix.view(batch_size, self.num_heads, -1)
+
+        # Additionally mask out everything that is beyond the sequence
+        mask_matrix[:, :, :seq_len] = True
+        return mask_matrix, pos_enc.to_sparse_coo()
+
+    def rel_attn(
+        self,
+        query: Tensor,
+        key: Tensor,
+        value: Tensor,
+        pos_indices: Tensor,
+        pad_indices: Tensor,
+        rel_q: Tensor | None,
+        rel_k: Tensor | None,
+        rel_v: Tensor | None,
+        cross_pos_indices: Tensor | None = None,
+        cross_pad_indices: Tensor | None = None,
+        mask: Tensor | None = None,
+    ):
+        """
+        :param q: [batch_size, num_heads, seq_len, d_k]
+        :param k: [batch_size, num_heads, seq_len, d_k]
+        :param v: [batch_size, num_heads, seq_len, d_k]
+        :param pos_indices: [batch_size, num_heads, k+1, seq_len]
+        :param pos_pad: [batch_size, num_heads, k+1, seq_len]
+        :param rel_q: [1, num_heads, k+1, d_k]
+        :param rel_k: [1, num_heads, k+1, d_k]
+        :param rel_v: [1, num_heads, k+1, d_k]
+        :return:
+        """
+        seq_len = query.size(-2)
+        query = query.view(-1, seq_len, self.d_k)
+        kv_c2p_pos = torch.cat([pos_indices, pad_indices], dim=-2)
+
+        if cross_pos_indices is not None and cross_pad_indices is not None:
+            q_c2p_pos = torch.cat([cross_pos_indices, cross_pad_indices], dim=-2)
+        else:
+            q_c2p_pos = kv_c2p_pos
+
+        # max_rel_pos = pos_enc.size(2)
+        scale_factor = 1
+        if rel_k is not None:
+            scale_factor += 1
+        if rel_q is not None:
+            scale_factor += 1
+
+        # Attention Calculation.
+        # Always sum over dimension of heads d_k
+        # Shape: [batch_size, num_heads, 2(k+1) * seq_len]
+        # context -> context
+        scale = 1 / math.sqrt(query.size(-1) * scale_factor)
+        c2c = torch.bmm(query, key.transpose(-1, -2) * scale)
+        attn_scores = c2c
+
+        # All relative attention mechanisms follow one scheme:
+        # 1) Multiply out all possible n to m combinations of
+        #    context and relative position
+        # 2) Then pick the ones we are actually interested in as indicated
+        #    by the indices
+        # Actually efficient cause there arent that many relative positional
+        # encodings (32 or so) and we can reuse the vectors
+        # (presumably a lot will have the same distance)
+
+        # position -> context
+        if rel_q is not None:
+            scale = 1 / math.sqrt(rel_q.size(-1) * scale_factor)
+            pos_q = rel_q.unsqueeze(-2)
+            p2c_att = torch.bmm(pos_q * scale, key.transpose(-1, -2))
+            p2c_att = torch.gather(p2c_att, dim=-2, index=q_c2p_pos)
+            attn_scores += p2c_att
+
+        # context -> position
+        if rel_k is not None:
+            scale = 1 / math.sqrt(rel_k.size(-1) * scale_factor)
+            pos_k = rel_k.unsqueeze(-2)
+            c2p_att = torch.bmm(query, pos_k.transpose(-1, -2) * scale)
+            c2p_att = torch.gather(c2p_att, dim=-1, index=kv_c2p_pos)
+            attn_scores += c2p_att
+
+        attn_scores = attn_scores - attn_scores.max(dim=-1, keepdim=True).values.detach()
+        attn_scores = attn_scores.view(-1, self.num_heads, attn_scores.size(-2), attn_scores.size(-1))
+
+        if mask is not None:
+            attn_scores = attn_scores.masked_fill(mask == 0, -1e9)
+
+        attn_scores = attn_scores.softmax(dim=-1)
+        attn_probs = self.dropout(attn_scores)
+
+        context = torch.bmm(attn_probs.view(-1, attn_probs.size(-2), self.d_k), value)
+
+        if rel_v is not None:
+            pos_v = rel_v.unsqueeze(-2)
+            positional_context = torch.bmm(attn_probs.view(-1, attn_probs.size(-2), self.d_k), pos_v)
+            context += positional_context
+
+        return context, attn_probs
 
     def finalize_output(self, output: Tensor) -> Tensor:
         output = output.permute(0, 2, 1, 3).contiguous()
@@ -40,24 +184,43 @@ class FastMultiHeadedAttention(nn.Module):
         return output
 
 
-class MHSelfAttn(FastMultiHeadedAttention):
+class OldMultiHeadedAttention(nn.Module):
     def __init__(
         self,
         d_model: int,
         num_heads: int,
         dropout: float = 0.1,
+        cross_attn: bool = False,
         device=None,
         dtype=None,
     ):
-        super(MHSelfAttn, self).__init__(d_model, num_heads, dropout, False, device, dtype)
+        super(OldMultiHeadedAttention, self).__init__()
+        factory_kwargs = {"device": device, "dtype": dtype}
+
+        self.d_k = d_model // num_heads
+        self.cross_attn = cross_attn
+        self.num_heads = num_heads
+
+        self.dropout = nn.Dropout(dropout)
+
+        # self._qkv_same_embed_dim = self.kdim == embed_dim and self.vdim == embed_dim
+
+        self.q_proj = nn.Linear(d_model, d_model, bias=True, *factory_kwargs)
+        self.k_proj = nn.Linear(d_model, d_model, bias=True, *factory_kwargs)
+        self.v_proj = nn.Linear(d_model, d_model, bias=True, *factory_kwargs)
+
+        self.pos_key_proj = nn.Linear(d_model, d_model, bias=True, *factory_kwargs)
+        self.pos_kv_proj = nn.Linear(d_model, d_model, bias=True, *factory_kwargs)
+
+        self.out_proj = nn.Linear(d_model, d_model, bias=True, *factory_kwargs)
 
     def forward(
         self,
         query: Tensor,
         key: Tensor,
         value: Tensor,
-        pos_enc: Tensor,
-        pos_pad: Tensor,
+        pos_indices: Tensor,
+        pad_indices: Tensor,
         rel_q: Tensor | None = None,
         rel_k: Tensor | None = None,
         rel_v: Tensor | None = None,
@@ -70,12 +233,12 @@ class MHSelfAttn(FastMultiHeadedAttention):
         key = transpose_for_scores(self.k_proj(key), self.num_heads)
         value = transpose_for_scores(self.v_proj(value), self.num_heads)
 
-        output = self.rel_attn(query, key, value, pos_enc, pos_pad, rel_q, rel_k, rel_v)
+        output, _ = self.rel_attn_old(query, key, value, pos_indices, pad_indices, rel_q, rel_k, rel_v)
 
         return self.finalize_output(output)
 
     @staticmethod
-    def rel_attn(
+    def rel_attn_old(
         q: Tensor,
         k: Tensor,
         v: Tensor,
@@ -243,76 +406,13 @@ class MHSelfAttn(FastMultiHeadedAttention):
 
         return output
 
+    def finalize_output(self, output: Tensor) -> Tensor:
+        output = output.permute(0, 2, 1, 3).contiguous()
+        new_value_shape = output.size()[:-2] + (-1,)
+        output = output.view(*new_value_shape)
+        output = self.out_proj(output)
 
-class MHCrossAttn(FastMultiHeadedAttention):
-    def __init__(
-        self,
-        d_model: int,
-        num_heads: int,
-        dropout: float = 0.1,
-        device=None,
-        dtype=None,
-    ):
-        super(MHCrossAttn, self).__init__(d_model, num_heads, dropout, True, device, dtype)
-
-    def forward(
-        self,
-        query: Tensor,
-        key: Tensor,
-        value: Tensor,
-        pos_enc: Tensor,
-        pos_pad: Tensor,
-        cross_pos_enc: Tensor,
-        cross_pos_pad: Tensor,
-        rel_q: Tensor | None = None,
-        rel_k: Tensor | None = None,
-        rel_v: Tensor | None = None,
-    ) -> Tensor:
-        """relative q shape [1, 2(k+1), dim]"""
-        """relative v shape [1, 2(k+1), dim]"""
-        """"""
-        query = transpose_for_scores(self.q_proj(query), self.num_heads)
-        key = transpose_for_scores(self.k_proj(key), self.num_heads)
-        value = transpose_for_scores(self.v_proj(value), self.num_heads)
-
-        output = self.rel_cross_attn(
-            query, key, value, pos_enc, pos_pad, cross_pos_enc, cross_pos_pad, rel_q, rel_k, rel_v
-        )
-
-        return self.finalize_output(output)
-
-    @staticmethod
-    def rel_cross_attn(
-        q: Tensor,
-        k: Tensor,
-        v: Tensor,
-        kv_pos_enc: Tensor,
-        kv_pos_pad: Tensor,
-        q_pos_enc: Tensor,
-        q_pos_pad: Tensor,
-        rel_q: Tensor | None,
-        rel_k: Tensor | None,
-        rel_v: Tensor | None,
-    ):
-        """
-        :param q: [batch_size, num_heads, seq_len, d_k]
-        :param k: [batch_size, num_heads, seq_len, d_k]
-        :param v: [batch_size, num_heads, seq_len, d_k]
-        :param kv_pos_enc: [batch_size, num_heads, k+1, seq_len]
-        :param kv_pos_pad: [batch_size, num_heads, k+1, seq_len]
-        :param q_pos_enc: [batch_size, num_heads, k+1, seq_len]
-        :param q_pos_pad: [batch_size, num_heads, k+1, seq_len]
-        :param rel_q: [1, num_heads, 2(k+1), d_k]
-        :param rel_k: [1, num_heads, 2(k+1), d_k]
-        :param rel_v: [1, num_heads, 2(k+1), d_k]
-        :return:
-        """
-        # k and q dio not always have the same size
-        batch_size, num_heads, kv_seq_len, d_k = k.size()
-        _, _, q_seq_len, _ = q.size()
-        # TODO REST
-
-        return Tensor()
+        return output
 
 
 def transpose_for_scores(x: Tensor, num_heads: int):
