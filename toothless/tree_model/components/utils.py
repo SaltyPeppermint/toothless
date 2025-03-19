@@ -1,13 +1,19 @@
 import copy
 
-import torch.nn as nn
 import torch
-from torch import Tensor
+import torch.nn as nn
 import torch.nn.functional as F
+from torch import Tensor
 
 
 class FeedForward(nn.Module):
-    def __init__(self, d_model: int, dim_feed_forward: int, dropout: float = 0.1, activation=F.gelu):
+    def __init__(
+        self,
+        d_model: int,
+        dim_feed_forward: int,
+        dropout: float = 0.1,
+        activation=F.gelu,
+    ):
         super(FeedForward, self).__init__()
         self.linear1 = nn.Linear(d_model, dim_feed_forward)
         self.linear2 = nn.Linear(dim_feed_forward, d_model)
@@ -41,13 +47,31 @@ def stack_layers(module: nn.Module, N: int):
     return nn.ModuleList([copy.deepcopy(module) for i in range(N)])
 
 
-def c2p_dynamic_expand(c2p_pos: Tensor, query_layer: Tensor, relative_pos: Tensor):
-    return c2p_pos.expand([query_layer.size(0), query_layer.size(1), query_layer.size(2), relative_pos.size(-1)])
+def c2p_dynamic_expand(
+    c2p_pos: Tensor, query_layer: Tensor, relative_pos: Tensor
+):
+    return c2p_pos.expand(
+        [
+            query_layer.size(0),
+            query_layer.size(1),
+            query_layer.size(2),
+            relative_pos.size(-1),
+        ]
+    )
 
 
 def p2c_dynamic_expand(c2p_pos: Tensor, query_layer: Tensor, key_layer: Tensor):
-    return c2p_pos.expand([query_layer.size(0), query_layer.size(1), key_layer.size(-2), key_layer.size(-2)])
+    return c2p_pos.expand(
+        [
+            query_layer.size(0),
+            query_layer.size(1),
+            key_layer.size(-2),
+            key_layer.size(-2),
+        ]
+    )
 
 
 def pos_dynamic_expand(pos_index: Tensor, p2c_att: Tensor, key_layer: Tensor):
-    return pos_index.expand(p2c_att.size()[:2] + (pos_index.size(-2), key_layer.size(-2)))
+    return pos_index.expand(
+        p2c_att.size()[:2] + (pos_index.size(-2), key_layer.size(-2))
+    )

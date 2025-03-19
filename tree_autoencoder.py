@@ -15,7 +15,7 @@ import transformers
 
 from toothless.utils.dist_helper import cleanup_process_group, setup_process_group, rank0_print
 from toothless.tree_model.data import CustomDataset
-from toothless.tree_model.model import FastASTTrans, MHAConfig
+from toothless.tree_model.model import FastASTTrans
 from toothless.tree_model.args import DataArguments, TrainingArguments, ModelArguments
 
 
@@ -140,9 +140,7 @@ def fsdp_main(
     init_start_event = torch.cuda.Event(enable_timing=True)
     init_end_event = torch.cuda.Event(enable_timing=True)
 
-    mha_config = MHAConfig(4, 4, 4, 4)
-
-    model = FastASTTrans(0, 0, 0, mha_config, 0, "0", 0, 0, 0.0)  # FIXME
+    model = FastASTTrans(0, 0, 0, 4, 4, 0, "0", 0, 0, 0.0)  # FIXME
     model.to(rank)
     rank0_print(rank, "Model loaded")
 

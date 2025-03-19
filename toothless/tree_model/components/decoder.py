@@ -1,8 +1,7 @@
-from torch import device
-import torch.nn as nn
 import torch
-from torch import Tensor
+import torch.nn as nn
 import torch.nn.functional as F
+from torch import Tensor, device
 
 from toothless.tree_model.components.mha import FastMultiHeadedAttention
 from toothless.tree_model.components.utils import (
@@ -15,15 +14,30 @@ from toothless.tree_model.embeddings import FastRelEmbeddings
 
 
 class ASTDecoderLayer(nn.Module):
-    def __init__(self, d_model: int, num_heads: int, dim_feed_forward: int, dropout: float = 0.2, activation=F.gelu):
+    def __init__(
+        self,
+        d_model: int,
+        num_heads: int,
+        dim_feed_forward: int,
+        dropout: float = 0.2,
+        activation=F.gelu,
+    ):
         super(ASTDecoderLayer, self).__init__()
         self.num_heads = num_heads
         self.d_model = d_model
 
-        self.self_attn = FastMultiHeadedAttention(d_model, num_heads, dropout=dropout, cross_attn=False)
-        self.l_cross_attn = FastMultiHeadedAttention(d_model, num_heads, dropout=dropout, cross_attn=True)
-        self.r_cross_attn = FastMultiHeadedAttention(d_model, num_heads, dropout=dropout, cross_attn=True)
-        self.feed_forward = FeedForward(d_model, dim_feed_forward, dropout=dropout, activation=activation)
+        self.self_attn = FastMultiHeadedAttention(
+            d_model, num_heads, dropout=dropout, cross_attn=False
+        )
+        self.l_cross_attn = FastMultiHeadedAttention(
+            d_model, num_heads, dropout=dropout, cross_attn=True
+        )
+        self.r_cross_attn = FastMultiHeadedAttention(
+            d_model, num_heads, dropout=dropout, cross_attn=True
+        )
+        self.feed_forward = FeedForward(
+            d_model, dim_feed_forward, dropout=dropout, activation=activation
+        )
         self.dropout = nn.Dropout(dropout)
 
         self.sublayers = stack_layers(SublayerConnection(d_model, dropout), 4)
@@ -53,20 +67,46 @@ class ASTDecoderLayer(nn.Module):
     ) -> Tensor:
         tgt = self.sublayers[0](
             tgt,
-            lambda x: self.self_attn(x, x, x, tgt_pos_enc, tgt_pos_pad, rel_q, rel_k, rel_v, attn_mask=tgt_mask),
+            lambda x: self.self_attn(
+                x,
+                x,
+                x,
+                tgt_pos_enc,
+                tgt_pos_pad,
+                rel_q,
+                rel_k,
+                rel_v,
+                attn_mask=tgt_mask,
+            ),
         )
 
         tgt = self.sublayers[1](
             tgt,
             lambda x: self.l_cross_attn(
-                x, l_mem, l_mem, l_mem_pos, l_mem_pos_pad, rel_q, rel_k, rel_v, attn_mask=tgt_mask
+                x,
+                l_mem,
+                l_mem,
+                l_mem_pos,
+                l_mem_pos_pad,
+                rel_q,
+                rel_k,
+                rel_v,
+                attn_mask=tgt_mask,
             ),
         )
 
         tgt = self.sublayers[2](
             tgt,
             lambda x: self.r_cross_attn(
-                x, r_mem, r_mem, r_mem_pos, r_mem_pos_pad, rel_q, rel_k, rel_v, attn_mask=tgt_mask
+                x,
+                r_mem,
+                r_mem,
+                r_mem_pos,
+                r_mem_pos_pad,
+                rel_q,
+                rel_k,
+                rel_v,
+                attn_mask=tgt_mask,
             ),
         )
 
@@ -95,9 +135,13 @@ class ASTDecoder(nn.Module):
         d_k = d_model // (n_anc_heads + n_sib_heads)
 
         if n_anc_heads > 0:
-            self.anc_rel_emb = FastRelEmbeddings(d_k, n_anc_heads, max_rel_pos, pos_type, dropout=dropout)
+            self.anc_rel_emb = FastRelEmbeddings(
+                d_k, n_anc_heads, max_rel_pos, pos_type, dropout=dropout
+            )
         if n_sib_heads > 0:
-            self.sib_rel_emb = FastRelEmbeddings(d_k, n_sib_heads, max_rel_pos, pos_type, dropout=dropout)
+            self.sib_rel_emb = FastRelEmbeddings(
+                d_k, n_sib_heads, max_rel_pos, pos_type, dropout=dropout
+            )
 
         self.tgt_pos_pad = None
         self.l_mem_pos_pad = None
@@ -142,18 +186,36 @@ class ASTDecoder(nn.Module):
 
         return self.norm(output)
 
-    def ensure_positional_padding(self, batch_size: int, max_rel_pos: int, max_ast_len: int, device: device):
+    def ensure_positional_padding(
+        self,
+        batch_size: int,
+        max_rel_pos: int,
+        max_ast_len: int,
+        device: device,
+    ):
         if self.tgt_pos_pad is None or batch_size != self.tgt_pos_pad.size(0):
-            pos_enc_padding = torch.arange(max_ast_len, device=device).unsqueeze(0).unsqueeze(0).unsqueeze(0)
-            self.tgt_pos_pad = pos_enc_padding.repeat(batch_size, self.n_anc_heads + self.n_sib_heads, max_rel_pos, 1)
+            pos_enc_padding = (
+                torch.arange(max_ast_len, device=device).unsqueeze(0).unsqueeze(0).unsqueeze(0)
+            )
+            self.tgt_pos_pad = pos_enc_padding.repeat(
+                batch_size, self.n_anc_heads + self.n_sib_heads, max_rel_pos, 1
+            )
 
         if self.l_mem_pos_pad is None or batch_size != self.l_mem_pos_pad.size(0):
-            pos_enc_padding = torch.arange(max_ast_len, device=device).unsqueeze(0).unsqueeze(0).unsqueeze(0)
-            self.l_mem_pos_pad = pos_enc_padding.repeat(batch_size, self.n_anc_heads + self.n_sib_heads, max_rel_pos, 1)
+            pos_enc_padding = (
+                torch.arange(max_ast_len, device=device).unsqueeze(0).unsqueeze(0).unsqueeze(0)
+            )
+            self.l_mem_pos_pad = pos_enc_padding.repeat(
+                batch_size, self.n_anc_heads + self.n_sib_heads, max_rel_pos, 1
+            )
 
         if self.r_mem_pos_pad is None or batch_size != self.r_mem_pos_pad.size(0):
-            pos_enc_padding = torch.arange(max_ast_len, device=device).unsqueeze(0).unsqueeze(0).unsqueeze(0)
-            self.r_mem_pos_pad = pos_enc_padding.repeat(batch_size, self.n_anc_heads + self.n_sib_heads, max_rel_pos, 1)
+            pos_enc_padding = (
+                torch.arange(max_ast_len, device=device).unsqueeze(0).unsqueeze(0).unsqueeze(0)
+            )
+            self.r_mem_pos_pad = pos_enc_padding.repeat(
+                batch_size, self.n_anc_heads + self.n_sib_heads, max_rel_pos, 1
+            )
 
     def rel_pos_emb(self):
         rel_anc_q, rel_anc_k, rel_anc_v = None, None, None
@@ -183,7 +245,12 @@ class ASTDecoder(nn.Module):
 
 class DecoderLayer(nn.Module):
     def __init__(
-        self, d_model: int, num_heads: int, dim_feed_forward: int = 2048, dropout: float = 0.2, activation=F.gelu
+        self,
+        d_model: int,
+        num_heads: int,
+        dim_feed_forward: int = 2048,
+        dropout: float = 0.2,
+        activation=F.gelu,
     ):
         super(DecoderLayer, self).__init__()
         self.self_attn = nn.MultiheadAttention(d_model, num_heads, dropout=dropout)
@@ -203,13 +270,24 @@ class DecoderLayer(nn.Module):
         memory_key_padding_mask: Tensor | None = None,
     ) -> Tensor:
         tgt = self.sublayers[0](
-            tgt, lambda x: self.self_attn(x, x, x, attn_mask=tgt_mask, key_padding_mask=tgt_key_padding_mask)
+            tgt,
+            lambda x: self.self_attn(
+                x,
+                x,
+                x,
+                attn_mask=tgt_mask,
+                key_padding_mask=tgt_key_padding_mask,
+            ),
         )
 
         tgt = self.sublayers[1](
             tgt,
             lambda x: self.multihead_attn(
-                x, memory, memory, attn_mask=memory_mask, key_padding_mask=memory_key_padding_mask
+                x,
+                memory,
+                memory,
+                attn_mask=memory_mask,
+                key_padding_mask=memory_key_padding_mask,
             ),
         )
 
@@ -220,13 +298,26 @@ class DecoderLayer(nn.Module):
 class BaseDecoder(nn.Module):
     __constants__ = ["norm"]
 
-    def __init__(self, decoder_layer: nn.Module, num_layers: int, norm: nn.LayerNorm | None = None):
+    def __init__(
+        self,
+        decoder_layer: nn.Module,
+        num_layers: int,
+        norm: nn.LayerNorm | None = None,
+    ):
         super(BaseDecoder, self).__init__()
         self.layers = stack_layers(decoder_layer, num_layers)
         self.num_layers = num_layers
         self.norm = norm
 
-    def forward(self, tgt, memory, tgt_mask, memory_mask=None, tgt_key_padding_mask=None, memory_key_padding_mask=None):
+    def forward(
+        self,
+        tgt,
+        memory,
+        tgt_mask,
+        memory_mask=None,
+        tgt_key_padding_mask=None,
+        memory_key_padding_mask=None,
+    ):
         output = tgt
 
         for mod in self.layers:

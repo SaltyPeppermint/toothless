@@ -1,19 +1,15 @@
+import json
 from functools import lru_cache
 from pathlib import Path
-import json
 from typing import Iterator
 
+import polars as pl
 import torch
-from torch import Tensor
-from torch.utils import data
-
+from eggshell import rise  # type: ignore
 from tokenizers import Tokenizer
 from tokenizers.models import BPE
-
-
-import polars as pl
-
-from eggshell import rise  # type: ignore
+from torch import Tensor
+from torch.utils import data
 
 # from eggshell import TreeData
 from toothless.utils import loading
@@ -77,13 +73,17 @@ class CustomDataset(data.Dataset):
                 length = j["len"]
             return j["len"], j["n_chunks"]
 
-        raw_expl_chains = pl.read_parquet(self.raw_path).get_column("explanation_chain")
+        raw_expl_chains = pl.read_parquet(self.raw_path).get_column(
+            "explanation_chain"
+        )
 
         print("Starting parallel processing")
         expl_chains = [rise.PyRecExpr.batch_new(i) for i in raw_expl_chains]
         print("Parallel processing done")
 
-        picked_tripples = [self._pick_indices(len(chain)) for chain in expl_chains]
+        picked_tripples = [
+            self._pick_indices(len(chain)) for chain in expl_chains
+        ]
         length = sum([len(chain_pairs) for chain_pairs in picked_tripples])
         print(f"Total pairs: {length}")
 
@@ -92,7 +92,12 @@ class CustomDataset(data.Dataset):
         n_chunks = 0
         for chain, tripple in zip(expl_chains, picked_tripples):
             pairs = [
-                self._vectorize(chain[left], chain[middle], chain[right], middle / (right - left))
+                self._vectorize(
+                    chain[left],
+                    chain[middle],
+                    chain[right],
+                    middle / (right - left),
+                )
                 for left, middle, right in tripple
             ]
 
@@ -101,7 +106,11 @@ class CustomDataset(data.Dataset):
             spill_buffer.extend(pairs[remaining_space:])
 
             if remaining_space == 0:
-                print(f"Saving {len(save_buffer)} pairs in {self.processed_paths(n_chunks)}")
+                print(
+                    f"Saving {len(save_buffer)} pairs in {
+                        self.processed_paths(n_chunks)
+                    }"
+                )
                 torch.save(save_buffer, self.processed_paths(n_chunks))
 
                 save_buffer = spill_buffer
@@ -110,10 +119,18 @@ class CustomDataset(data.Dataset):
 
         # Save last few in the buffer if exist
         if len(save_buffer) != 0:
-            print(f"Saving the last {len(save_buffer)} pairs in {self.processed_paths(n_chunks)}")
+            print(
+                f"Saving the last {len(save_buffer)} pairs in {
+                    self.processed_paths(n_chunks)
+                }"
+            )
             torch.save(save_buffer, self.processed_paths(n_chunks))
 
-        with open(Path(self.processed_dir) / Path("meta.json"), mode="w", encoding="utf-8") as f:
+        with open(
+            Path(self.processed_dir) / Path("meta.json"),
+            mode="w",
+            encoding="utf-8",
+        ) as f:
             json.dump({"len": length, "n_chunks": n_chunks}, f)
 
         print("Data processed!")
@@ -165,7 +182,13 @@ class CustomDataset(data.Dataset):
 
         return r
 
-    def _vectorize(self, left: rise.PyRecExpr, middle: rise.PyRecExpr, right: rise.PyRecExpr, distance: float) -> dict:
+    def _vectorize(
+        self,
+        left: rise.PyRecExpr,
+        middle: rise.PyRecExpr,
+        right: rise.PyRecExpr,
+        distance: float,
+    ) -> dict:
         l_tok, l_anc, l_sib = self._pyrec_to_tensor(left)
         x_tok, x_anc, x_sib = self._pyrec_to_tensor(middle)
         r_tok, r_anc, r_sib = self._pyrec_to_tensor(right)
@@ -183,7 +206,9 @@ class CustomDataset(data.Dataset):
             "distance": torch.tensor([distance]),
         }
 
-    def _pyrec_to_tensor(self, expr: rise.PyRecExpr) -> tuple[Tensor, Tensor, Tensor]:
+    def _pyrec_to_tensor(
+        self, expr: rise.PyRecExpr
+    ) -> tuple[Tensor, Tensor, Tensor]:
         graph_data = expr.to_data()
         # n_edges = graph_data.size()
 
@@ -195,7 +220,11 @@ class CustomDataset(data.Dataset):
         #     for node in graph_data.nodes
         # ]
         tokenized_values = torch.tensor(
-            [self.tokenizer.token_to_id(node.name) for node in graph_data.nodes], dtype=torch.int32
+            [
+                self.tokenizer.token_to_id(node.name)
+                for node in graph_data.nodes
+            ],
+            dtype=torch.int32,
         )
         #     for node in graph_data.nodes]
 
@@ -205,8 +234,12 @@ class CustomDataset(data.Dataset):
         #     dtype=torch.bool,
         #     size=torch.Size((150, 150)),
         # )
-        anc_matrix = torch.tensor(graph_data.anc_matrix(self.max_distance), dtype=torch.int32)
-        sib_matrix = torch.tensor(graph_data.sib_matrix(self.max_distance), dtype=torch.int32)
+        anc_matrix = torch.tensor(
+            graph_data.anc_matrix(self.max_distance), dtype=torch.int32
+        )
+        sib_matrix = torch.tensor(
+            graph_data.sib_matrix(self.max_distance), dtype=torch.int32
+        )
 
         return tokenized_values, anc_matrix, sib_matrix
 
@@ -218,7 +251,12 @@ class CustomDataset(data.Dataset):
 
         return (
             not self.force_reload
-            and all([self.processed_paths(i).is_file() for i in range(0, meta_info["n_chunks"])])
+            and all(
+                [
+                    self.processed_paths(i).is_file()
+                    for i in range(0, meta_info["n_chunks"])
+                ]
+            )
             and self.tokenizer_path.is_file()
         )
 
@@ -247,3 +285,16 @@ class CustomDataset(data.Dataset):
 @lru_cache(maxsize=100)
 def _load_shard(chunk_path: Path):
     return torch.load(chunk_path, weights_only=False)
+
+
+# def subsequent_mask(size: int):
+#     attn_shape = (1, size, size)
+#     sub_sequent_mask = torch.triu(np.ones(attn_shape), k=1).astype("uint8")
+#     return torch.from_numpy(sub_sequent_mask) != 0
+
+
+# def make_std_mask(nl: Tensor, pad: int):
+#     "Create a mask to hide padding and future words."
+#     nl_mask = (nl == pad).unsqueeze(-2)
+#     nl_mask = nl_mask | subsequent_mask(nl.size(-1)).type_as(nl_mask.data)
+#     return nl_mask

@@ -1,8 +1,7 @@
 import math
 
 import torch
-from torch import nn
-from torch import Tensor
+from torch import Tensor, nn
 
 
 class PositionalEncoding(nn.Module):
@@ -11,7 +10,9 @@ class PositionalEncoding(nn.Module):
         # Compute the positional encodings once in log space.
         pe = torch.zeros(max_len, emb_size, requires_grad=False)
         position = torch.arange(0, max_len).unsqueeze(1)
-        div_term = torch.exp(torch.arange(0, emb_size, 2) * -(math.log(10000.0) / emb_size))
+        div_term = torch.exp(
+            torch.arange(0, emb_size, 2) * -(math.log(10000.0) / emb_size)
+        )
         pe[:, 0::2] = torch.sin(position * div_term)
         pe[:, 1::2] = torch.cos(position * div_term)
         pe = pe.unsqueeze(0)
@@ -24,9 +25,17 @@ class PositionalEncoding(nn.Module):
 
 
 class Embeddings(nn.Module):
-    def __init__(self, embedding_dim: int, vocab_size: int, dropout: float = 0.1, with_pos: bool = False):
+    def __init__(
+        self,
+        embedding_dim: int,
+        vocab_size: int,
+        dropout: float = 0.1,
+        with_pos: bool = False,
+    ):
         super(Embeddings, self).__init__()
-        self.word_embeddings = nn.Embedding(vocab_size, embedding_dim, padding_idx=0)
+        self.word_embeddings = nn.Embedding(
+            vocab_size, embedding_dim, padding_idx=0
+        )
         if with_pos:
             self.pos_emb = PositionalEncoding(embedding_dim)
         else:
@@ -45,7 +54,14 @@ class Embeddings(nn.Module):
 
 
 class RelEmbeddings(nn.Module):
-    def __init__(self, d_model: int, num_heads: int, k: int, pos_type: list[str], dropout: float = 0.0):
+    def __init__(
+        self,
+        d_model: int,
+        num_heads: int,
+        k: int,
+        pos_type: list[str],
+        dropout: float = 0.0,
+    ):
         super(RelEmbeddings, self).__init__()
 
         self.d_model = d_model
@@ -53,11 +69,17 @@ class RelEmbeddings(nn.Module):
         self.pos_type = pos_type
         self.num_heads = num_heads
         if "p2q" in pos_type:
-            self.rel_emb_q = nn.Embedding(self.k, d_model, padding_idx=self.k // 2)  # pad id=k+1 -> zero
+            self.rel_emb_q = nn.Embedding(
+                self.k, d_model, padding_idx=self.k // 2
+            )  # pad id=k+1 -> zero
         if "p2k" in pos_type:
-            self.rel_emb_k = nn.Embedding(self.k, d_model, padding_idx=self.k // 2)
+            self.rel_emb_k = nn.Embedding(
+                self.k, d_model, padding_idx=self.k // 2
+            )
         if "p2v" in pos_type:
-            self.rel_emb_v = nn.Embedding(self.k, d_model, padding_idx=self.k // 2)
+            self.rel_emb_v = nn.Embedding(
+                self.k, d_model, padding_idx=self.k // 2
+            )
         self.dropout = nn.Dropout(dropout)
 
     def get_rel_weights(self, rel_params: Tensor) -> Tensor:
@@ -80,8 +102,17 @@ class RelEmbeddings(nn.Module):
 
 
 class FastRelEmbeddings(RelEmbeddings):
-    def __init__(self, d_model: int, num_heads: int, k, pos_type: list[str], dropout: float = 0.0):
-        super(FastRelEmbeddings, self).__init__(d_model, num_heads, k, pos_type, dropout)
+    def __init__(
+        self,
+        d_model: int,
+        num_heads: int,
+        k,
+        pos_type: list[str],
+        dropout: float = 0.0,
+    ):
+        super(FastRelEmbeddings, self).__init__(
+            d_model, num_heads, k, pos_type, dropout
+        )
 
     def forward(self) -> tuple[Tensor | None, Tensor | None, Tensor | None]:
         rel_q, rel_k, rel_v = None, None, None
@@ -96,7 +127,11 @@ class FastRelEmbeddings(RelEmbeddings):
 
 
 def build_relative_position(
-    query_size: int, key_size: int, max_relative_positions: int, device: int, need_traverse=False
+    query_size: int,
+    key_size: int,
+    max_relative_positions: int,
+    device: int,
+    need_traverse=False,
 ) -> Tensor:
     """
     :return: obj:`torch.LongTensor`: A tensor with shape [1, query_size, key_size]
