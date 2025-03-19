@@ -26,19 +26,11 @@ class FastMultiHeadedAttention(nn.Module):
 
         # self._qkv_same_embed_dim = self.kdim == embed_dim and self.vdim == embed_dim
 
-        self.q_proj = nn.Linear(
-            d_model, d_model, bias=True, **self.factory_kwargs
-        )
-        self.k_proj = nn.Linear(
-            d_model, d_model, bias=True, **self.factory_kwargs
-        )
-        self.v_proj = nn.Linear(
-            d_model, d_model, bias=True, **self.factory_kwargs
-        )
+        self.q_proj = nn.Linear(d_model, d_model, bias=True, **self.factory_kwargs)
+        self.k_proj = nn.Linear(d_model, d_model, bias=True, **self.factory_kwargs)
+        self.v_proj = nn.Linear(d_model, d_model, bias=True, **self.factory_kwargs)
 
-        self.out_proj = nn.Linear(
-            d_model, d_model, bias=True, **self.factory_kwargs
-        )
+        self.out_proj = nn.Linear(d_model, d_model, bias=True, **self.factory_kwargs)
 
     def forward(
         self,
@@ -63,9 +55,7 @@ class FastMultiHeadedAttention(nn.Module):
             if cross_pad_indices is None or cross_pos_indices is None:
                 raise ValueError("Need cross pos indices!")
             else:
-                q_c2p_pos = torch.cat(
-                    [cross_pos_indices, cross_pad_indices], dim=-2
-                )
+                q_c2p_pos = torch.cat([cross_pos_indices, cross_pad_indices], dim=-2)
         else:
             q_c2p_pos = kv_c2p_pos
 
@@ -166,9 +156,7 @@ class FastMultiHeadedAttention(nn.Module):
             c2p_att = torch.gather(c2p_att, dim=-1, index=kv_c2p_pos)
             attn_scores += c2p_att
 
-        attn_scores = (
-            attn_scores - attn_scores.max(dim=-1, keepdim=True).values.detach()
-        )
+        attn_scores = attn_scores - attn_scores.max(dim=-1, keepdim=True).values.detach()
         attn_scores = attn_scores.view(
             -1, self.num_heads, attn_scores.size(-2), attn_scores.size(-1)
         )
@@ -179,18 +167,14 @@ class FastMultiHeadedAttention(nn.Module):
         attn_scores = attn_scores.softmax(dim=-1)
         attn_probs = self.dropout(attn_scores)
 
-        context = torch.bmm(
-            attn_probs.view(-1, attn_probs.size(-2), self.d_k), value
-        )
+        context = torch.bmm(attn_probs.view(-1, attn_probs.size(-2), self.d_k), value)
 
         if rel_v is not None:
             pos_v = rel_v.unsqueeze(-2)
             positional_context = torch.bmm(
                 attn_probs.view(-1, attn_probs.size(-2), self.d_k), pos_v
             )
-            positional_context = torch.gather(
-                positional_context, dim=-1, index=kv_c2p_pos
-            )
+            positional_context = torch.gather(positional_context, dim=-1, index=kv_c2p_pos)
             context += positional_context
 
         return context, attn_probs
@@ -237,12 +221,8 @@ class OldMultiHeadedAttention(nn.Module):
         self.k_proj = nn.Linear(d_model, d_model, bias=True, *factory_kwargs)
         self.v_proj = nn.Linear(d_model, d_model, bias=True, *factory_kwargs)
 
-        self.pos_key_proj = nn.Linear(
-            d_model, d_model, bias=True, *factory_kwargs
-        )
-        self.pos_kv_proj = nn.Linear(
-            d_model, d_model, bias=True, *factory_kwargs
-        )
+        self.pos_key_proj = nn.Linear(d_model, d_model, bias=True, *factory_kwargs)
+        self.pos_kv_proj = nn.Linear(d_model, d_model, bias=True, *factory_kwargs)
 
         self.out_proj = nn.Linear(d_model, d_model, bias=True, *factory_kwargs)
 
@@ -418,9 +398,7 @@ class OldMultiHeadedAttention(nn.Module):
 
         # Softmax and add broadcast shape at 1
         # Shape: [batch_size, num_heads, 2(k+1), seq_len, 1]
-        scores = scores.softmax(dim=-1).view(
-            batch_size, num_heads, -1, seq_len, 1
-        )
+        scores = scores.softmax(dim=-1).view(batch_size, num_heads, -1, seq_len, 1)
 
         # Add v_context to v before multiplication with attention
         if rel_v is not None:
@@ -430,9 +408,7 @@ class OldMultiHeadedAttention(nn.Module):
         attn_v = torch.mul(scores, v_context)
 
         # Shape: [batch_size, num_heads, 2(k+1) * seq_len, 1]
-        query_indexes = query_indexes.view(
-            batch_size, num_heads, -1, seq_len
-        ).unsqueeze(-1)
+        query_indexes = query_indexes.view(batch_size, num_heads, -1, seq_len).unsqueeze(-1)
         # Shape: [batch_size, num_heads, 2(k+1) * seq_len, d_k]
         query_indexes = query_indexes.repeat_interleave(repeats=d_k, dim=-1)
 

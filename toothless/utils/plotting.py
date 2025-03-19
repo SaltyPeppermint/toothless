@@ -1,15 +1,11 @@
 from pathlib import Path
-import plotly.express as px
+
 import numpy as np
+import plotly.express as px
 import polars as pl
 
 
-def plot_metrics(
-    prefix,
-    basic_metrics,
-    mae_by_label,
-    rmse_by_label,
-):
+def plot_metrics(prefix, basic_metrics, mae_by_label, rmse_by_label):
     basic_metrics = pl.from_dict(basic_metrics)
     mae_by_label = pl.from_dict(mae_by_label)
     rmse_by_label = pl.from_dict(rmse_by_label)
@@ -66,11 +62,7 @@ def plot_random_forest(model_name, feature_names, model):
     importances = model.feature_importances_
     std_devs = np.std([tree.feature_importances_ for tree in model.estimators_], axis=0)
     importance_df = pl.from_dict(
-        {
-            "Feature": feature_names,
-            "Importance": importances,
-            "StdDev": std_devs,
-        }
+        {"Feature": feature_names, "Importance": importances, "StdDev": std_devs}
     ).sort(by="Importance", descending=True)
 
     fig = px.bar(
@@ -88,17 +80,11 @@ def plot_decision_tree(model_name, feature_names, model):
     path_prefix.mkdir(parents=True, exist_ok=True)
 
     importances = model.feature_importances_
-    importance_df = pl.from_dict(
-        {
-            "Feature": feature_names,
-            "Importance": importances,
-        }
-    ).sort(by="Importance", descending=True)
+    importance_df = pl.from_dict({"Feature": feature_names, "Importance": importances}).sort(
+        by="Importance", descending=True
+    )
 
     fig = px.bar(
-        importance_df,
-        x="Feature",
-        y="Importance",
-        title="Feature Importances in Decision Tree",
+        importance_df, x="Feature", y="Importance", title="Feature Importances in Decision Tree"
     )
     fig.write_image(f"{path_prefix}/decision_tree_feature_importance.png", scale=3)

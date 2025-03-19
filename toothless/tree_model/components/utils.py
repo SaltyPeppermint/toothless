@@ -47,9 +47,7 @@ def stack_layers(module: nn.Module, N: int):
     return nn.ModuleList([copy.deepcopy(module) for i in range(N)])
 
 
-def c2p_dynamic_expand(
-    c2p_pos: Tensor, query_layer: Tensor, relative_pos: Tensor
-):
+def c2p_dynamic_expand(c2p_pos: Tensor, query_layer: Tensor, relative_pos: Tensor):
     return c2p_pos.expand(
         [
             query_layer.size(0),
@@ -72,6 +70,4 @@ def p2c_dynamic_expand(c2p_pos: Tensor, query_layer: Tensor, key_layer: Tensor):
 
 
 def pos_dynamic_expand(pos_index: Tensor, p2c_att: Tensor, key_layer: Tensor):
-    return pos_index.expand(
-        p2c_att.size()[:2] + (pos_index.size(-2), key_layer.size(-2))
-    )
+    return pos_index.expand(p2c_att.size()[:2] + (pos_index.size(-2), key_layer.size(-2)))

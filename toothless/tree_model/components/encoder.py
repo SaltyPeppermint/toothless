@@ -35,14 +35,10 @@ class ASTEncoderLayer(nn.Module):
 
         self.sublayers = stack_layers(SublayerConnection(d_model, dropout), 2)
 
-    def forward(
-        self, src, pos_enc, pos_enc_padding, rel_q, rel_k, rel_v
-    ) -> Tensor:
+    def forward(self, src, pos_enc, pos_enc_padding, rel_q, rel_k, rel_v) -> Tensor:
         src = self.sublayers[0](
             src,
-            lambda x: self.self_attn(
-                x, x, x, pos_enc, pos_enc_padding, rel_q, rel_k, rel_v
-            ),
+            lambda x: self.self_attn(x, x, x, pos_enc, pos_enc_padding, rel_q, rel_k, rel_v),
         )
         src = self.sublayers[1](src, self.feed_forward)
         return src
@@ -87,10 +83,7 @@ class ASTEncoder(nn.Module):
         pos_enc = self.concat_pos(src_data.anc_edges, src_data.sib_edges)
 
         need_pos_enc_padding = True
-        if (
-            self.pos_enc_padding is not None
-            and batch_size == self.pos_enc_padding.size(0)
-        ):
+        if self.pos_enc_padding is not None and batch_size == self.pos_enc_padding.size(0):
             need_pos_enc_padding = False
 
         # Formerly "End Nodes"
@@ -107,9 +100,7 @@ class ASTEncoder(nn.Module):
 
         output = src_data.emb
         for layer in self.layers:
-            output = layer(
-                output, pos_enc, self.pos_enc_padding, rel_q, rel_k, rel_v
-            )
+            output = layer(output, pos_enc, self.pos_enc_padding, rel_q, rel_k, rel_v)
 
         return self.norm(output)
 
@@ -128,20 +119,12 @@ class ASTEncoder(nn.Module):
 
     def concat_pos(self, rel_anc_pos, rel_sib_pos) -> Tensor:
         if self.anc_heads == 0:
-            return rel_sib_pos.unsqueeze(1).repeat_interleave(
-                repeats=self.sib_heads, dim=1
-            )
+            return rel_sib_pos.unsqueeze(1).repeat_interleave(repeats=self.sib_heads, dim=1)
         if self.sib_heads == 0:
-            return rel_anc_pos.unsqueeze(1).repeat_interleave(
-                repeats=self.anc_heads, dim=1
-            )
+            return rel_anc_pos.unsqueeze(1).repeat_interleave(repeats=self.anc_heads, dim=1)
 
-        rel_anc_pos = rel_anc_pos.unsqueeze(1).repeat_interleave(
-            repeats=self.anc_heads, dim=1
-        )
-        rel_sib_pos = rel_sib_pos.unsqueeze(1).repeat_interleave(
-            repeats=self.sib_heads, dim=1
-        )
+        rel_anc_pos = rel_anc_pos.unsqueeze(1).repeat_interleave(repeats=self.anc_heads, dim=1)
+        rel_sib_pos = rel_sib_pos.unsqueeze(1).repeat_interleave(repeats=self.sib_heads, dim=1)
         rel_pos = torch.cat([rel_anc_pos, rel_sib_pos], dim=1)
 
         return rel_pos

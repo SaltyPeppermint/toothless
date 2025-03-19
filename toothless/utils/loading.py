@@ -2,9 +2,7 @@ import json
 from pathlib import Path
 
 import polars as pl
-
 from eggshell import rise  # type: ignore
-
 
 DATASETS = {
     "start": "data/start_goal_with_expl/start_and_goal-2025-01-29-b33b4ba4-ee88-48b5-981b-c2b809d6504f/0",
@@ -49,13 +47,20 @@ def _load_fragment(data_file: Path) -> pl.DataFrame:
 
     expl_chain = pl.Series(
         name="explanation_chain",
-        values=[[y["rec_expr"] for y in x["explanation"]["explanation_chain"]] for x in json_content["sample_data"]],
+        values=[
+            [y["rec_expr"] for y in x["explanation"]["explanation_chain"]]
+            for x in json_content["sample_data"]
+        ],
     )
-    generation = pl.Series(name="generation", values=[i["generation"] for i in json_content["sample_data"]])
+    generation = pl.Series(
+        name="generation", values=[i["generation"] for i in json_content["sample_data"]]
+    )
     goal_expr = pl.Series(name="goal_expr", values=[str(i) for i in exprs])
     df = df.with_columns([generation, expl_chain, goal_expr])
     df = df.with_columns(
-        pl.col("explanation_chain").map_elements(lambda x: x[len(x) // 2], return_dtype=pl.String).alias("middle_expr")
+        pl.col("explanation_chain")
+        .map_elements(lambda x: x[len(x) // 2], return_dtype=pl.String)
+        .alias("middle_expr")
     )
     df = df.with_columns(pl.lit(str(start_term)).alias("start_expr"))
 

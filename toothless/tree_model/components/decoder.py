@@ -68,45 +68,21 @@ class ASTDecoderLayer(nn.Module):
         tgt = self.sublayers[0](
             tgt,
             lambda x: self.self_attn(
-                x,
-                x,
-                x,
-                tgt_pos_enc,
-                tgt_pos_pad,
-                rel_q,
-                rel_k,
-                rel_v,
-                attn_mask=tgt_mask,
+                x, x, x, tgt_pos_enc, tgt_pos_pad, rel_q, rel_k, rel_v, attn_mask=tgt_mask
             ),
         )
 
         tgt = self.sublayers[1](
             tgt,
             lambda x: self.l_cross_attn(
-                x,
-                l_mem,
-                l_mem,
-                l_mem_pos,
-                l_mem_pos_pad,
-                rel_q,
-                rel_k,
-                rel_v,
-                attn_mask=tgt_mask,
+                x, l_mem, l_mem, l_mem_pos, l_mem_pos_pad, rel_q, rel_k, rel_v, attn_mask=tgt_mask
             ),
         )
 
         tgt = self.sublayers[2](
             tgt,
             lambda x: self.r_cross_attn(
-                x,
-                r_mem,
-                r_mem,
-                r_mem_pos,
-                r_mem_pos_pad,
-                rel_q,
-                rel_k,
-                rel_v,
-                attn_mask=tgt_mask,
+                x, r_mem, r_mem, r_mem_pos, r_mem_pos_pad, rel_q, rel_k, rel_v, attn_mask=tgt_mask
             ),
         )
 
@@ -272,22 +248,14 @@ class DecoderLayer(nn.Module):
         tgt = self.sublayers[0](
             tgt,
             lambda x: self.self_attn(
-                x,
-                x,
-                x,
-                attn_mask=tgt_mask,
-                key_padding_mask=tgt_key_padding_mask,
+                x, x, x, attn_mask=tgt_mask, key_padding_mask=tgt_key_padding_mask
             ),
         )
 
         tgt = self.sublayers[1](
             tgt,
             lambda x: self.multihead_attn(
-                x,
-                memory,
-                memory,
-                attn_mask=memory_mask,
-                key_padding_mask=memory_key_padding_mask,
+                x, memory, memory, attn_mask=memory_mask, key_padding_mask=memory_key_padding_mask
             ),
         )
 

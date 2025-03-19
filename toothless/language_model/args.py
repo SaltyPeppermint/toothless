@@ -1,5 +1,4 @@
 from dataclasses import dataclass, field
-
 from typing import Optional
 
 
@@ -12,7 +11,9 @@ class ModelArguments:
 
 @dataclass
 class DataArguments:
-    data_path: str | None = field(default="cache/start.parquet", metadata={"help": "Path to the training data."})
+    data_path: str | None = field(
+        default="cache/start.parquet", metadata={"help": "Path to the training data."}
+    )
     test_size: float = field(default=0.2)
     random_state: int = field(default=42)
     lazy_preprocess: bool = field(default=False)
@@ -23,7 +24,9 @@ class TrainingArguments:
     cache_dir: Optional[str] = field(default=None)
     model_max_length: int = field(
         default=8192,
-        metadata={"help": "Maximum sequence length. Sequences will be right padded (and possibly truncated)."},
+        metadata={
+            "help": "Maximum sequence length. Sequences will be right padded (and possibly truncated)."
+        },
     )
     num_train_epochs: int = field(default=1)
     per_device_train_batch_size: int = field(default=1)

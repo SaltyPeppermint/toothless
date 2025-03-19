@@ -1,10 +1,9 @@
-from collections import defaultdict
 import pprint
+from collections import defaultdict
 
 import polars as pl
-from sklearn.metrics import root_mean_squared_error, mean_absolute_error, r2_score
-
 from eggshell import rise  # type: ignore
+from sklearn.metrics import mean_absolute_error, r2_score, root_mean_squared_error
 
 
 def score_models(models, test: pl.DataFrame, cols_to_drop):
@@ -26,10 +25,12 @@ def score_models(models, test: pl.DataFrame, cols_to_drop):
             by_value[label].append(pred)
 
         mae_by_label[model_name] = {
-            int(label): mean_absolute_error([label] * len(pred), pred) for label, pred in by_value.items()
+            int(label): mean_absolute_error([label] * len(pred), pred)
+            for label, pred in by_value.items()
         }
         rmse_by_label[model_name] = {
-            int(label): root_mean_squared_error([label] * len(pred), pred) for label, pred in by_value.items()
+            int(label): root_mean_squared_error([label] * len(pred), pred)
+            for label, pred in by_value.items()
         }
 
     pprint.pprint(basic_metrics)
@@ -54,7 +55,9 @@ def evaluate_predictions(three_from_start: pl.DataFrame, goal: rise.PyRecExpr) -
         actual_distances.append(actual_distance)
         stop_reasons.append(stop_reason)
         reports.append(report)
-        print(f"Predicted Distance: {pred}\nMeasured Distance: {actual_distance}\nStop Reason: {stop_reason}\n---")
+        print(
+            f"Predicted Distance: {pred}\nMeasured Distance: {actual_distance}\nStop Reason: {stop_reason}\n---"
+        )
     three_from_start["actual_distance"] = actual_distances
     three_from_start["stop_reason"] = stop_reasons
     three_from_start["report"] = reports
