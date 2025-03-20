@@ -5,7 +5,7 @@ import torch.nn as nn
 from torch import Tensor
 
 
-class FastMultiHeadedAttention(nn.Module):
+class FastMHA(nn.Module):
     def __init__(
         self,
         d_model: int,
@@ -15,7 +15,7 @@ class FastMultiHeadedAttention(nn.Module):
         device: torch.device | None = None,
         dtype: torch.dtype | None = None,
     ):
-        super(FastMultiHeadedAttention, self).__init__()
+        super(FastMHA, self).__init__()
         self.factory_kwargs = {"device": device, "dtype": dtype}
 
         self.d_k = d_model // num_heads
@@ -65,9 +65,7 @@ class FastMultiHeadedAttention(nn.Module):
 
         mask = self.make_mask(pos_indices)
 
-        output, _ = self.rel_attn(
-            query, key, value, q_c2p_pos, kv_c2p_pos, rel_q, rel_k, rel_v, mask
-        )
+        output, _ = self.rel_attn(query, key, value, q_c2p_pos, kv_c2p_pos, rel_q, rel_k, rel_v, mask)
 
         return self.finalize_output(output)
 
@@ -157,9 +155,7 @@ class FastMultiHeadedAttention(nn.Module):
             attn_scores += c2p_att
 
         attn_scores = attn_scores - attn_scores.max(dim=-1, keepdim=True).values.detach()
-        attn_scores = attn_scores.view(
-            -1, self.num_heads, attn_scores.size(-2), attn_scores.size(-1)
-        )
+        attn_scores = attn_scores.view(-1, self.num_heads, attn_scores.size(-2), attn_scores.size(-1))
 
         if mask is not None:
             attn_scores = attn_scores.masked_fill(mask == 0, -1e9)
@@ -171,9 +167,7 @@ class FastMultiHeadedAttention(nn.Module):
 
         if rel_v is not None:
             pos_v = rel_v.unsqueeze(-2)
-            positional_context = torch.bmm(
-                attn_probs.view(-1, attn_probs.size(-2), self.d_k), pos_v
-            )
+            positional_context = torch.bmm(attn_probs.view(-1, attn_probs.size(-2), self.d_k), pos_v)
             positional_context = torch.gather(positional_context, dim=-1, index=kv_c2p_pos)
             context += positional_context
 
@@ -245,9 +239,7 @@ class OldMultiHeadedAttention(nn.Module):
         key = transpose_for_scores(self.k_proj(key), self.num_heads)
         value = transpose_for_scores(self.v_proj(value), self.num_heads)
 
-        output, _ = self.rel_attn_old(
-            query, key, value, pos_indices, pad_indices, rel_q, rel_k, rel_v
-        )
+        output, _ = self.rel_attn_old(query, key, value, pos_indices, pad_indices, rel_q, rel_k, rel_v)
 
         return self.finalize_output(output)
 
@@ -302,9 +294,7 @@ class OldMultiHeadedAttention(nn.Module):
 
         # Generate the offsets into the q_weigths
         # Shape: [batch_size * num_heads]
-        map_pos_offsets = torch.arange(
-            batch_size * num_heads, dtype=torch.long, device=pos_enc.device
-        )
+        map_pos_offsets = torch.arange(batch_size * num_heads, dtype=torch.long, device=pos_enc.device)
         # Unsequeeze along seq_len -> [[0],[1],[2],..[batch_size * num_heads]],
         # then scale to seq len -> [[0],[1 * seq_len],[2 * seq_len],..[batch_size * num_heads * seq_len]]
         # Shape: [batch_size * num_heads, 1]
