@@ -14,7 +14,7 @@ from tqdm.auto import tqdm
 import transformers
 
 from toothless.utils.dist_helper import cleanup_process_group, setup_process_group, rank0_print
-from toothless.tree_model.data import CustomDataset
+from toothless.tree_model.data import PAD_TOKEN, CustomDataset, DictCollator
 from toothless.tree_model.model import FastASTTrans
 from toothless.tree_model.args import DataArguments, TrainingArguments, ModelArguments
 
@@ -30,6 +30,11 @@ def mk_loaders(rank: int, world_size: int, dataset: CustomDataset, data_args: Da
     train_sampler = DistributedSampler(train_dataset, rank=rank, num_replicas=world_size, shuffle=True)
     test_sampler = DistributedSampler(test_dataset, rank=rank, num_replicas=world_size)
 
+    pad_token = dataset.tokenizer.token_to_id(PAD_TOKEN)
+    assert pad_token == 0
+
+    collator = DictCollator(pad_token)
+
     # Create the dataloaders
     train_dataloader = DataLoader(
         train_dataset,
@@ -38,6 +43,7 @@ def mk_loaders(rank: int, world_size: int, dataset: CustomDataset, data_args: Da
         num_workers=2,
         pin_memory=True,
         shuffle=False,
+        collate_fn=collator,
     )
     test_dataloader = DataLoader(
         test_dataset,
@@ -46,6 +52,7 @@ def mk_loaders(rank: int, world_size: int, dataset: CustomDataset, data_args: Da
         num_workers=2,
         pin_memory=True,
         shuffle=False,
+        collate_fn=collator,
     )
 
     return train_dataloader, test_dataloader
@@ -131,7 +138,7 @@ def fsdp_main(
     rank0_print(rank, "DataLoaders ready")
 
     for s in train_dataloader:
-        rank0_print(rank, s)
+        rank0_print(rank, len(s))
         break
 
     # Load Model

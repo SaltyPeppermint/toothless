@@ -4,12 +4,22 @@ from pathlib import Path
 from typing import Iterator
 
 import polars as pl
-import torch
 from eggshell import rise  # type: ignore
 from tokenizers import Tokenizer
 from tokenizers.models import BPE
+from tokenizers.normalizers import BertNormalizer
+from tokenizers.trainers import BpeTrainer
+from tokenizers.pre_tokenizers import Sequence as PreTokenizerSequence
+from tokenizers.pre_tokenizers import Split
+from tokenizers.normalizers import Strip
+from tokenizers.normalizers import Sequence as NormalizerSequence
+
+import torch
 from torch import Tensor
 from torch.utils import data
+from torch.nn.utils.rnn import pad_sequence
+import torch.nn.functional as F
+
 
 # from eggshell import TreeData
 from toothless.utils import loading
@@ -18,13 +28,15 @@ CHUNK_SIZE = 10000
 
 PAD_TOKEN = "<pad>"
 UNK_TOKEN = "<unk>"
-BOS_TOKEN = "<s>"
-EOS_TOKEN = "</s>"
-SEP_TOKEN = "<sep>"
+# BOS_TOKEN = "<s>"
+# EOS_TOKEN = "</s>"
+# SEP_TOKEN = "<sep>"
 MASK_TOKEN = "<mask>"
 
 
 class CustomDataset(data.Dataset):
+    tokenizer: Tokenizer
+
     def __init__(
         self,
         json_root: Path,
@@ -121,24 +133,25 @@ class CustomDataset(data.Dataset):
         #     return Tokenizer.from_file(str(self.tokenizer_path))
 
         tokenizer = Tokenizer(BPE(unk_token=UNK_TOKEN))
-        # tokenizer.normalizer = NormalizerSequence(
-        #     [
-        #         Strip(),
-        #         BertNormalizer(clean_text=True, strip_accents=True, lowercase=True),
-        #     ]  # type: ignore
-        # )  # type: ignore
-        # tokenizer.pre_tokenizer = PretokenizerSequence([Split(" ", behavior="removed")])  # type: ignore
+        tokenizer.normalizer = NormalizerSequence(
+            [
+                Strip(),
+                BertNormalizer(clean_text=True, strip_accents=True, lowercase=True),
+            ]  # type: ignore
+        )  # type: ignore
+        tokenizer.pre_tokenizer = PreTokenizerSequence([Split(" ", behavior="removed")])  # type: ignore
 
-        # trainer = BpeTrainer(
-        #     vocab_size=1000,  # type: ignore
-        #     special_tokens=[UNK_TOKEN, BOS_TOKEN, EOS_TOKEN, SEP_TOKEN, PAD_TOKEN, MASK_TOKEN],  # type: ignore
-        # )
+        # VERY IMPORTANT THAT PAD = 0
+        trainer = BpeTrainer(
+            vocab_size=1000,  # type: ignore
+            special_tokens=[PAD_TOKEN, UNK_TOKEN, MASK_TOKEN],  # type: ignore
+        )
         # iterator = self._gen(expl_chains, picked_tripples)
         # tokenizer.train_from_iterator(
         #     iterator=iterator, trainer=trainer, length=len(expl_chains) * 3 * self.pairs_per_expl * 50
         # )
-        tokenizer.add_tokens(rise.operators())
-        tokenizer.add_tokens(["[constant]", "[variable]"])
+        tokenizer.train_from_iterator(iterator=iter(rise.operators() + ["[constant]", "[variable]"]), trainer=trainer)
+
         tokenizer.save(str(self.tokenizer_path))
         return tokenizer
 
@@ -161,9 +174,7 @@ class CustomDataset(data.Dataset):
 
         return r
 
-    def _vectorize(
-        self, left: rise.PyRecExpr, middle: rise.PyRecExpr, right: rise.PyRecExpr, distance: float
-    ) -> dict:
+    def _vectorize(self, left: rise.PyRecExpr, middle: rise.PyRecExpr, right: rise.PyRecExpr, distance: float) -> dict:
         l_tok, l_anc, l_sib = self._pyrec_to_tensor(left)
         x_tok, x_anc, x_sib = self._pyrec_to_tensor(middle)
         r_tok, r_anc, r_sib = self._pyrec_to_tensor(right)
@@ -245,6 +256,53 @@ class CustomDataset(data.Dataset):
 @lru_cache(maxsize=100)
 def _load_shard(chunk_path: Path):
     return torch.load(chunk_path, weights_only=False)
+
+
+class DictCollator:
+    def __init__(self, pad_token):
+        self.pad_token = pad_token
+
+    def __call__(self, batch: list[dict[str, Tensor]]) -> dict[str, Tensor]:
+        # batch is a list of dictionaries
+        batched_data = {}
+
+        # Iterate over each key in the dictionary
+        for key in batch[0].keys():
+            # If the value is a tensor and represents a sequence (e.g., 1D or 2D tensor)
+            if isinstance(batch[0][key], torch.Tensor):
+                # Stack or pad the tensors for each key
+                if batch[0][key].dim() == 0:
+                    # If it's a scalar tensor, stack them
+                    batched_data[key] = torch.stack([sample[key] for sample in batch])
+                elif batch[0][key].dim() == 1:  # Check if it's a sequence (1D or higher)
+                    # Pad sequences to the same length
+                    batched_data[key] = pad_sequence(
+                        [sample[key] for sample in batch], batch_first=True, padding_value=self.pad_token
+                    )
+                elif batch[0][key].dim() == 2:
+                    # Find largest dimensions of the square 2-dimensional matrices
+                    # (they are always square)
+                    # Get elements in batch
+                    samples = [sample[key] for sample in batch]
+                    # Get their dimensions
+                    dims = [e.size() for e in samples]
+                    (max_x, max_y) = max(dims)
+                    # Generate padding directions depending on largest element in batch
+                    paddings = [(0, max_x - x, 0, max_y - y) for (x, y) in dims]
+                    padded_elements = [F.pad(s, p, "constant", self.pad_token) for s, p in zip(samples, paddings)]
+
+                    batched_data[key] = torch.stack(padded_elements)
+                else:
+                    print(batch[0][key])
+                    raise ValueError("Cannot deal with dimensions bigger than 2")
+            else:
+                # If the value is not a tensor, just collect them in a list
+                batched_data[key] = [sample[key] for sample in batch]
+
+        # for k, v in batched_data.items():
+        #     print(k)
+        #     print(v.size())
+        return batched_data
 
 
 # def subsequent_mask(size: int):

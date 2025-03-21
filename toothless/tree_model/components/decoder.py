@@ -1,4 +1,3 @@
-import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch import Tensor
@@ -12,16 +11,9 @@ from toothless.tree_model.components.utils import (
 )
 
 
-class ASTDecoderLayer(nn.Module):
-    def __init__(
-        self,
-        d_model: int,
-        num_heads: int,
-        dim_feed_forward: int,
-        dropout: float = 0.2,
-        activation=F.gelu,
-    ):
-        super(ASTDecoderLayer, self).__init__()
+class ASTDoubleDecoderLayer(nn.Module):
+    def __init__(self, d_model: int, num_heads: int, dim_feed_forward: int, dropout: float = 0.2, activation=F.gelu):
+        super(ASTDoubleDecoderLayer, self).__init__()
         self.num_heads = num_heads
         self.d_model = d_model
 
@@ -33,56 +25,41 @@ class ASTDecoderLayer(nn.Module):
         self.dropout = nn.Dropout(dropout)
         self.sublayers = stack_layers(SublayerConnection(d_model, dropout), 4)
 
-    # def forward(self, src, start_nodes, end_nodes, rel_q, rel_k, rel_v):
-    #     src, attn_weights = self.sublayers[0](
-    #         src, lambda x: self.self_attn(x, x, x, start_nodes, end_nodes, rel_q, rel_k, rel_v)
-    #     )
-    #     src, _ = self.sublayers[1](src, self.feed_forward)
-    #     return src
-
     def forward(
         self,
         tgt: Tensor,
         l_mem: Tensor,
         r_mem: Tensor,
-        rel_q: Tensor,
-        rel_k: Tensor,
-        rel_v: Tensor,
-        tgt_pos_enc: Tensor,
-        tgt_pos_pad: Tensor,
-        l_mem_pos: Tensor,
-        l_mem_pos_pad: Tensor,
-        r_mem_pos: Tensor,
-        r_mem_pos_pad: Tensor,
-        tgt_mask: Tensor | None = None,
+        tgt_pos_indices: Tensor,
+        l_mem_pos_indices: Tensor,
+        r_mem_pos_indices: Tensor,
+        rel_q: Tensor | None,
+        rel_k: Tensor | None,
+        rel_v: Tensor | None,
     ) -> Tensor:
         tgt = self.sublayers[0](
             tgt,
-            lambda x: self.self_attn(x, x, x, tgt_pos_enc, tgt_pos_pad, rel_q, rel_k, rel_v, attn_mask=tgt_mask),
+            lambda x: self.self_attn(x, x, x, tgt_pos_indices, tgt_pos_indices, rel_q, rel_k, rel_v),
         )
 
         tgt = self.sublayers[1](
             tgt,
-            lambda x: self.l_cross_attn(
-                x, l_mem, l_mem, l_mem_pos, l_mem_pos_pad, rel_q, rel_k, rel_v, attn_mask=tgt_mask
-            ),
+            lambda x: self.l_cross_attn(x, l_mem, l_mem, tgt_pos_indices, l_mem_pos_indices, rel_q, rel_k, rel_v),
         )
 
         tgt = self.sublayers[2](
             tgt,
-            lambda x: self.r_cross_attn(
-                x, r_mem, r_mem, r_mem_pos, r_mem_pos_pad, rel_q, rel_k, rel_v, attn_mask=tgt_mask
-            ),
+            lambda x: self.r_cross_attn(x, r_mem, r_mem, tgt_pos_indices, r_mem_pos_indices, rel_q, rel_k, rel_v),
         )
 
         tgt = self.sublayers[3](tgt, self.feed_forward)
         return tgt
 
 
-class ASTDecoder(RelCoder):
+class ASTDoubleDecoder(RelCoder):
     def __init__(
         self,
-        decoder_layer: ASTDecoderLayer,
+        decoder_layer: ASTDoubleDecoderLayer,
         num_layers: int,
         n_anc_heads: int,
         n_sib_heads: int,
@@ -91,7 +68,7 @@ class ASTDecoder(RelCoder):
         d_model: int,
         dropout: float = 0.2,
     ):
-        super(ASTDecoder, self).__init__(n_anc_heads, n_sib_heads, pos_type, max_rel_pos, d_model, dropout)
+        super(ASTDoubleDecoder, self).__init__(n_anc_heads, n_sib_heads, pos_type, max_rel_pos, d_model, dropout)
         self.layers = stack_layers(decoder_layer, num_layers)
         self.norm = nn.LayerNorm(d_model)
 
@@ -101,100 +78,55 @@ class ASTDecoder(RelCoder):
 
     def forward(
         self,
-        tgt_data,
-        l_mem_data,
-        r_mem_data,
-        tgt_mask,
+        tgt: Tensor,
+        tgt_anc: Tensor,
+        tgt_sib: Tensor,
+        l_mem: Tensor,
+        l_mem_anc: Tensor,
+        l_mem_sib: Tensor,
+        r_mem: Tensor,
+        r_mem_anc: Tensor,
+        r_mem_sib: Tensor,
     ) -> Tensor:
-        batch_size, max_rel_pos, max_ast_len = tgt_data.anc_edges.size()
         rel_q, rel_k, rel_v = self.rel_pos_emb()
 
-        tgt_pos_enc = self.concat_pos(tgt_data.anc_edges, tgt_data.sib_edges)
-        l_mem_pos_enc = self.concat_pos(l_mem_data.anc_edges, l_mem_data.sib_edges)
-        r_mem_pos_enc = self.concat_pos(r_mem_data.anc_edges, r_mem_data.sib_edges)
+        tgt_pos_indices = self.concat_pos(tgt_anc, tgt_sib)
+        l_mem_pos_indices = self.concat_pos(l_mem_anc, l_mem_sib)
+        r_mem_pos_indices = self.concat_pos(r_mem_anc, r_mem_sib)
 
-        self.ensure_positional_padding(batch_size, max_rel_pos, max_ast_len, tgt_pos_enc.device)
+        # self.ensure_positional_padding(batch_size, max_rel_pos, max_ast_len, tgt_pos_enc.device)
 
-        output = tgt_data.emb
+        output = tgt
         for layer in self.layers:
             output = layer(
-                tgt_data.emb,
-                l_mem_data.emb,
-                r_mem_data.emb,
+                output,
+                l_mem,
+                r_mem,
+                tgt_pos_indices,
+                l_mem_pos_indices,
+                r_mem_pos_indices,
                 rel_q,
                 rel_k,
                 rel_v,
-                tgt_pos_enc,
-                self.tgt_pos_pad,
-                l_mem_pos_enc,
-                self.l_mem_pos_pad,
-                r_mem_pos_enc,
-                self.r_mem_pos_pad,
-                tgt_mask=tgt_mask,
             )
-
-        # if self.norm is not None:
-        #     output = self.norm(output)
 
         return self.norm(output)
 
-    def ensure_positional_padding(
-        self,
-        batch_size: int,
-        max_rel_pos: int,
-        max_ast_len: int,
-        device: torch.device,
-    ):
-        if self.tgt_pos_pad is None or batch_size != self.tgt_pos_pad.size(0):
-            pos_enc_padding = torch.arange(max_ast_len, device=device).unsqueeze(0).unsqueeze(0).unsqueeze(0)
-            self.tgt_pos_pad = pos_enc_padding.repeat(batch_size, self.n_anc_heads + self.n_sib_heads, max_rel_pos, 1)
+    # def ensure_positional_padding(
+    #     self,
+    #     batch_size: int,
+    #     max_rel_pos: int,
+    #     max_ast_len: int,
+    #     device: torch.device,
+    # ):
+    #     if self.tgt_pos_pad is None or batch_size != self.tgt_pos_pad.size(0):
+    #         pos_enc_padding = torch.arange(max_ast_len, device=device).unsqueeze(0).unsqueeze(0).unsqueeze(0)
+    #         self.tgt_pos_pad = pos_enc_padding.repeat(batch_size, self.n_anc_heads + self.n_sib_heads, max_rel_pos, 1)
 
-        if self.l_mem_pos_pad is None or batch_size != self.l_mem_pos_pad.size(0):
-            pos_enc_padding = torch.arange(max_ast_len, device=device).unsqueeze(0).unsqueeze(0).unsqueeze(0)
-            self.l_mem_pos_pad = pos_enc_padding.repeat(batch_size, self.n_anc_heads + self.n_sib_heads, max_rel_pos, 1)
+    #     if self.l_mem_pos_pad is None or batch_size != self.l_mem_pos_pad.size(0):
+    #         pos_enc_padding = torch.arange(max_ast_len, device=device).unsqueeze(0).unsqueeze(0).unsqueeze(0)
+    #         self.l_mem_pos_pad = pos_enc_padding.repeat(batch_size, self.n_anc_heads + self.n_sib_heads, max_rel_pos, 1)
 
-        if self.r_mem_pos_pad is None or batch_size != self.r_mem_pos_pad.size(0):
-            pos_enc_padding = torch.arange(max_ast_len, device=device).unsqueeze(0).unsqueeze(0).unsqueeze(0)
-            self.r_mem_pos_pad = pos_enc_padding.repeat(batch_size, self.n_anc_heads + self.n_sib_heads, max_rel_pos, 1)
-
-
-class DecoderLayer(nn.Module):
-    def __init__(
-        self,
-        d_model: int,
-        num_heads: int,
-        dim_feed_forward: int = 2048,
-        dropout: float = 0.2,
-        activation=F.gelu,
-    ):
-        super(DecoderLayer, self).__init__()
-        self.self_attn = nn.MultiheadAttention(d_model, num_heads, dropout=dropout)
-        self.multihead_attn = nn.MultiheadAttention(d_model, num_heads, dropout=dropout)
-        self.feed_forward = FeedForward(d_model, dim_feed_forward, dropout=dropout)
-        self.sublayers = stack_layers(SublayerConnection(d_model, dropout), 3)
-
-        self.activation = activation
-
-    def forward(
-        self,
-        tgt: Tensor,
-        memory: Tensor,
-        tgt_mask: Tensor | None = None,
-        memory_mask: Tensor | None = None,
-        tgt_key_padding_mask: Tensor | None = None,
-        memory_key_padding_mask: Tensor | None = None,
-    ) -> Tensor:
-        tgt = self.sublayers[0](
-            tgt,
-            lambda x: self.self_attn(x, x, x, attn_mask=tgt_mask, key_padding_mask=tgt_key_padding_mask),
-        )
-
-        tgt = self.sublayers[1](
-            tgt,
-            lambda x: self.multihead_attn(
-                x, memory, memory, attn_mask=memory_mask, key_padding_mask=memory_key_padding_mask
-            ),
-        )
-
-        tgt = self.sublayers[2](tgt, self.feed_forward)
-        return tgt
+    #     if self.r_mem_pos_pad is None or batch_size != self.r_mem_pos_pad.size(0):
+    #         pos_enc_padding = torch.arange(max_ast_len, device=device).unsqueeze(0).unsqueeze(0).unsqueeze(0)
+    #         self.r_mem_pos_pad = pos_enc_padding.repeat(batch_size, self.n_anc_heads + self.n_sib_heads, max_rel_pos, 1)

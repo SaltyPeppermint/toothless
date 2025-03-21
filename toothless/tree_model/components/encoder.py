@@ -1,4 +1,3 @@
-import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch import Tensor
@@ -13,14 +12,7 @@ from toothless.tree_model.components.utils import (
 
 
 class ASTEncoderLayer(nn.Module):
-    def __init__(
-        self,
-        d_model: int,
-        num_heads: int,
-        dim_feed_forward: int,
-        dropout: float = 0.2,
-        activation=F.gelu,
-    ):
+    def __init__(self, d_model: int, num_heads: int, dim_feed_forward: int, dropout: float = 0.2, activation=F.gelu):
         super(ASTEncoderLayer, self).__init__()
         self.num_heads = num_heads
         self.d_model = d_model
@@ -29,10 +21,12 @@ class ASTEncoderLayer(nn.Module):
         self.feed_forward = FeedForward(d_model, dim_feed_forward, dropout=dropout, activation=activation)
         self.sublayers = stack_layers(SublayerConnection(d_model, dropout), 2)
 
-    def forward(self, src, pos_enc, pos_enc_padding, rel_q, rel_k, rel_v) -> Tensor:
+    def forward(
+        self, src: Tensor, pos_indices: Tensor, rel_q: Tensor | None, rel_k: Tensor | None, rel_v: Tensor | None
+    ) -> Tensor:
         src = self.sublayers[0](
             src,
-            lambda x: self.self_attn(x, x, x, pos_enc, pos_enc_padding, rel_q, rel_k, rel_v),
+            lambda x: self.self_attn(x, x, x, pos_indices, pos_indices, rel_q, rel_k, rel_v),
         )
         src = self.sublayers[1](src, self.feed_forward)
         return src
@@ -54,24 +48,13 @@ class ASTEncoder(RelCoder):
         self.layers = stack_layers(encoder_layer, num_layers)
         self.norm = nn.LayerNorm(d_model)
 
-        self.pos_enc_padding = None
-
-    def forward(self, src_data) -> Tensor:
-        batch_size, max_rel_pos, max_ast_len = src_data.anc_edges.size()
+    def forward(self, src: Tensor, src_anc: Tensor, src_sib: Tensor) -> Tensor:
         rel_q, rel_k, rel_v = self.rel_pos_emb()
 
-        # Formerly "Start Nodes"
-        pos_enc = self.concat_pos(src_data.anc_edges, src_data.sib_edges)
+        pos_indices = self.concat_pos(src_anc, src_sib)
 
-        # Formerly "End Nodes"
-        if self.pos_enc_padding is None or batch_size != self.pos_enc_padding.size(0):
-            pos_enc_padding = torch.arange(max_ast_len, device=pos_enc.device).unsqueeze(0).unsqueeze(0).unsqueeze(0)
-            self.pos_enc_padding = pos_enc_padding.repeat(
-                batch_size, self.n_anc_heads + self.n_sib_heads, max_rel_pos, 1
-            )
-
-        output = src_data.emb
+        output = src
         for layer in self.layers:
-            output = layer(output, pos_enc, self.pos_enc_padding, rel_q, rel_k, rel_v)
+            output = layer(output, pos_indices, pos_indices, rel_q, rel_k, rel_v)
 
         return self.norm(output)

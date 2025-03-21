@@ -37,10 +37,8 @@ class FastMHA(nn.Module):
         query: Tensor,
         key: Tensor,
         value: Tensor,
-        pos_indices: Tensor,
-        pad_indices: Tensor,
-        cross_pos_indices: Tensor | None = None,
-        cross_pad_indices: Tensor | None = None,
+        q_pos_indices: Tensor,
+        kv_pos_indices: Tensor,
         rel_q: Tensor | None = None,
         rel_k: Tensor | None = None,
         rel_v: Tensor | None = None,
@@ -49,32 +47,22 @@ class FastMHA(nn.Module):
         """relative v shape [1, 2k+1, dim]"""
         """"""
 
-        kv_c2p_pos = torch.cat([pos_indices, pad_indices], dim=-2)
-
-        if self.cross_attn:
-            if cross_pad_indices is None or cross_pos_indices is None:
-                raise ValueError("Need cross pos indices!")
-            else:
-                q_c2p_pos = torch.cat([cross_pos_indices, cross_pad_indices], dim=-2)
-        else:
-            q_c2p_pos = kv_c2p_pos
-
         query = transpose_for_scores(self.q_proj(query), self.num_heads)
         key = transpose_for_scores(self.k_proj(key), self.num_heads)
         value = transpose_for_scores(self.v_proj(value), self.num_heads)
 
-        mask = self.make_mask(pos_indices)
+        mask = self.make_mask(q_pos_indices)
 
-        output, _ = self.rel_attn(query, key, value, q_c2p_pos, kv_c2p_pos, rel_q, rel_k, rel_v, mask)
+        output, _ = self.rel_attn(query, key, value, q_pos_indices, kv_pos_indices, rel_q, rel_k, rel_v, mask)
 
         return self.finalize_output(output)
 
-    def make_mask(self, pos_enc: Tensor) -> Tensor:
+    def make_mask(self, pos_indices: Tensor) -> Tensor:
         # Get positions where pos_enc is 0 aka inf
-        mask_matrix = pos_enc.eq(0)
+        mask_matrix = pos_indices.eq(0)
 
-        batch_size = pos_enc.size(0)
-        seq_len = pos_enc.size(-1)
+        batch_size = pos_indices.size(0)
+        seq_len = pos_indices.size(-1)
 
         # Shape: [batch_size, num_heads, 2(k+1) * seq_len]
         mask_matrix = mask_matrix.view(batch_size, self.num_heads, -1)
@@ -84,7 +72,7 @@ class FastMHA(nn.Module):
 
         # Apply triangular matrix
         if self.cross_attn:
-            mask_matrix[:,] = triangle_matrix(seq_len, pos_enc.device)
+            mask_matrix[:,] = triangle_matrix(seq_len, pos_indices.device)
 
         return mask_matrix
 
@@ -93,12 +81,12 @@ class FastMHA(nn.Module):
         query: Tensor,
         key: Tensor,
         value: Tensor,
-        q_c2p_pos: Tensor,
-        kv_c2p_pos: Tensor,
+        q_pos_indices: Tensor,
+        kv_pos_indices: Tensor,
         rel_q: Tensor | None,
         rel_k: Tensor | None,
         rel_v: Tensor | None,
-        mask: Tensor | None = None,
+        mask: Tensor,
     ):
         """
         :param q: [batch_size, num_heads, seq_len, d_k]
@@ -143,7 +131,7 @@ class FastMHA(nn.Module):
             scale = 1 / math.sqrt(rel_q.size(-1) * scale_factor)
             pos_q = rel_q.unsqueeze(-2)
             p2c_att = torch.bmm(pos_q * scale, key.transpose(-1, -2))
-            p2c_att = torch.gather(p2c_att, dim=-2, index=q_c2p_pos)
+            p2c_att = torch.gather(p2c_att, dim=-2, index=q_pos_indices)
             attn_scores += p2c_att
 
         # context -> position
@@ -151,14 +139,13 @@ class FastMHA(nn.Module):
             scale = 1 / math.sqrt(rel_k.size(-1) * scale_factor)
             pos_k = rel_k.unsqueeze(-2)
             c2p_att = torch.bmm(query, pos_k.transpose(-1, -2) * scale)
-            c2p_att = torch.gather(c2p_att, dim=-1, index=kv_c2p_pos)
+            c2p_att = torch.gather(c2p_att, dim=-1, index=kv_pos_indices)
             attn_scores += c2p_att
 
         attn_scores = attn_scores - attn_scores.max(dim=-1, keepdim=True).values.detach()
         attn_scores = attn_scores.view(-1, self.num_heads, attn_scores.size(-2), attn_scores.size(-1))
 
-        if mask is not None:
-            attn_scores = attn_scores.masked_fill(mask == 0, -1e9)
+        attn_scores = attn_scores.masked_fill(mask == 0, -1e9)
 
         attn_scores = attn_scores.softmax(dim=-1)
         attn_probs = self.dropout(attn_scores)
@@ -168,7 +155,7 @@ class FastMHA(nn.Module):
         if rel_v is not None:
             pos_v = rel_v.unsqueeze(-2)
             positional_context = torch.bmm(attn_probs.view(-1, attn_probs.size(-2), self.d_k), pos_v)
-            positional_context = torch.gather(positional_context, dim=-1, index=kv_c2p_pos)
+            positional_context = torch.gather(positional_context, dim=-1, index=kv_pos_indices)
             context += positional_context
 
         return context, attn_probs
