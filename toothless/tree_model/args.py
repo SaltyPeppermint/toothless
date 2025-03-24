@@ -6,8 +6,11 @@ from typing import Optional
 @dataclass
 class ModelArguments:
     output_dir: str = field(default="model")
+    d_model: int = field(default=128)
+    num_layers: int = field(default=2)
     embedding_size: int = field(default=128)
-    hidden_channels: int = field(default=128)
+    dim_feed_forward: int = field(default=128)
+    dropout: float = field(default=0.2)
     # bf16: bool = field(default=True)
 
 

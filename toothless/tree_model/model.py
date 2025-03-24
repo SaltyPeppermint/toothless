@@ -14,13 +14,13 @@ class FastASTTrans(nn.Module):
         src_vocab_size: int,
         tgt_vocab_size: int,
         d_model: int,
-        n_anc_heads: int,
-        n_sib_heads: int,
-        max_rel_pos: int,
-        pos_type: str,
         num_layers: int,
         dim_feed_forward: int,
         dropout: float,
+        pos_type: str,
+        n_anc_heads: int,
+        n_sib_heads: int,
+        max_rel_pos: int,
         state_dict=None,
     ):
         super(FastASTTrans, self).__init__()

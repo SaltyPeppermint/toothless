@@ -14,7 +14,7 @@ from tqdm.auto import tqdm
 import transformers
 
 from toothless.utils.dist_helper import cleanup_process_group, setup_process_group, rank0_print
-from toothless.tree_model.data import PAD_TOKEN, CustomDataset, DictCollator
+from toothless.tree_model.data import CustomDataset, DictCollator
 from toothless.tree_model.model import FastASTTrans
 from toothless.tree_model.args import DataArguments, TrainingArguments, ModelArguments
 
@@ -30,7 +30,8 @@ def mk_loaders(rank: int, world_size: int, dataset: CustomDataset, data_args: Da
     train_sampler = DistributedSampler(train_dataset, rank=rank, num_replicas=world_size, shuffle=True)
     test_sampler = DistributedSampler(test_dataset, rank=rank, num_replicas=world_size)
 
-    pad_token = dataset.tokenizer.token_to_id(PAD_TOKEN)
+    pad_token = dataset.vocab.pad_id
+    print(pad_token)
     assert pad_token == 0
 
     collator = DictCollator(pad_token)
@@ -64,6 +65,7 @@ def train(
     optimizer: optim.Optimizer,
     train_dataloader: DataLoader,
     epoch: int,
+    train_args: TrainingArguments,
     writer: SummaryWriter | None = None,
 ):
     model.train()
@@ -135,19 +137,35 @@ def fsdp_main(
     # Load Data
     dataset = CustomDataset(data_args.data_path, 5, data_args.random_state)
     train_dataloader, eval_dataloader = mk_loaders(rank, world_size, dataset, data_args)
+
+    i = 0
+    for x in train_dataloader:
+        print(x)
+        i += 1
+        if i == 100:
+            break
+
     rank0_print(rank, "DataLoaders ready")
 
-    for s in train_dataloader:
-        rank0_print(rank, len(s))
-        break
-
+    vocab_size = len(dataset.vocab)
     # Load Model
     rank0_print(rank, "Creating model...")
 
     init_start_event = torch.cuda.Event(enable_timing=True)
     init_end_event = torch.cuda.Event(enable_timing=True)
 
-    model = FastASTTrans(0, 0, 0, 4, 4, 0, "0", 0, 0, 0.0)  # FIXME
+    model = FastASTTrans(
+        vocab_size,
+        vocab_size,
+        model_args.d_model,
+        model_args.num_layers,
+        model_args.dim_feed_forward,
+        model_args.dropout,
+        "anc_sib",
+        4,
+        4,
+        dataset.max_distance,
+    )  # FIXME
     model.to(rank)
     rank0_print(rank, "Model loaded")
 
@@ -175,7 +193,7 @@ def fsdp_main(
     init_start_event.record(torch.cuda.current_stream())
 
     for epoch in range(train_args.num_train_epochs):
-        train(rank, model, optimizer, train_dataloader, epoch, writer)
+        train(rank, model, optimizer, train_dataloader, epoch, train_args, writer)
 
         # Optionally, evaluate the model on the validation set after each epoch
         if train_args.eval_each_epoch:

@@ -24,7 +24,7 @@ import torch.nn.functional as F
 # from eggshell import TreeData
 from toothless.utils import loading
 
-CHUNK_SIZE = 10000
+CHUNK_SIZE = 128
 
 PAD_TOKEN = "<pad>"
 UNK_TOKEN = "<unk>"
@@ -34,9 +34,60 @@ UNK_TOKEN = "<unk>"
 MASK_TOKEN = "<mask>"
 
 
-class CustomDataset(data.Dataset):
-    tokenizer: Tokenizer
+class SimpleVocab:
+    def __init__(self, pad_token: str, unk_token: str, mask_token: str, tokens: list[str]):
+        self.pad_token = pad_token
+        self.unk_token = unk_token
+        self.mask_token = mask_token
+        self.vocab = {}
+        for id, token in enumerate([pad_token, unk_token, mask_token] + tokens):
+            self.vocab[token] = id
 
+        self.rev_vocab = {v: k for k, v in self.vocab.items()}
+
+    def __len__(self):
+        return len(self.vocab)
+
+    def token2id(self, token: str) -> int:
+        if token in self.vocab.keys():
+            return self.vocab[token]
+        else:
+            return self.vocab[self.unk_token]
+
+    def id2token(self, id: int) -> str:
+        return self.rev_vocab[id]
+
+    @property
+    def pad_id(self):
+        return self.vocab[self.pad_token]
+
+    @property
+    def mask_id(self):
+        return self.vocab[self.mask_token]
+
+    @property
+    def unk_id(self):
+        return self.vocab[self.unk_id]
+
+    def save(self, path: Path):
+        d = {}
+        d["pad_token"] = self.pad_token
+        d["unk_token"] = self.unk_token
+        d["mask_token"] = self.mask_token
+        d["vocab"] = self.vocab
+        with open(path, mode="w", encoding="utf-8") as f:
+            json.dump(d, f)
+
+    @staticmethod
+    def load(path: Path):
+        with open(path, mode="r", encoding="utf-8") as f:
+            d = json.load(f)
+
+        v = [d["vocab"][i] for i in range(3, len(d["vocab"]))]
+        return SimpleVocab(d["pad_token"], d["unk_token"], d["mask_token"], v)
+
+
+class CustomDataset(data.Dataset):
     def __init__(
         self,
         json_root: Path,
@@ -55,20 +106,22 @@ class CustomDataset(data.Dataset):
         self.cache_dir.mkdir(parents=True, exist_ok=True)
 
         self._process_raw()
-        self.tokenizer = self._build_tokenizer()
-        self.length, self.n_chunks = self._process()
+        self.vocab = self._build_vocab()
+        self.samples = self._process()
 
     def __len__(self) -> int:
-        return self.length
+        return len(self.samples)
 
     def __getitem__(self, idx):
         # TODO Implement an iterator for this
-        chunk_path = self.processed_paths(idx // CHUNK_SIZE)
-        chunk = _load_shard(chunk_path)
-        sample = chunk[idx % CHUNK_SIZE]
-        sample = {k: v.to_dense() for k, v in sample.items()}
+        sample = self.samples[idx]
+        right = sample["right"].item()
+        left = sample["left"].item()
+        middle = sample["middle"].item()
+        distance = sample["distance"].item()
 
-        return sample
+        vectorized = self._vectorize(right, middle, left, distance)
+        return vectorized
 
     def _process_raw(self):
         if not self.force_reload and self.raw_path.is_file():
@@ -78,89 +131,49 @@ class CustomDataset(data.Dataset):
         df.write_parquet(self.raw_path)
         return
 
-    def _process(self) -> tuple[int, int]:
-        if self.is_processed():
-            with open(self.meta_path) as f:
-                j = json.load(f)
-                length = j["len"]
-            return j["len"], j["n_chunks"]
+    def _process(self) -> pl.DataFrame:
+        if not self.force_reload and self.processed_path.is_file():
+            return pl.read_parquet(self.processed_path)
 
-        raw_expl_chains = pl.read_parquet(self.raw_path).get_column("explanation_chain")
+        raw_data = pl.read_parquet(self.raw_path)
+        expl_chains = raw_data.get_column("explanation_chain")
 
-        print("Starting parallel processing")
-        expl_chains = [rise.PyRecExpr.batch_new(i) for i in raw_expl_chains]
-        print("Parallel processing done")
+        # print("Starting parallel processing")
+        # print("Parallel processing done")
 
         picked_tripples = [self._pick_indices(len(chain)) for chain in expl_chains]
         length = sum([len(chain_pairs) for chain_pairs in picked_tripples])
         print(f"Total pairs: {length}")
 
-        save_buffer = []
-        spill_buffer = []
-        n_chunks = 0
-        for chain, tripple in zip(expl_chains, picked_tripples):
-            pairs = [
-                self._vectorize(chain[left], chain[middle], chain[right], middle / (right - left))
-                for left, middle, right in tripple
-            ]
-
-            remaining_space = CHUNK_SIZE - len(save_buffer)
-            save_buffer.extend(pairs[:remaining_space])
-            spill_buffer.extend(pairs[remaining_space:])
-
-            if remaining_space == 0:
-                print(f"Saving {len(save_buffer)} pairs in {self.processed_paths(n_chunks)}")
-                torch.save(save_buffer, self.processed_paths(n_chunks))
-
-                save_buffer = spill_buffer
-                spill_buffer = []
-                n_chunks += 1
-
-        # Save last few in the buffer if exist
-        if len(save_buffer) != 0:
-            print(f"Saving the last {len(save_buffer)} pairs in {self.processed_paths(n_chunks)}")
-            torch.save(save_buffer, self.processed_paths(n_chunks))
-
-        with open(Path(self.processed_dir) / Path("meta.json"), mode="w", encoding="utf-8") as f:
-            json.dump({"len": length, "n_chunks": n_chunks}, f)
-
-        print("Data processed!")
-        return length, n_chunks
-
-    def _build_tokenizer(self) -> Tokenizer:
-        # def _tokenizer(self, expl_chains, picked_tripples) -> Tokenizer:
-        # if self.tokenizer_path.exists() and not self.force_reload:
-        #     return Tokenizer.from_file(str(self.tokenizer_path))
-
-        tokenizer = Tokenizer(BPE(unk_token=UNK_TOKEN))
-        tokenizer.normalizer = NormalizerSequence(
-            [
-                Strip(),
-                BertNormalizer(clean_text=True, strip_accents=True, lowercase=True),
-            ]  # type: ignore
-        )  # type: ignore
-        tokenizer.pre_tokenizer = PreTokenizerSequence([Split(" ", behavior="removed")])  # type: ignore
-
-        # VERY IMPORTANT THAT PAD = 0
-        trainer = BpeTrainer(
-            vocab_size=1000,  # type: ignore
-            special_tokens=[PAD_TOKEN, UNK_TOKEN, MASK_TOKEN],  # type: ignore
-        )
-        # iterator = self._gen(expl_chains, picked_tripples)
-        # tokenizer.train_from_iterator(
-        #     iterator=iterator, trainer=trainer, length=len(expl_chains) * 3 * self.pairs_per_expl * 50
-        # )
-        tokenizer.train_from_iterator(iterator=iter(rise.operators() + ["[constant]", "[variable]"]), trainer=trainer)
-
-        tokenizer.save(str(self.tokenizer_path))
-        return tokenizer
-
-    def _gen(self, expl_chains, picked_tripples) -> Iterator[list[str]]:
+        total_samples = {"left": [], "right": [], "middle": [], "distance": []}
         for chain, tripple in zip(expl_chains, picked_tripples):
             for left, middle, right in tripple:
-                yield chain[left].to_data().values()
-                yield chain[middle].to_data().values()
-                yield chain[right].to_data().values()
+                right = int(right)
+                left = int(left)
+                middle = int(middle)
+                total_samples["left"].append(str(chain[left]))
+                total_samples["right"].append(str(chain[right]))
+                total_samples["middle"].append(str(chain[middle]))
+                total_samples["distance"].append(middle / (right - left))
+
+        df = pl.DataFrame(total_samples)
+        df.write_parquet(self.processed_path)
+        print(f"Total samples: {len(total_samples)}")
+
+        print("Data processed!")
+        return df
+
+    def _build_vocab(self) -> SimpleVocab:
+        vocab = SimpleVocab(PAD_TOKEN, UNK_TOKEN, MASK_TOKEN, rise.operators() + ["[constant]", "[variable]"])
+        vocab.save(self.vocab_path)
+        return vocab
+
+    # def _gen(self, expl_chains, picked_tripples) -> Iterator[list[str]]:
+    #     for chain, tripple in zip(expl_chains, picked_tripples):
+    #         for left, middle, right in tripple:
+    #             yield chain[left].to_data().values()
+    #             yield chain[middle].to_data().values()
+    #             yield chain[right].to_data().values()
 
     def _pick_indices(self, max_index: int) -> set[tuple[int, int, int]]:
         xs = torch.randint(0, max_index, (self.pairs_per_expl,))
@@ -174,10 +187,10 @@ class CustomDataset(data.Dataset):
 
         return r
 
-    def _vectorize(self, left: rise.PyRecExpr, middle: rise.PyRecExpr, right: rise.PyRecExpr, distance: float) -> dict:
-        l_tok, l_anc, l_sib = self._pyrec_to_tensor(left)
-        x_tok, x_anc, x_sib = self._pyrec_to_tensor(middle)
-        r_tok, r_anc, r_sib = self._pyrec_to_tensor(right)
+    def _vectorize(self, left: str, middle: str, right: str, distance: float) -> dict:
+        l_tok, l_anc, l_sib = self._pyrec_to_tensor(rise.PyRecExpr(left))
+        x_tok, x_anc, x_sib = self._pyrec_to_tensor(rise.PyRecExpr(middle))
+        r_tok, r_anc, r_sib = self._pyrec_to_tensor(rise.PyRecExpr(right))
 
         return {
             "l_tok": l_tok,
@@ -204,7 +217,7 @@ class CustomDataset(data.Dataset):
         #     for node in graph_data.nodes
         # ]
         tokenized_values = torch.tensor(
-            [self.tokenizer.token_to_id(node.name) for node in graph_data.nodes], dtype=torch.int32
+            [self.vocab.token2id(node.name) for node in graph_data.nodes], dtype=torch.int32
         )
         #     for node in graph_data.nodes]
 
@@ -219,43 +232,22 @@ class CustomDataset(data.Dataset):
 
         return tokenized_values, anc_matrix, sib_matrix
 
-    def is_processed(self) -> bool:
-        if not self.meta_path.is_file():
-            return False
-        with open(self.meta_path) as f:
-            meta_info = json.load(f)
-
-        return (
-            not self.force_reload
-            and all([self.processed_paths(i).is_file() for i in range(0, meta_info["n_chunks"])])
-            and self.tokenizer_path.is_file()
-        )
-
     @property
     def raw_path(self) -> Path:
         return self.cache_dir / Path("df_raw.parquet")
 
     @property
-    def processed_dir(self) -> Path:
-        processed_dir = self.cache_dir / Path("processed")
-        processed_dir.mkdir(exist_ok=True)
-        return processed_dir
+    def vocab_path(self) -> Path:
+        return self.cache_dir / Path("vocab.json")
 
     @property
-    def meta_path(self) -> Path:
-        return self.processed_dir / Path("meta.json")
-
-    @property
-    def tokenizer_path(self) -> Path:
-        return self.cache_dir / Path("tokenizer.json")
-
-    def processed_paths(self, i) -> Path:
-        return self.processed_dir / Path(f"data_{i}.pt")
+    def processed_path(self) -> Path:
+        return self.cache_dir / Path(f"processed.parquet")
 
 
-@lru_cache(maxsize=100)
-def _load_shard(chunk_path: Path):
-    return torch.load(chunk_path, weights_only=False)
+# # @lru_cache(maxsize=100)
+# def _load_shard(chunk_path: Path):
+#     return torch.load(chunk_path, weights_only=False)
 
 
 class DictCollator:
