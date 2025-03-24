@@ -58,16 +58,16 @@ class SimpleVocab:
         return self.rev_vocab[id]
 
     @property
-    def pad_id(self):
+    def pad_token_id(self):
         return self.vocab[self.pad_token]
 
     @property
-    def mask_id(self):
+    def mask_token_id(self):
         return self.vocab[self.mask_token]
 
     @property
-    def unk_id(self):
-        return self.vocab[self.unk_id]
+    def unk_token_id(self):
+        return self.vocab[self.unk_token_id]
 
     def save(self, path: Path):
         d = {}
@@ -188,18 +188,18 @@ class CustomDataset(data.Dataset):
         return r
 
     def _vectorize(self, left: str, middle: str, right: str, distance: float) -> dict:
-        l_tok, l_anc, l_sib = self._pyrec_to_tensor(rise.PyRecExpr(left))
-        x_tok, x_anc, x_sib = self._pyrec_to_tensor(rise.PyRecExpr(middle))
-        r_tok, r_anc, r_sib = self._pyrec_to_tensor(rise.PyRecExpr(right))
+        l_ids, l_anc, l_sib = self._pyrec_to_tensor(rise.PyRecExpr(left))
+        tgt_ids, tgt_anc, tgt_sib = self._pyrec_to_tensor(rise.PyRecExpr(middle))
+        r_ids, r_anc, r_sib = self._pyrec_to_tensor(rise.PyRecExpr(right))
 
         return {
-            "l_tok": l_tok,
+            "l_ids": l_ids,
             "l_anc": l_anc,
             "l_sib": l_sib,
-            "x_tok": x_tok,
-            "x_anc": x_anc,
-            "x_sib": x_sib,
-            "r_tok": r_tok,
+            "tgt_ids": tgt_ids,
+            "tgt_anc": tgt_anc,
+            "tgt_sib": tgt_sib,
+            "r_ids": r_ids,
             "r_anc": r_anc,
             "r_sib": r_sib,
             "distance": torch.tensor([distance]),
@@ -216,9 +216,7 @@ class CustomDataset(data.Dataset):
         #     else tokenizer.encode(BOS_TOKEN + node.name + EOS_TOKEN)
         #     for node in graph_data.nodes
         # ]
-        tokenized_values = torch.tensor(
-            [self.vocab.token2id(node.name) for node in graph_data.nodes], dtype=torch.int32
-        )
+        ids = torch.tensor([self.vocab.token2id(node.name) for node in graph_data.nodes], dtype=torch.int32)
         #     for node in graph_data.nodes]
 
         # adjacency_matrix = torch.sparse_coo_tensor(
@@ -230,7 +228,7 @@ class CustomDataset(data.Dataset):
         anc_matrix = torch.tensor(graph_data.anc_matrix(self.max_distance), dtype=torch.int32)
         sib_matrix = torch.tensor(graph_data.sib_matrix(self.max_distance), dtype=torch.int32)
 
-        return tokenized_values, anc_matrix, sib_matrix
+        return ids, anc_matrix, sib_matrix
 
     @property
     def raw_path(self) -> Path:
@@ -251,8 +249,9 @@ class CustomDataset(data.Dataset):
 
 
 class DictCollator:
-    def __init__(self, pad_token):
-        self.pad_token = pad_token
+    def __init__(self, pad_id: int, max_len: int):
+        self.pad_id = pad_id
+        self.max_len = max_len
 
     def __call__(self, batch: list[dict[str, Tensor]]) -> dict[str, Tensor]:
         # batch is a list of dictionaries
@@ -268,20 +267,20 @@ class DictCollator:
                     batched_data[key] = torch.stack([sample[key] for sample in batch])
                 elif batch[0][key].dim() == 1:  # Check if it's a sequence (1D or higher)
                     # Pad sequences to the same length
-                    batched_data[key] = pad_sequence(
-                        [sample[key] for sample in batch], batch_first=True, padding_value=self.pad_token
-                    )
+                    samples = [sample[key] for sample in batch]
+                    # Generate padding directions depending on max_len
+                    paddings = [(0, self.max_len - s.size(-1)) for s in samples]
+                    padded_elements = [F.pad(s, p, "constant", self.pad_id) for s, p in zip(samples, paddings)]
+
+                    batched_data[key] = torch.stack(padded_elements)
                 elif batch[0][key].dim() == 2:
                     # Find largest dimensions of the square 2-dimensional matrices
                     # (they are always square)
                     # Get elements in batch
                     samples = [sample[key] for sample in batch]
-                    # Get their dimensions
-                    dims = [e.size() for e in samples]
-                    (max_x, max_y) = max(dims)
                     # Generate padding directions depending on largest element in batch
-                    paddings = [(0, max_x - x, 0, max_y - y) for (x, y) in dims]
-                    padded_elements = [F.pad(s, p, "constant", self.pad_token) for s, p in zip(samples, paddings)]
+                    paddings = [(0, self.max_len - s.size(-1), 0, self.max_len - s.size(-2)) for s in samples]
+                    padded_elements = [F.pad(s, p, "constant", self.pad_id) for s, p in zip(samples, paddings)]
 
                     batched_data[key] = torch.stack(padded_elements)
                 else:

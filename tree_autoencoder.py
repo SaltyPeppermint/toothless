@@ -7,6 +7,7 @@ from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 from torch.utils.data.distributed import DistributedSampler
 from torch.utils.data import DataLoader
 import torch.multiprocessing as mp
+from torch.nn import CrossEntropyLoss
 from torch.utils.tensorboard.writer import SummaryWriter
 
 
@@ -30,11 +31,10 @@ def mk_loaders(rank: int, world_size: int, dataset: CustomDataset, data_args: Da
     train_sampler = DistributedSampler(train_dataset, rank=rank, num_replicas=world_size, shuffle=True)
     test_sampler = DistributedSampler(test_dataset, rank=rank, num_replicas=world_size)
 
-    pad_token = dataset.vocab.pad_id
-    print(pad_token)
-    assert pad_token == 0
+    pad_id = dataset.vocab.pad_token_id
+    assert pad_id == 0
 
-    collator = DictCollator(pad_token)
+    collator = DictCollator(pad_id, 256)
 
     # Create the dataloaders
     train_dataloader = DataLoader(
@@ -63,6 +63,7 @@ def train(
     rank: int,
     model: FSDP,
     optimizer: optim.Optimizer,
+    criterion: CrossEntropyLoss,
     train_dataloader: DataLoader,
     epoch: int,
     train_args: TrainingArguments,
@@ -74,18 +75,14 @@ def train(
     for batch_idx, batch in enumerate(tqdm(train_dataloader, desc=f"Epoch {epoch + 1}/{train_args.num_train_epochs}")):
         # Move batch to device
         batch = {k: v.to(rank) for k, v in batch.items()}
-        # Reset Optimizer
-        optimizer.zero_grad()
 
         # Forward pass
-        z_s = model.encode(batch["x_s"], batch["edge_index_s"], batch["x_s_batch"])
-        z_t = model.encode(batch["x_t"], batch["edge_index_t"], batch["x_t_batch"])
-        pred = model.distance(z_s, z_t)
-        loss = (
-            model.recon_loss(z_s, batch["x_s"], batch["edge_index_s"])
-            + model.recon_loss(z_t, batch["x_t"], batch["edge_index_t"])
-            + model.distance_loss(pred, batch["distance"])
-        )
+        outputs = model(batch)
+        logits = outputs.logits
+        loss = criterion(logits.view(-1, logits.size(-1)), batch["tgt_ids"].view(-1))
+
+        # Backwards pass
+        optimizer.zero_grad()
         loss.backward()
         optimizer.step()
 
@@ -138,13 +135,6 @@ def fsdp_main(
     dataset = CustomDataset(data_args.data_path, 5, data_args.random_state)
     train_dataloader, eval_dataloader = mk_loaders(rank, world_size, dataset, data_args)
 
-    i = 0
-    for x in train_dataloader:
-        print(x)
-        i += 1
-        if i == 100:
-            break
-
     rank0_print(rank, "DataLoaders ready")
 
     vocab_size = len(dataset.vocab)
@@ -165,7 +155,7 @@ def fsdp_main(
         4,
         4,
         dataset.max_distance,
-    )  # FIXME
+    )
     model.to(rank)
     rank0_print(rank, "Model loaded")
 
@@ -181,6 +171,7 @@ def fsdp_main(
         weight_decay=train_args.weight_decay,
     )
     lr_scheduler = CosineAnnealingLR(optimizer, T_max=train_args.tmax)
+    criterion = CrossEntropyLoss(ignore_index=dataset.vocab.pad_token_id, label_smoothing=0.1)
     rank0_print(rank, "Optimizer and LR Scheduler ready")
 
     if rank == 0:
@@ -193,7 +184,7 @@ def fsdp_main(
     init_start_event.record(torch.cuda.current_stream())
 
     for epoch in range(train_args.num_train_epochs):
-        train(rank, model, optimizer, train_dataloader, epoch, train_args, writer)
+        train(rank, model, optimizer, criterion, train_dataloader, epoch, train_args, writer)
 
         # Optionally, evaluate the model on the validation set after each epoch
         if train_args.eval_each_epoch:

@@ -39,17 +39,33 @@ class ASTDoubleDecoderLayer(nn.Module):
     ) -> Tensor:
         tgt = self.sublayers[0](
             tgt,
-            lambda x: self.self_attn(x, x, x, tgt_pos_indices, tgt_pos_indices, rel_q, rel_k, rel_v),
+            lambda x: self.self_attn(x, tgt_pos_indices, rel_q=rel_q, rel_k=rel_k, rel_v=rel_v),
         )
 
         tgt = self.sublayers[1](
             tgt,
-            lambda x: self.l_cross_attn(x, l_mem, l_mem, tgt_pos_indices, l_mem_pos_indices, rel_q, rel_k, rel_v),
+            lambda x: self.l_cross_attn(
+                x,
+                tgt_pos_indices,
+                query_states=l_mem,
+                query_pos_indices=l_mem_pos_indices,
+                rel_q=rel_q,
+                rel_k=rel_k,
+                rel_v=rel_v,
+            ),
         )
 
         tgt = self.sublayers[2](
             tgt,
-            lambda x: self.r_cross_attn(x, r_mem, r_mem, tgt_pos_indices, r_mem_pos_indices, rel_q, rel_k, rel_v),
+            lambda x: self.l_cross_attn(
+                x,
+                tgt_pos_indices,
+                query_states=r_mem,
+                query_pos_indices=r_mem_pos_indices,
+                rel_q=rel_q,
+                rel_k=rel_k,
+                rel_v=rel_v,
+            ),
         )
 
         tgt = self.sublayers[3](tgt, self.feed_forward)

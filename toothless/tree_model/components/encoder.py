@@ -26,7 +26,7 @@ class ASTEncoderLayer(nn.Module):
     ) -> Tensor:
         src = self.sublayers[0](
             src,
-            lambda x: self.self_attn(x, x, x, pos_indices, pos_indices, rel_q, rel_k, rel_v),
+            lambda x: self.self_attn(x, pos_indices, rel_q=rel_q, rel_k=rel_k, rel_v=rel_v),
         )
         src = self.sublayers[1](src, self.feed_forward)
         return src
@@ -36,12 +36,12 @@ class ASTEncoder(RelCoder):
     def __init__(
         self,
         encoder_layer: ASTEncoderLayer,
+        d_model: int,
         num_layers: int,
         n_anc_heads: int,
         n_sib_heads: int,
         pos_type: list[str],
         max_rel_pos: int,
-        d_model: int,
         dropout: float = 0.2,
     ):
         super(ASTEncoder, self).__init__(n_anc_heads, n_sib_heads, pos_type, max_rel_pos, d_model, dropout)
@@ -55,6 +55,6 @@ class ASTEncoder(RelCoder):
 
         output = src
         for layer in self.layers:
-            output = layer(output, pos_indices, pos_indices, rel_q, rel_k, rel_v)
+            output = layer(output, pos_indices, rel_q, rel_k, rel_v)
 
         return self.norm(output)
