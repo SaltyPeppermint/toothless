@@ -28,18 +28,21 @@ class ASTDoubleDecoderLayer(nn.Module):
     def forward(
         self,
         tgt: Tensor,
-        l_mem: Tensor,
-        r_mem: Tensor,
         tgt_pos_indices: Tensor,
-        l_mem_pos_indices: Tensor,
-        r_mem_pos_indices: Tensor,
+        tgt_mask: Tensor,
+        l_mem: Tensor,
+        l_pos_indices: Tensor,
+        l_mask: Tensor,
+        r_mem: Tensor,
+        r_pos_indices: Tensor,
+        r_mask: Tensor,
         rel_q: Tensor | None,
         rel_k: Tensor | None,
         rel_v: Tensor | None,
     ) -> Tensor:
         tgt = self.sublayers[0](
             tgt,
-            lambda x: self.self_attn(x, tgt_pos_indices, rel_q=rel_q, rel_k=rel_k, rel_v=rel_v),
+            lambda x: self.self_attn(x, tgt_pos_indices, tgt_mask, rel_q=rel_q, rel_k=rel_k, rel_v=rel_v),
         )
 
         tgt = self.sublayers[1](
@@ -47,8 +50,9 @@ class ASTDoubleDecoderLayer(nn.Module):
             lambda x: self.l_cross_attn(
                 x,
                 tgt_pos_indices,
-                query_states=l_mem,
-                query_pos_indices=l_mem_pos_indices,
+                l_mask,
+                cross_state=l_mem,
+                cross_pos_indices=l_pos_indices,
                 rel_q=rel_q,
                 rel_k=rel_k,
                 rel_v=rel_v,
@@ -57,11 +61,12 @@ class ASTDoubleDecoderLayer(nn.Module):
 
         tgt = self.sublayers[2](
             tgt,
-            lambda x: self.l_cross_attn(
+            lambda x: self.r_cross_attn(
                 x,
                 tgt_pos_indices,
-                query_states=r_mem,
-                query_pos_indices=r_mem_pos_indices,
+                r_mask,
+                cross_state=r_mem,
+                cross_pos_indices=r_pos_indices,
                 rel_q=rel_q,
                 rel_k=rel_k,
                 rel_v=rel_v,
@@ -97,30 +102,45 @@ class ASTDoubleDecoder(RelCoder):
         tgt: Tensor,
         tgt_anc: Tensor,
         tgt_sib: Tensor,
+        tgt_mask: Tensor,
         l_mem: Tensor,
         l_mem_anc: Tensor,
         l_mem_sib: Tensor,
+        l_mask: Tensor,
         r_mem: Tensor,
         r_mem_anc: Tensor,
         r_mem_sib: Tensor,
+        r_mask: Tensor,
     ) -> Tensor:
+        """
+        seq_len -1 for rightshift of train samples for autoregressive training
+
+        :param tgt:         [batch_size, seq_len - 1, d_model]
+        :param tgt_mask:    [batch_size, 1, seq_len - 1, seq_len - 1]
+        :param l_mem:       [batch_size, seq_len, d_model]
+        :param l_mask:      [batch_size, 1, 1, seq_len]
+        :param r_mem:       [batch_size, seq_len, d_model]
+        :param r_mask:      [batch_size, 1, 1, seq_len]
+        :return             [batch_size, seq_len - 1, d_model]
+        """
         rel_q, rel_k, rel_v = self.rel_pos_emb()
 
         tgt_pos_indices = self.concat_pos(tgt_anc, tgt_sib)
-        l_mem_pos_indices = self.concat_pos(l_mem_anc, l_mem_sib)
-        r_mem_pos_indices = self.concat_pos(r_mem_anc, r_mem_sib)
-
-        # self.ensure_positional_padding(batch_size, max_rel_pos, max_ast_len, tgt_pos_enc.device)
+        l_pos_indices = self.concat_pos(l_mem_anc, l_mem_sib)
+        r_pos_indices = self.concat_pos(r_mem_anc, r_mem_sib)
 
         output = tgt
         for layer in self.layers:
             output = layer(
                 output,
-                l_mem,
-                r_mem,
                 tgt_pos_indices,
-                l_mem_pos_indices,
-                r_mem_pos_indices,
+                tgt_mask,
+                l_mem,
+                l_pos_indices,
+                l_mask,
+                r_mem,
+                r_pos_indices,
+                r_mask,
                 rel_q,
                 rel_k,
                 rel_v,

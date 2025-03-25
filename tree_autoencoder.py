@@ -72,14 +72,15 @@ def train(
     model.train()
     ddp_loss = torch.zeros(2).to(rank)
 
-    for batch_idx, batch in enumerate(tqdm(train_dataloader, desc=f"Epoch {epoch + 1}/{train_args.num_train_epochs}")):
+    for batch_idx, (batch, num_tokens) in enumerate(
+        tqdm(train_dataloader, desc=f"Epoch {epoch + 1}/{train_args.num_train_epochs}")
+    ):
         # Move batch to device
         batch = {k: v.to(rank) for k, v in batch.items()}
 
         # Forward pass
-        outputs = model(batch)
-        logits = outputs.logits
-        loss = criterion(logits.view(-1, logits.size(-1)), batch["tgt_ids"].view(-1))
+        out = model(batch)
+        loss = criterion(out.view(-1, out.size(-1)), batch["tgt_ids_y"].view(-1))
 
         # Backwards pass
         optimizer.zero_grad()
@@ -88,6 +89,7 @@ def train(
 
         if writer:
             writer.add_scalar("Loss/train-batch", loss, batch_idx + epoch * len(train_dataloader))
+            writer.add_scalar("Loss/tokens-in-batch", num_tokens, batch_idx + epoch * len(train_dataloader))
 
         # Record loss
         ddp_loss[0] += loss.item()
@@ -148,12 +150,12 @@ def fsdp_main(
         vocab_size,
         vocab_size,
         model_args.d_model,
-        model_args.num_layers,
+        model_args.num_layers,  # 1 for testing
         model_args.dim_feed_forward,
         model_args.dropout,
         "anc_sib",
-        4,
-        4,
+        1,
+        3,
         dataset.max_distance,
     )
     model.to(rank)

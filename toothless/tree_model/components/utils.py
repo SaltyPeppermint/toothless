@@ -44,8 +44,7 @@ class Generator(nn.Module):
 
     def forward(self, outputs):
         out = self.linear(outputs)
-        gen_prob = self.soft_max(self.dropout(out))
-        return torch.log(gen_prob)
+        return F.log_softmax(self.dropout(out), dim=-1)
 
 
 # class GreedyGenerator(nn.Module):

@@ -1,23 +1,22 @@
 import json
-from functools import lru_cache
 from pathlib import Path
-from typing import Iterator
 
 import polars as pl
+
+# import matplotlib.pyplot as plt
 from eggshell import rise  # type: ignore
-from tokenizers import Tokenizer
-from tokenizers.models import BPE
-from tokenizers.normalizers import BertNormalizer
-from tokenizers.trainers import BpeTrainer
-from tokenizers.pre_tokenizers import Sequence as PreTokenizerSequence
-from tokenizers.pre_tokenizers import Split
-from tokenizers.normalizers import Strip
-from tokenizers.normalizers import Sequence as NormalizerSequence
+# from tokenizers import Tokenizer
+# from tokenizers.models import BPE
+# from tokenizers.normalizers import BertNormalizer
+# from tokenizers.trainers import BpeTrainer
+# from tokenizers.pre_tokenizers import Sequence as PreTokenizerSequence
+# from tokenizers.pre_tokenizers import Split
+# from tokenizers.normalizers import Strip
+# from tokenizers.normalizers import Sequence as NormalizerSequence
 
 import torch
 from torch import Tensor
 from torch.utils import data
-from torch.nn.utils.rnn import pad_sequence
 import torch.nn.functional as F
 
 
@@ -28,19 +27,23 @@ CHUNK_SIZE = 128
 
 PAD_TOKEN = "<pad>"
 UNK_TOKEN = "<unk>"
-# BOS_TOKEN = "<s>"
-# EOS_TOKEN = "</s>"
+BOS_TOKEN = "<s>"
+EOS_TOKEN = "</s>"
 # SEP_TOKEN = "<sep>"
 MASK_TOKEN = "<mask>"
 
 
 class SimpleVocab:
-    def __init__(self, pad_token: str, unk_token: str, mask_token: str, tokens: list[str]):
+    def __init__(
+        self, pad_token: str, unk_token: str, mask_token: str, bos_token: str, eos_token: str, tokens: list[str]
+    ):
         self.pad_token = pad_token
         self.unk_token = unk_token
         self.mask_token = mask_token
+        self.bos_token = bos_token
+        self.eos_token = eos_token
         self.vocab = {}
-        for id, token in enumerate([pad_token, unk_token, mask_token] + tokens):
+        for id, token in enumerate([pad_token, unk_token, mask_token, bos_token, eos_token] + tokens):
             self.vocab[token] = id
 
         self.rev_vocab = {v: k for k, v in self.vocab.items()}
@@ -69,11 +72,21 @@ class SimpleVocab:
     def unk_token_id(self):
         return self.vocab[self.unk_token_id]
 
+    @property
+    def bos_token_id(self):
+        return self.vocab[self.bos_token]
+
+    @property
+    def eos_token_id(self):
+        return self.vocab[self.eos_token]
+
     def save(self, path: Path):
         d = {}
         d["pad_token"] = self.pad_token
         d["unk_token"] = self.unk_token
         d["mask_token"] = self.mask_token
+        d["bos_token"] = self.bos_token
+        d["eos_token"] = self.eos_token
         d["vocab"] = self.vocab
         with open(path, mode="w", encoding="utf-8") as f:
             json.dump(d, f)
@@ -84,7 +97,7 @@ class SimpleVocab:
             d = json.load(f)
 
         v = [d["vocab"][i] for i in range(3, len(d["vocab"]))]
-        return SimpleVocab(d["pad_token"], d["unk_token"], d["mask_token"], v)
+        return SimpleVocab(d["pad_token"], d["unk_token"], d["mask_token"], d["bos_token"], d["eos_token"], v)
 
 
 class CustomDataset(data.Dataset):
@@ -138,9 +151,6 @@ class CustomDataset(data.Dataset):
         raw_data = pl.read_parquet(self.raw_path)
         expl_chains = raw_data.get_column("explanation_chain")
 
-        # print("Starting parallel processing")
-        # print("Parallel processing done")
-
         picked_tripples = [self._pick_indices(len(chain)) for chain in expl_chains]
         length = sum([len(chain_pairs) for chain_pairs in picked_tripples])
         print(f"Total pairs: {length}")
@@ -164,7 +174,8 @@ class CustomDataset(data.Dataset):
         return df
 
     def _build_vocab(self) -> SimpleVocab:
-        vocab = SimpleVocab(PAD_TOKEN, UNK_TOKEN, MASK_TOKEN, rise.operators() + ["[constant]", "[variable]"])
+        normal_tokens = rise.operators() + ["[constant]", "[variable]"]
+        vocab = SimpleVocab(PAD_TOKEN, UNK_TOKEN, MASK_TOKEN, BOS_TOKEN, EOS_TOKEN, normal_tokens)
         vocab.save(self.vocab_path)
         return vocab
 
@@ -216,7 +227,12 @@ class CustomDataset(data.Dataset):
         #     else tokenizer.encode(BOS_TOKEN + node.name + EOS_TOKEN)
         #     for node in graph_data.nodes
         # ]
-        ids = torch.tensor([self.vocab.token2id(node.name) for node in graph_data.nodes], dtype=torch.int32)
+        ids = torch.tensor(
+            [self.vocab.bos_token_id]
+            + [self.vocab.token2id(node.name) for node in graph_data.nodes]
+            + [self.vocab.eos_token_id],
+            dtype=torch.int64,
+        )
         #     for node in graph_data.nodes]
 
         # adjacency_matrix = torch.sparse_coo_tensor(
@@ -225,8 +241,8 @@ class CustomDataset(data.Dataset):
         #     dtype=torch.bool,
         #     size=torch.Size((150, 150)),
         # )
-        anc_matrix = torch.tensor(graph_data.anc_matrix(self.max_distance), dtype=torch.int32)
-        sib_matrix = torch.tensor(graph_data.sib_matrix(self.max_distance), dtype=torch.int32)
+        anc_matrix = torch.tensor(graph_data.anc_matrix(self.max_distance, double_pad=True), dtype=torch.int16)
+        sib_matrix = torch.tensor(graph_data.sib_matrix(self.max_distance, double_pad=True), dtype=torch.int16)
 
         return ids, anc_matrix, sib_matrix
 
@@ -240,12 +256,28 @@ class CustomDataset(data.Dataset):
 
     @property
     def processed_path(self) -> Path:
-        return self.cache_dir / Path(f"processed.parquet")
+        return self.cache_dir / Path("processed.parquet")
 
 
-# # @lru_cache(maxsize=100)
-# def _load_shard(chunk_path: Path):
-#     return torch.load(chunk_path, weights_only=False)
+def make_std_mask(tgt: Tensor, pad_id: int):
+    "Create a mask to hide padding and future words."
+    # print(f"tgt shape: {tgt.size()}")
+    tgt_mask = (tgt == pad_id).unsqueeze(-2)
+    # plt.imsave("padding_mask.png", tgt_mask[0])
+    # print(f"tgt_mask: {tgt_mask.size()}")
+    triangle_mask = triangle_matrix(tgt.size(-1))
+    # print(f"triangle_matrix: {triangle_mask.size()}")
+    # plt.imsave("triangle_mask.png", triangle_mask)
+    tgt_mask = tgt_mask | triangle_mask
+    # print(f"combined_mask: {tgt_mask.size()}")
+    # plt.imsave("combined_mask.png", tgt_mask[0])
+    # print("===")
+    return tgt_mask.unsqueeze(-3)
+
+
+def triangle_matrix(sz: int, device: torch.device | None = None) -> Tensor:
+    m = torch.full((sz, sz), True, device=device, dtype=torch.bool)
+    return torch.triu(m, diagonal=1)
 
 
 class DictCollator:
@@ -253,7 +285,7 @@ class DictCollator:
         self.pad_id = pad_id
         self.max_len = max_len
 
-    def __call__(self, batch: list[dict[str, Tensor]]) -> dict[str, Tensor]:
+    def __call__(self, batch: list[dict[str, Tensor]]) -> tuple[dict[str, Tensor], int]:
         # batch is a list of dictionaries
         batched_data = {}
 
@@ -262,38 +294,53 @@ class DictCollator:
             # If the value is a tensor and represents a sequence (e.g., 1D or 2D tensor)
             if isinstance(batch[0][key], torch.Tensor):
                 # Stack or pad the tensors for each key
-                if batch[0][key].dim() == 0:
-                    # If it's a scalar tensor, stack them
+                if batch[0][key].dim() == 0:  # If it's a scalar tensor, stack them
                     batched_data[key] = torch.stack([sample[key] for sample in batch])
-                elif batch[0][key].dim() == 1:  # Check if it's a sequence (1D or higher)
-                    # Pad sequences to the same length
-                    samples = [sample[key] for sample in batch]
-                    # Generate padding directions depending on max_len
-                    paddings = [(0, self.max_len - s.size(-1)) for s in samples]
-                    padded_elements = [F.pad(s, p, "constant", self.pad_id) for s, p in zip(samples, paddings)]
-
-                    batched_data[key] = torch.stack(padded_elements)
-                elif batch[0][key].dim() == 2:
-                    # Find largest dimensions of the square 2-dimensional matrices
-                    # (they are always square)
-                    # Get elements in batch
-                    samples = [sample[key] for sample in batch]
-                    # Generate padding directions depending on largest element in batch
-                    paddings = [(0, self.max_len - s.size(-1), 0, self.max_len - s.size(-2)) for s in samples]
-                    padded_elements = [F.pad(s, p, "constant", self.pad_id) for s, p in zip(samples, paddings)]
-
-                    batched_data[key] = torch.stack(padded_elements)
+                elif batch[0][key].dim() == 1:  # Check if it's a sequence (1D)
+                    batched_data[key] = self.pad_1d([sample[key] for sample in batch])
+                elif batch[0][key].dim() == 2:  # Check if it's a 2D matrix
+                    batched_data[key] = self.pad_2d([sample[key] for sample in batch])
                 else:
-                    print(batch[0][key])
-                    raise ValueError("Cannot deal with dimensions bigger than 2")
+                    raise ValueError(f"Cannot deal with dimensions bigger than 2: {batch[0][key]}")
             else:
                 # If the value is not a tensor, just collect them in a list
                 batched_data[key] = [sample[key] for sample in batch]
 
-        # for k, v in batched_data.items():
-        #     print(k)
-        #     print(v.size())
-        return batched_data
+        batched_data["l_mask"] = (batched_data["l_ids"] == self.pad_id).unsqueeze(-2).unsqueeze(-2)
+        batched_data["r_mask"] = (batched_data["r_ids"] == self.pad_id).unsqueeze(-2).unsqueeze(-2)
+
+        if batched_data["tgt_ids"] is not None:
+            # The _y versions are always shifted right.
+            # For matrices this means right and down.
+            full_tgt_ids = batched_data["tgt_ids"]
+            batched_data["tgt_ids"] = full_tgt_ids[:, :-1]
+            batched_data["tgt_ids_y"] = full_tgt_ids[:, 1:]
+            batched_data["tgt_mask"] = make_std_mask(batched_data["tgt_ids"], self.pad_id)
+
+            # full_tgt_anc = batched_data["tgt_anc"]
+            # batched_data["tgt_anc"] = full_tgt_anc[:, :-1, :-1]
+            # batched_data["tgt_anc_y"] = full_tgt_anc[:, :1, :1]
+
+            # full_tgt_sib = batched_data["tgt_sib"]
+            # batched_data["tgt_sib"] = full_tgt_sib[:, :-1, :-1]
+            # batched_data["tgt_sib_y"] = full_tgt_sib[:, :1, :1]
+
+        return batched_data, (batched_data["tgt_ids_y"] != self.pad_id).data.sum()
+
+    def pad_1d(self, samples: list[Tensor]) -> Tensor:
+        # Pad sequences to the same length
+        # Generate padding directions depending on max_len
+        paddings = [(0, self.max_len - s.size(-1)) for s in samples]
+        padded_elements = [F.pad(s, p, "constant", self.pad_id) for s, p in zip(samples, paddings)]
+        return torch.stack(padded_elements)
+
+    def pad_2d(self, samples: list[Tensor]) -> Tensor:
+        # Find largest dimensions of the square 2-dimensional matrices
+        # (they are always square)
+        # Generate padding directions depending on largest element in batch
+        paddings = [(0, self.max_len - s.size(-1), 0, self.max_len - s.size(-2)) for s in samples]
+        padded_elements = [F.pad(s, p, "constant", self.pad_id) for s, p in zip(samples, paddings)]
+        return torch.stack(padded_elements)
 
 
 # def subsequent_mask(size: int):

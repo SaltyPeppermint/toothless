@@ -90,35 +90,38 @@ class FastASTTrans(nn.Module):
         r_mem = self.encode_r(data)
 
         decoder_outputs = self.decode(data, l_mem, r_mem)
-        out = self.generator(decoder_outputs)
-        return out
+        output = self.generator(decoder_outputs)
+        return output
 
     def encode_l(self, data: dict[str, Tensor]) -> Tensor:
         l_emb = self.l_embedding(data["l_ids"])
-        l_mem = self.l_encoder(l_emb, data["l_anc"], data["l_sib"])
+        l_mem = self.l_encoder(l_emb, data["l_anc"], data["l_sib"], data["l_mask"])
         return l_mem
 
     def encode_r(self, data: dict[str, Tensor]) -> Tensor:
         r_emb = self.r_embedding(data["r_ids"])
-        r_mem = self.r_encoder(r_emb, data["r_anc"], data["r_sib"])
+        r_mem = self.r_encoder(r_emb, data["r_anc"], data["r_sib"], data["r_mask"])
         return r_mem
 
     def decode(self, data: dict[str, Tensor], l_mem: Tensor, r_mem: Tensor):
         tgt = self.tgt_embedding(data["tgt_ids"])
-        tgt = tgt.permute(1, 0, 2)
-        l_mem = l_mem.permute(1, 0, 2)
-        r_mem = r_mem.permute(1, 0, 2)
+        # tgt = tgt.permute(1, 0, 2)
+        # l_mem = l_mem.permute(1, 0, 2)
+        # r_mem = r_mem.permute(1, 0, 2)
 
         outputs = self.decoder(
             tgt,
             data["tgt_anc"],
             data["tgt_sib"],
+            data["tgt_mask"],
             l_mem,
             data["l_anc"],
             data["l_sib"],
+            data["l_mask"],
             r_mem,
             data["r_anc"],
             data["r_sib"],
+            data["r_mask"],
         )
         outputs = outputs.permute(1, 0, 2)
         return outputs

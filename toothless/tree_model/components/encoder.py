@@ -22,11 +22,17 @@ class ASTEncoderLayer(nn.Module):
         self.sublayers = stack_layers(SublayerConnection(d_model, dropout), 2)
 
     def forward(
-        self, src: Tensor, pos_indices: Tensor, rel_q: Tensor | None, rel_k: Tensor | None, rel_v: Tensor | None
+        self,
+        src: Tensor,
+        pos_indices: Tensor,
+        mask: Tensor,
+        rel_q: Tensor | None,
+        rel_k: Tensor | None,
+        rel_v: Tensor | None,
     ) -> Tensor:
         src = self.sublayers[0](
             src,
-            lambda x: self.self_attn(x, pos_indices, rel_q=rel_q, rel_k=rel_k, rel_v=rel_v),
+            lambda x: self.self_attn(x, pos_indices, mask, rel_q=rel_q, rel_k=rel_k, rel_v=rel_v),
         )
         src = self.sublayers[1](src, self.feed_forward)
         return src
@@ -48,13 +54,20 @@ class ASTEncoder(RelCoder):
         self.layers = stack_layers(encoder_layer, num_layers)
         self.norm = nn.LayerNorm(d_model)
 
-    def forward(self, src: Tensor, src_anc: Tensor, src_sib: Tensor) -> Tensor:
+    def forward(self, src: Tensor, src_anc: Tensor, src_sib: Tensor, mask: Tensor) -> Tensor:
+        """
+        seq_len -1 for rightshift of train samples for autoregressive training
+
+        :param src:     [batch_size, seq_len -1, d_model]
+        :param mask:    [batch_size, 1, 1, seq_len]
+        :return         [batch_size, seq_len -1, d_model]
+        """
         rel_q, rel_k, rel_v = self.rel_pos_emb()
 
         pos_indices = self.concat_pos(src_anc, src_sib)
 
-        output = src
+        output = src  # batch_size, max_len, d_model
         for layer in self.layers:
-            output = layer(output, pos_indices, rel_q, rel_k, rel_v)
+            output = layer(output, pos_indices, mask, rel_q, rel_k, rel_v)
 
         return self.norm(output)
