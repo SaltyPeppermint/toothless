@@ -4,11 +4,7 @@ from torch import Tensor
 
 from toothless.tree_model.components.mha import FastMHA
 from toothless.tree_model.components.rel_pos import RelCoder
-from toothless.tree_model.components.utils import (
-    FeedForward,
-    SublayerConnection,
-    stack_layers,
-)
+from toothless.tree_model.components.utils import FeedForward, stack_layers
 
 
 class ASTEncoderLayer(nn.Module):
@@ -22,12 +18,13 @@ class ASTEncoderLayer(nn.Module):
     ):
         super(ASTEncoderLayer, self).__init__()
 
-        self.num_heads = num_heads
-        self.d_model = d_model
-
         self.self_attn = FastMHA(d_model, num_heads, dropout=dropout, cross_attn=False)
+        self.self_norm = nn.LayerNorm(d_model)
+        self.self_dropout = nn.Dropout(dropout)
+
         self.feed_forward = FeedForward(d_model, dim_feed_forward, dropout=dropout, activation=activation)
-        self.sublayers = stack_layers(SublayerConnection(d_model, dropout), 2)
+        self.ff_norm = nn.LayerNorm(d_model)
+        self.ff_dropout = nn.Dropout(dropout)
 
     def forward(
         self,
@@ -38,8 +35,11 @@ class ASTEncoderLayer(nn.Module):
         rel_k: Tensor | None,
     ) -> Tensor:
         """ """
-        src = self.sublayers[0](src, lambda x: self.self_attn(x, pos_indices, mask, rel_q=rel_q, rel_k=rel_k))
-        src = self.sublayers[1](src, self.feed_forward)
+
+        src = src + self.self_dropout(self.self_attn(self.self_norm(src), pos_indices, mask, rel_q=rel_q, rel_k=rel_k))
+        src = src + self.ff_dropout(self.feed_forward(self.ff_norm(src)))
+        # src = self.sublayers[0](src, lambda x: self.self_attn(x, pos_indices, mask, rel_q=rel_q, rel_k=rel_k))
+        # src = self.sublayers[1](src, self.feed_forward)
         return src
 
 

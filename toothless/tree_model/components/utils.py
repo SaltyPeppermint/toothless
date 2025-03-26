@@ -19,15 +19,15 @@ class FeedForward(nn.Module):
         return self.linear2(self.dropout(self.activation(self.linear1(x))))
 
 
-class SublayerConnection(nn.Module):
-    def __init__(self, size: int, dropout: float = 0.1):
-        super(SublayerConnection, self).__init__()
-        self.norm = nn.LayerNorm(size)
-        self.dropout = nn.Dropout(dropout)
+# class SublayerConnection(nn.Module):
+#     def __init__(self, size: int, dropout: float = 0.1):
+#         super(SublayerConnection, self).__init__()
+#         self.norm = nn.LayerNorm(size)
+#         self.dropout = nn.Dropout(dropout)
 
-    def forward(self, x: Tensor, sublayer: nn.Module) -> Tensor:
-        output = sublayer(self.norm(x))
-        return x + self.dropout(output)
+#     def forward(self, x: Tensor, sublayer: nn.Module) -> Tensor:
+#         output = sublayer(self.norm(x))
+#         return x + self.dropout(output)
 
 
 class PositionalEncoding(nn.Module):

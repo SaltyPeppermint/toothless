@@ -4,11 +4,7 @@ from torch import Tensor
 
 from toothless.tree_model.components.mha import FastMHA
 from toothless.tree_model.components.rel_pos import RelCoder
-from toothless.tree_model.components.utils import (
-    FeedForward,
-    SublayerConnection,
-    stack_layers,
-)
+from toothless.tree_model.components.utils import FeedForward, stack_layers
 
 
 class ASTDoubleDecoderLayer(nn.Module):
@@ -22,14 +18,21 @@ class ASTDoubleDecoderLayer(nn.Module):
     ):
         super(ASTDoubleDecoderLayer, self).__init__()
 
-        self.num_heads = num_heads
-        self.d_model = d_model
-
+        self.self_norm = nn.LayerNorm(d_model)
         self.self_attn = FastMHA(d_model, num_heads, dropout=dropout, cross_attn=False)
+        self.self_dropout = nn.Dropout(dropout)
+
+        self.l_norm = nn.LayerNorm(d_model)
         self.l_cross_attn = FastMHA(d_model, num_heads, dropout=dropout, cross_attn=True)
+        self.l_dropout = nn.Dropout(dropout)
+
+        self.r_norm = nn.LayerNorm(d_model)
         self.r_cross_attn = FastMHA(d_model, num_heads, dropout=dropout, cross_attn=True)
+        self.r_dropout = nn.Dropout(dropout)
+
+        self.ff_norm = nn.LayerNorm(d_model)
         self.feed_forward = FeedForward(d_model, dim_feed_forward, dropout=dropout, activation=activation)
-        self.sublayers = stack_layers(SublayerConnection(d_model, dropout), 4)
+        self.ff_dropout = nn.Dropout(dropout)
 
     def forward(
         self,
@@ -45,23 +48,52 @@ class ASTDoubleDecoderLayer(nn.Module):
         rel_q: Tensor | None,
         rel_k: Tensor | None,
     ) -> Tensor:
-        tgt = self.sublayers[0](tgt, lambda x: self.self_attn(x, tgt_pos_indices, tgt_mask, rel_q=rel_q, rel_k=rel_k))
-
-        tgt = self.sublayers[1](
-            tgt,
-            lambda x: self.l_cross_attn(
-                x, tgt_pos_indices, l_mask, cross_state=l_mem, cross_pos_indices=l_pos_indices, rel_q=rel_q, rel_k=rel_k
-            ),
+        tgt = tgt + self.self_dropout(
+            self.self_attn(self.self_norm(tgt), tgt_pos_indices, tgt_mask, rel_q=rel_q, rel_k=rel_k)
+        )
+        tgt = tgt + self.l_dropout(
+            self.l_cross_attn(
+                self.l_norm(tgt),
+                tgt_pos_indices,
+                l_mask,
+                cross_state=l_mem,
+                cross_pos_indices=l_pos_indices,
+                rel_q=rel_q,
+                rel_k=rel_k,
+            )
         )
 
-        tgt = self.sublayers[2](
-            tgt,
-            lambda x: self.r_cross_attn(
-                x, tgt_pos_indices, r_mask, cross_state=r_mem, cross_pos_indices=r_pos_indices, rel_q=rel_q, rel_k=rel_k
-            ),
+        tgt = tgt + self.r_dropout(
+            self.r_cross_attn(
+                self.r_norm(tgt),
+                tgt_pos_indices,
+                r_mask,
+                cross_state=r_mem,
+                cross_pos_indices=r_pos_indices,
+                rel_q=rel_q,
+                rel_k=rel_k,
+            )
         )
 
-        tgt = self.sublayers[3](tgt, self.feed_forward)
+        tgt = tgt + self.ff_dropout(self.feed_forward(self.ff_norm(tgt)))
+
+        # tgt = self.sublayers[0](tgt, lambda x: self.self_attn(x, tgt_pos_indices, tgt_mask, rel_q=rel_q, rel_k=rel_k))
+
+        # tgt = self.sublayers[1](
+        #     tgt,
+        #     lambda x: self.l_cross_attn(
+        #         x, tgt_pos_indices, l_mask, cross_state=l_mem, cross_pos_indices=l_pos_indices, rel_q=rel_q, rel_k=rel_k
+        #     ),
+        # )
+
+        # tgt = self.sublayers[2](
+        #     tgt,
+        #     lambda x: self.r_cross_attn(
+        #         x, tgt_pos_indices, r_mask, cross_state=r_mem, cross_pos_indices=r_pos_indices, rel_q=rel_q, rel_k=rel_k
+        #     ),
+        # )
+
+        # tgt = self.sublayers[3](tgt, self.feed_forward)
         return tgt
 
 
