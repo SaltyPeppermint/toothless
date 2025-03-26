@@ -16,19 +16,18 @@ class FastMHA(nn.Module):
         dtype: torch.dtype | None = None,
     ):
         super(FastMHA, self).__init__()
-        self.factory_kwargs = {"device": device, "dtype": dtype}
 
-        self.d_proj = d_model // num_heads
+        self.d_k = d_model // num_heads
         self.cross_attn = cross_attn
         self.num_heads = num_heads
 
         self.dropout = nn.Dropout(dropout)
 
-        self.q_proj = nn.Linear(d_model, d_model, bias=True, **self.factory_kwargs)
-        self.k_proj = nn.Linear(d_model, d_model, bias=True, **self.factory_kwargs)
-        self.v_proj = nn.Linear(d_model, d_model, bias=True, **self.factory_kwargs)
+        self.q_proj = nn.Linear(d_model, d_model, bias=True, device=device, dtype=dtype)
+        self.k_proj = nn.Linear(d_model, d_model, bias=True, device=device, dtype=dtype)
+        self.v_proj = nn.Linear(d_model, d_model, bias=True, device=device, dtype=dtype)
 
-        self.out_proj = nn.Linear(d_model, d_model, bias=True, **self.factory_kwargs)
+        self.out_proj = nn.Linear(d_model, d_model, bias=True, device=device, dtype=dtype)
 
     def forward(
         self,
@@ -39,18 +38,16 @@ class FastMHA(nn.Module):
         cross_pos_indices: Tensor | None = None,
         rel_q: Tensor | None = None,
         rel_k: Tensor | None = None,
-        rel_v: Tensor | None = None,
     ) -> Tensor:
         """
-        :param hidden_state:    [batch_size, seq_len, d_model]
-        :param pos_indices:     [batch_size, k+1, seq_len]
-        :param mask:            [batch_size, 1, 1 (or seql_len if cross_attention), seq_len]
-        :param cross_state:
-        :param cross_pos_indices:
-        :param rel_v:           [k+1, d_proj] | None
-        :param rel_v:           [k+1, d_proj] | None
-        :param rel_v:           [k+1, d_proj] | None
-        :return                 [batch_size, seq_len, d_model]
+        :param hidden_state:        [batch_size, seq_len, d_model]
+        :param pos_indices:         [batch_size, num_heads, seq_len, seq_len]
+        :param mask:                [batch_size, 1, 1 (or seql_len if cross_attention), seq_len]
+        :param cross_state:         [batch_size, seq_len, d_model]  | None
+        :param cross_pos_indices:   [batch_size, 2k+2, seq_len]     | None
+        :param rel_v:               [k+1, d_k]                      | None
+        :param rel_v:               [k+1, d_k]                      | None
+        :return                     [batch_size, seq_len, d_model]
         """
         if cross_state is None:
             cross_state = hidden_state
@@ -59,13 +56,11 @@ class FastMHA(nn.Module):
 
         batch_size = hidden_state.size(0)
         # batch_size, num_heads, seq_len, d_proj
-        query = self.q_proj(hidden_state).view(batch_size, -1, self.num_heads, self.d_proj).transpose(1, 2)
-        key = self.k_proj(cross_state).view(batch_size, -1, self.num_heads, self.d_proj).transpose(1, 2)
-        value = self.v_proj(cross_state).view(batch_size, -1, self.num_heads, self.d_proj).transpose(1, 2)
+        query = self.q_proj(hidden_state).view(batch_size, -1, self.num_heads, self.d_k).transpose(1, 2)
+        key = self.k_proj(cross_state).view(batch_size, -1, self.num_heads, self.d_k).transpose(1, 2)
+        value = self.v_proj(cross_state).view(batch_size, -1, self.num_heads, self.d_k).transpose(1, 2)
 
-        # mask = self.make_mask(mask, pos_indices)
-
-        output = self.rel_attn(query, key, value, cross_pos_indices, pos_indices, rel_q, rel_k, rel_v, mask)
+        output = self.rel_attn(query, key, value, cross_pos_indices, pos_indices, rel_q, rel_k, mask)
         return self.finalize_output(output)  # batch_size, max_seq_len, d_model
 
     def rel_attn(
@@ -77,22 +72,19 @@ class FastMHA(nn.Module):
         kv_pos_indices: Tensor,
         rel_q: Tensor | None,
         rel_k: Tensor | None,
-        rel_v: Tensor | None,
         mask: Tensor,
     ) -> Tensor:
         """
-        :param q:           [batch_size, num_heads, seq_len, d_proj]
-        :param k:           [batch_size, num_heads, seq_len, d_proj]
-        :param v:           [batch_size, num_heads, seq_len, d_proj]
-        :param q_c2p_pos:   [batch_size, num_heads, k+1, seq_len]
-        :param kv_c2p_pos:  [batch_size, num_heads, k+1, seq_len]
-        :param rel_q:       [1, num_heads, k+1, d_proj]
-        :param rel_k:       [1, num_heads, k+1, d_proj]
-        :param rel_v:       [1, num_heads, k+1, d_proj]
-        :param mask:        [batch_size, 1, 1 (or seql_len if cross_attention), seq_len]
-        :return:            [batch_size, num_heads, seq_len, d_proj]
+        :param q:               [batch_size, num_heads, seq_len, d_k]
+        :param k:               [batch_size, num_heads, seq_len, d_k]
+        :param v:               [batch_size, num_heads, seq_len, d_k]
+        :param q_pos_indices:   [batch_size, num_heads, seq_len, seq_len]
+        :param kv_pos_indices:  [batch_size, num_heads, seq_len, seq_len]
+        :param rel_q:           [1, num_heads, 2k+2, d_k] | None
+        :param rel_k:           [1, num_heads, 2k+2, d_k] | None
+        :param mask:            [batch_size, 1, 1 (or seql_len if cross_attention), seq_len]
+        :return:                [batch_size, num_heads, seq_len, d_k]
         """
-        # max_rel_pos = pos_enc.size(2)
         scale_factor = 1
         if rel_k is not None:
             scale_factor += 1
@@ -118,27 +110,19 @@ class FastMHA(nn.Module):
         # position -> context
         if rel_q is not None:
             scale = 1 / math.sqrt(rel_q.size(-1) * scale_factor)
-            print(f"rel_q shape: {rel_q.size()}")
-            pos_q = rel_q.unsqueeze(-2)
-            print(f"pos_q shape: {pos_q.size()}")
-            p2c_attn = torch.matmul(pos_q * scale, key.transpose(-1, -2))
-            print(f"p2c_att shape: {p2c_attn.size()}")
+            p2c_attn = torch.matmul(rel_q * scale, key.transpose(-1, -2))
             p2c_attn = torch.gather(p2c_attn, dim=-2, index=q_pos_indices)
             attn_scores += p2c_attn
 
         # context -> position
         if rel_k is not None:
             scale = 1 / math.sqrt(rel_k.size(-1) * scale_factor)
-            print(f"pos_k shape: {rel_k.size()}")
-            pos_k = rel_k.unsqueeze(-2)
-            print(f"pos_k shape: {pos_k.size()}")
-            c2p_attn = torch.matmul(query, pos_k.transpose(-1, -2) * scale)
+            c2p_attn = torch.matmul(query, rel_k.transpose(-1, -2) * scale)
             # (
             #     torch.clamp(relative_pos + att_span, 0, att_span * 2 - 1)
             #     .squeeze(0)
             #     .expand([query.size(0), query.size(1), query.size(-1)])
             # )
-            print(f"c2p_att shape: {c2p_attn.size()}")
             c2p_attn = torch.gather(c2p_attn, dim=-1, index=kv_pos_indices.transpose(-2, -1))
             attn_scores += c2p_attn
 
@@ -147,12 +131,6 @@ class FastMHA(nn.Module):
         attn_probs = self.dropout(attn_scores)
 
         context = torch.matmul(attn_probs, value)
-
-        if rel_v is not None:
-            pos_v = rel_v.unsqueeze(-2)
-            positional_context = torch.matmul(attn_probs, pos_v)
-            positional_context = torch.gather(positional_context, dim=-1, index=kv_pos_indices)
-            context += positional_context
 
         return context  # , attn_probs
 

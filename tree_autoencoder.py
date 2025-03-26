@@ -34,7 +34,7 @@ def mk_loaders(rank: int, world_size: int, dataset: CustomDataset, data_args: Da
     pad_id = dataset.vocab.pad_token_id
     assert pad_id == 0
 
-    collator = DictCollator(pad_id, 256)
+    collator = DictCollator(pad_id, data_args.max_len)
 
     # Create the dataloaders
     train_dataloader = DataLoader(
@@ -79,8 +79,8 @@ def train(
         batch = {k: v.to(rank) for k, v in batch.items()}
 
         # Forward pass
-        out = model(batch)
-        loss = criterion(out.view(-1, out.size(-1)), batch["tgt_ids_y"].view(-1))
+        outputs = model(batch)
+        loss = criterion(outputs.view(-1, outputs.size(-1)), batch["tgt_ids_y"].view(-1))
 
         # Backwards pass
         optimizer.zero_grad()
@@ -106,6 +106,7 @@ def eval(
     rank: int,
     model: nn.Module,
     eval_dataloader: DataLoader,
+    criterion: CrossEntropyLoss,
     epoch: int,
     writer: SummaryWriter | None = None,
 ):
@@ -114,8 +115,9 @@ def eval(
     for batch in eval_dataloader:
         batch = {k: v.to(rank) for k, v in batch.items()}
         with torch.no_grad():
-            outputs = model(**batch)
-            ddp_loss[0] += outputs.loss
+            outputs = model(batch)
+            loss = criterion(outputs.view(-1, outputs.size(-1)), batch["tgt_ids_y"].view(-1))
+            ddp_loss[0] += loss
             ddp_loss[1] += len(batch)
 
     dist.all_reduce(ddp_loss, op=dist.ReduceOp.SUM)
@@ -134,7 +136,7 @@ def fsdp_main(
     torch.cuda.set_device(rank)
 
     # Load Data
-    dataset = CustomDataset(data_args.data_path, 5, data_args.random_state)
+    dataset = CustomDataset(data_args.data_path, 5, data_args.max_rel_distance, random_state=data_args.random_state)
     train_dataloader, eval_dataloader = mk_loaders(rank, world_size, dataset, data_args)
 
     rank0_print(rank, "DataLoaders ready")
@@ -153,10 +155,12 @@ def fsdp_main(
         model_args.num_layers,  # 1 for testing
         model_args.dim_feed_forward,
         model_args.dropout,
-        "anc_sib",
-        1,
-        3,
-        dataset.max_distance,
+        "p2q_p2k_p2v",
+        model_args.anc_heads,
+        model_args.sib_heads,
+        dataset.max_rel_distance,
+        device=torch.device("cuda", rank),
+        dtype=torch.bfloat16 if model_args.bf16 else torch.float32,
     )
     model.to(rank)
     rank0_print(rank, "Model loaded")
@@ -190,7 +194,7 @@ def fsdp_main(
 
         # Optionally, evaluate the model on the validation set after each epoch
         if train_args.eval_each_epoch:
-            eval(rank, model, eval_dataloader, epoch, writer)
+            eval(rank, model, eval_dataloader, criterion, epoch, writer)
 
         lr_scheduler.step()
 

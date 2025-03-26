@@ -1,3 +1,4 @@
+import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch import Tensor
@@ -12,8 +13,19 @@ from toothless.tree_model.components.utils import (
 
 
 class ASTDoubleDecoderLayer(nn.Module):
-    def __init__(self, d_model: int, num_heads: int, dim_feed_forward: int, dropout: float = 0.2, activation=F.gelu):
+    def __init__(
+        self,
+        d_model: int,
+        num_heads: int,
+        dim_feed_forward: int,
+        dropout: float = 0.2,
+        activation=F.gelu,
+        device: torch.device | None = None,
+        dtype: torch.dtype | None = None,
+    ):
         super(ASTDoubleDecoderLayer, self).__init__()
+        self.factory_kwargs = {"device": device, "dtype": dtype}
+
         self.num_heads = num_heads
         self.d_model = d_model
 
@@ -38,38 +50,20 @@ class ASTDoubleDecoderLayer(nn.Module):
         r_mask: Tensor,
         rel_q: Tensor | None,
         rel_k: Tensor | None,
-        rel_v: Tensor | None,
     ) -> Tensor:
-        tgt = self.sublayers[0](
-            tgt,
-            lambda x: self.self_attn(x, tgt_pos_indices, tgt_mask, rel_q=rel_q, rel_k=rel_k, rel_v=rel_v),
-        )
+        tgt = self.sublayers[0](tgt, lambda x: self.self_attn(x, tgt_pos_indices, tgt_mask, rel_q=rel_q, rel_k=rel_k))
 
         tgt = self.sublayers[1](
             tgt,
             lambda x: self.l_cross_attn(
-                x,
-                tgt_pos_indices,
-                l_mask,
-                cross_state=l_mem,
-                cross_pos_indices=l_pos_indices,
-                rel_q=rel_q,
-                rel_k=rel_k,
-                rel_v=rel_v,
+                x, tgt_pos_indices, l_mask, cross_state=l_mem, cross_pos_indices=l_pos_indices, rel_q=rel_q, rel_k=rel_k
             ),
         )
 
         tgt = self.sublayers[2](
             tgt,
             lambda x: self.r_cross_attn(
-                x,
-                tgt_pos_indices,
-                r_mask,
-                cross_state=r_mem,
-                cross_pos_indices=r_pos_indices,
-                rel_q=rel_q,
-                rel_k=rel_k,
-                rel_v=rel_v,
+                x, tgt_pos_indices, r_mask, cross_state=r_mem, cross_pos_indices=r_pos_indices, rel_q=rel_q, rel_k=rel_k
             ),
         )
 
@@ -88,10 +82,14 @@ class ASTDoubleDecoder(RelCoder):
         max_rel_pos: int,
         d_model: int,
         dropout: float = 0.2,
+        device: torch.device | None = None,
+        dtype: torch.dtype | None = None,
     ):
-        super(ASTDoubleDecoder, self).__init__(n_anc_heads, n_sib_heads, pos_type, max_rel_pos, d_model, dropout)
+        super(ASTDoubleDecoder, self).__init__(
+            n_anc_heads, n_sib_heads, pos_type, max_rel_pos, d_model, dropout, device, dtype
+        )
         self.layers = stack_layers(decoder_layer, num_layers)
-        self.norm = nn.LayerNorm(d_model)
+        self.norm = nn.LayerNorm(d_model, device=device, dtype=dtype)
 
         self.tgt_pos_pad = None
         self.l_mem_pos_pad = None
@@ -123,7 +121,7 @@ class ASTDoubleDecoder(RelCoder):
         :param r_mask:      [batch_size, 1, 1, seq_len]
         :return             [batch_size, seq_len - 1, d_model]
         """
-        rel_q, rel_k, rel_v = self.rel_pos_emb()
+        rel_q, rel_k = self.rel_pos_emb()
 
         tgt_pos_indices = self.concat_pos(tgt_anc, tgt_sib)
         l_pos_indices = self.concat_pos(l_mem_anc, l_mem_sib)
@@ -143,26 +141,6 @@ class ASTDoubleDecoder(RelCoder):
                 r_mask,
                 rel_q,
                 rel_k,
-                rel_v,
             )
 
         return self.norm(output)
-
-    # def ensure_positional_padding(
-    #     self,
-    #     batch_size: int,
-    #     max_rel_pos: int,
-    #     max_ast_len: int,
-    #     device: torch.device,
-    # ):
-    #     if self.tgt_pos_pad is None or batch_size != self.tgt_pos_pad.size(0):
-    #         pos_enc_padding = torch.arange(max_ast_len, device=device).unsqueeze(0).unsqueeze(0).unsqueeze(0)
-    #         self.tgt_pos_pad = pos_enc_padding.repeat(batch_size, self.n_anc_heads + self.n_sib_heads, max_rel_pos, 1)
-
-    #     if self.l_mem_pos_pad is None or batch_size != self.l_mem_pos_pad.size(0):
-    #         pos_enc_padding = torch.arange(max_ast_len, device=device).unsqueeze(0).unsqueeze(0).unsqueeze(0)
-    #         self.l_mem_pos_pad = pos_enc_padding.repeat(batch_size, self.n_anc_heads + self.n_sib_heads, max_rel_pos, 1)
-
-    #     if self.r_mem_pos_pad is None or batch_size != self.r_mem_pos_pad.size(0):
-    #         pos_enc_padding = torch.arange(max_ast_len, device=device).unsqueeze(0).unsqueeze(0).unsqueeze(0)
-    #         self.r_mem_pos_pad = pos_enc_padding.repeat(batch_size, self.n_anc_heads + self.n_sib_heads, max_rel_pos, 1)

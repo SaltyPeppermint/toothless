@@ -105,13 +105,13 @@ class CustomDataset(data.Dataset):
         self,
         json_root: Path,
         pairs_per_expl: int,
-        max_distance: int = 32,
+        max_rel_distance: int = 15,
         random_state: int = 42,
         force_reload: bool = False,
     ):
         self.json_root = Path(json_root)
         self.pairs_per_expl = pairs_per_expl
-        self.max_distance = max_distance
+        self.max_rel_distance = max_rel_distance
         self.force_reload = force_reload
         torch.manual_seed(random_state)
 
@@ -241,8 +241,8 @@ class CustomDataset(data.Dataset):
         #     dtype=torch.bool,
         #     size=torch.Size((150, 150)),
         # )
-        anc_matrix = torch.tensor(graph_data.anc_matrix(self.max_distance, double_pad=True), dtype=torch.int16)
-        sib_matrix = torch.tensor(graph_data.sib_matrix(self.max_distance, double_pad=True), dtype=torch.int16)
+        anc_matrix = torch.tensor(graph_data.anc_matrix(self.max_rel_distance, double_pad=True), dtype=torch.int64)
+        sib_matrix = torch.tensor(graph_data.sib_matrix(self.max_rel_distance, double_pad=True), dtype=torch.int64)
 
         return ids, anc_matrix, sib_matrix
 
@@ -297,9 +297,9 @@ class DictCollator:
                 if batch[0][key].dim() == 0:  # If it's a scalar tensor, stack them
                     batched_data[key] = torch.stack([sample[key] for sample in batch])
                 elif batch[0][key].dim() == 1:  # Check if it's a sequence (1D)
-                    batched_data[key] = self.pad_1d([sample[key] for sample in batch])
+                    batched_data[key] = self.pad_1d([sample[key] for sample in batch], key)
                 elif batch[0][key].dim() == 2:  # Check if it's a 2D matrix
-                    batched_data[key] = self.pad_2d([sample[key] for sample in batch])
+                    batched_data[key] = self.pad_2d([sample[key] for sample in batch], key)
                 else:
                     raise ValueError(f"Cannot deal with dimensions bigger than 2: {batch[0][key]}")
             else:
@@ -317,28 +317,34 @@ class DictCollator:
             batched_data["tgt_ids_y"] = full_tgt_ids[:, 1:]
             batched_data["tgt_mask"] = make_std_mask(batched_data["tgt_ids"], self.pad_id)
 
-            # full_tgt_anc = batched_data["tgt_anc"]
-            # batched_data["tgt_anc"] = full_tgt_anc[:, :-1, :-1]
-            # batched_data["tgt_anc_y"] = full_tgt_anc[:, :1, :1]
+            full_tgt_anc = batched_data["tgt_anc"]
+            batched_data["tgt_anc"] = full_tgt_anc[:, :-1, :-1]
+            batched_data["tgt_anc_y"] = full_tgt_anc[:, :1, :1]
 
-            # full_tgt_sib = batched_data["tgt_sib"]
-            # batched_data["tgt_sib"] = full_tgt_sib[:, :-1, :-1]
-            # batched_data["tgt_sib_y"] = full_tgt_sib[:, :1, :1]
+            full_tgt_sib = batched_data["tgt_sib"]
+            batched_data["tgt_sib"] = full_tgt_sib[:, :-1, :-1]
+            batched_data["tgt_sib_y"] = full_tgt_sib[:, :1, :1]
 
         return batched_data, (batched_data["tgt_ids_y"] != self.pad_id).data.sum()
 
-    def pad_1d(self, samples: list[Tensor]) -> Tensor:
+    def pad_1d(self, samples: list[Tensor], key: str) -> Tensor:
         # Pad sequences to the same length
         # Generate padding directions depending on max_len
-        paddings = [(0, self.max_len - s.size(-1)) for s in samples]
+        pad_len = self.max_len
+        if "tgt" in key:
+            pad_len += 1  # Extra padding since tgt will be shifted
+        paddings = [(0, pad_len - s.size(-1)) for s in samples]
         padded_elements = [F.pad(s, p, "constant", self.pad_id) for s, p in zip(samples, paddings)]
         return torch.stack(padded_elements)
 
-    def pad_2d(self, samples: list[Tensor]) -> Tensor:
+    def pad_2d(self, samples: list[Tensor], key: str) -> Tensor:
         # Find largest dimensions of the square 2-dimensional matrices
         # (they are always square)
         # Generate padding directions depending on largest element in batch
-        paddings = [(0, self.max_len - s.size(-1), 0, self.max_len - s.size(-2)) for s in samples]
+        pad_len = self.max_len
+        if "tgt" in key:
+            pad_len += 1  # Extra padding since tgt will be shifted
+        paddings = [(0, pad_len - s.size(-1), 0, pad_len - s.size(-2)) for s in samples]
         padded_elements = [F.pad(s, p, "constant", self.pad_id) for s, p in zip(samples, paddings)]
         return torch.stack(padded_elements)
 
