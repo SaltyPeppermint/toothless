@@ -5,7 +5,7 @@ import torch.nn as nn
 from torch import Tensor
 
 
-class FastMHA(nn.Module):
+class MultiHeadAttention(nn.Module):
     def __init__(
         self,
         d_model: int,
@@ -13,7 +13,7 @@ class FastMHA(nn.Module):
         dropout: float = 0.1,
         cross_attn: bool = False,
     ):
-        super(FastMHA, self).__init__()
+        super(MultiHeadAttention, self).__init__()
 
         self.d_k = d_model // num_heads
         self.cross_attn = cross_attn

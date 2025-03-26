@@ -2,7 +2,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch import Tensor
 
-from toothless.tree_model.components.mha import FastMHA
+from toothless.tree_model.components.mha import MultiHeadAttention
 from toothless.tree_model.components.rel_pos import RelCoder
 from toothless.tree_model.components.utils import FeedForward, stack_layers
 
@@ -19,15 +19,15 @@ class ASTDoubleDecoderLayer(nn.Module):
         super(ASTDoubleDecoderLayer, self).__init__()
 
         self.self_norm = nn.LayerNorm(d_model)
-        self.self_attn = FastMHA(d_model, num_heads, dropout=dropout, cross_attn=False)
+        self.self_attn = MultiHeadAttention(d_model, num_heads, dropout=dropout, cross_attn=False)
         self.self_dropout = nn.Dropout(dropout)
 
         self.l_norm = nn.LayerNorm(d_model)
-        self.l_cross_attn = FastMHA(d_model, num_heads, dropout=dropout, cross_attn=True)
+        self.l_cross_attn = MultiHeadAttention(d_model, num_heads, dropout=dropout, cross_attn=True)
         self.l_dropout = nn.Dropout(dropout)
 
         self.r_norm = nn.LayerNorm(d_model)
-        self.r_cross_attn = FastMHA(d_model, num_heads, dropout=dropout, cross_attn=True)
+        self.r_cross_attn = MultiHeadAttention(d_model, num_heads, dropout=dropout, cross_attn=True)
         self.r_dropout = nn.Dropout(dropout)
 
         self.ff_norm = nn.LayerNorm(d_model)
