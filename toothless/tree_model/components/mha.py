@@ -12,8 +12,6 @@ class FastMHA(nn.Module):
         num_heads: int,
         dropout: float = 0.1,
         cross_attn: bool = False,
-        device: torch.device | None = None,
-        dtype: torch.dtype | None = None,
     ):
         super(FastMHA, self).__init__()
 
@@ -23,11 +21,11 @@ class FastMHA(nn.Module):
 
         self.dropout = nn.Dropout(dropout)
 
-        self.q_proj = nn.Linear(d_model, d_model, bias=True, device=device, dtype=dtype)
-        self.k_proj = nn.Linear(d_model, d_model, bias=True, device=device, dtype=dtype)
-        self.v_proj = nn.Linear(d_model, d_model, bias=True, device=device, dtype=dtype)
+        self.q_proj = nn.Linear(d_model, d_model, bias=True)
+        self.k_proj = nn.Linear(d_model, d_model, bias=True)
+        self.v_proj = nn.Linear(d_model, d_model, bias=True)
 
-        self.out_proj = nn.Linear(d_model, d_model, bias=True, device=device, dtype=dtype)
+        self.out_proj = nn.Linear(d_model, d_model, bias=True)
 
     def forward(
         self,
@@ -75,9 +73,9 @@ class FastMHA(nn.Module):
         mask: Tensor,
     ) -> Tensor:
         """
-        :param q:               [batch_size, num_heads, seq_len, d_k]
-        :param k:               [batch_size, num_heads, seq_len, d_k]
-        :param v:               [batch_size, num_heads, seq_len, d_k]
+        :param query:           [batch_size, num_heads, seq_len, d_k]
+        :param key:             [batch_size, num_heads, seq_len, d_k]
+        :param value:           [batch_size, num_heads, seq_len, d_k]
         :param q_pos_indices:   [batch_size, num_heads, seq_len, seq_len]
         :param kv_pos_indices:  [batch_size, num_heads, seq_len, seq_len]
         :param rel_q:           [1, num_heads, 2k+2, d_k] | None
@@ -94,7 +92,7 @@ class FastMHA(nn.Module):
         # Attention Calculation.
         # Always sum over dimension of heads d_k
         # context -> context
-        scale = 1 / math.sqrt(query.size(-1) * scale_factor)
+        scale = 1 / math.sqrt(self.d_k * scale_factor)
         c2c = torch.matmul(query, key.transpose(-1, -2) * scale)
         attn_scores = c2c  # [batch_size, num_heads, seq_len, seq_len]
 
@@ -109,14 +107,14 @@ class FastMHA(nn.Module):
 
         # position -> context
         if rel_q is not None:
-            scale = 1 / math.sqrt(rel_q.size(-1) * scale_factor)
+            scale = 1 / math.sqrt(self.d_k * scale_factor)
             p2c_attn = torch.matmul(rel_q * scale, key.transpose(-1, -2))
             p2c_attn = torch.gather(p2c_attn, dim=-2, index=q_pos_indices)
             attn_scores += p2c_attn
 
         # context -> position
         if rel_k is not None:
-            scale = 1 / math.sqrt(rel_k.size(-1) * scale_factor)
+            scale = 1 / math.sqrt(self.d_k * scale_factor)
             c2p_attn = torch.matmul(query, rel_k.transpose(-1, -2) * scale)
             # (
             #     torch.clamp(relative_pos + att_span, 0, att_span * 2 - 1)

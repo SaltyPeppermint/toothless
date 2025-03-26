@@ -1,5 +1,4 @@
 from torch import Tensor
-import torch
 import torch.nn.functional as F
 from torch import nn
 
@@ -22,27 +21,17 @@ class FastASTTrans(nn.Module):
         n_sib_heads: int,
         max_rel_pos: int,
         state_dict=None,
-        device: torch.device | None = None,
-        dtype: torch.dtype | None = None,
     ):
         super(FastASTTrans, self).__init__()
         self.num_heads = n_anc_heads + n_sib_heads
 
         self.pos_type = pos_type.split("_")
 
-        self.l_embedding = Embeddings(
-            d_model, src_vocab_size, dropout=dropout, with_pos=False, device=device, dtype=dtype
-        )
-        self.r_embedding = Embeddings(
-            d_model, src_vocab_size, dropout=dropout, with_pos=False, device=device, dtype=dtype
-        )
-        self.tgt_embedding = Embeddings(
-            d_model, tgt_vocab_size, dropout=dropout, with_pos=True, device=device, dtype=dtype
-        )
+        self.l_embedding = Embeddings(d_model, src_vocab_size, dropout=dropout, with_pos=False)
+        self.r_embedding = Embeddings(d_model, src_vocab_size, dropout=dropout, with_pos=False)
+        self.tgt_embedding = Embeddings(d_model, tgt_vocab_size, dropout=dropout, with_pos=True)
 
-        l_encoder_layer = ASTEncoderLayer(
-            d_model, self.num_heads, dim_feed_forward, dropout, activation=F.gelu, device=device, dtype=dtype
-        )
+        l_encoder_layer = ASTEncoderLayer(d_model, self.num_heads, dim_feed_forward, dropout, activation=F.gelu)
         self.l_encoder = ASTEncoder(
             l_encoder_layer,
             d_model,
@@ -52,13 +41,9 @@ class FastASTTrans(nn.Module):
             self.pos_type,
             max_rel_pos,
             dropout=dropout,
-            device=device,
-            dtype=dtype,
         )
 
-        r_encoder_layer = ASTEncoderLayer(
-            d_model, self.num_heads, dim_feed_forward, dropout, activation=F.gelu, device=device, dtype=dtype
-        )
+        r_encoder_layer = ASTEncoderLayer(d_model, self.num_heads, dim_feed_forward, dropout, activation=F.gelu)
         self.r_encoder = ASTEncoder(
             r_encoder_layer,
             d_model,
@@ -68,12 +53,10 @@ class FastASTTrans(nn.Module):
             self.pos_type,
             max_rel_pos,
             dropout=dropout,
-            device=device,
-            dtype=dtype,
         )
 
         decoder_layer = ASTDoubleDecoderLayer(
-            d_model, self.num_heads, dim_feed_forward, dropout=dropout, activation=F.gelu, device=device, dtype=dtype
+            d_model, self.num_heads, dim_feed_forward, dropout=dropout, activation=F.gelu
         )
         self.decoder = ASTDoubleDecoder(
             decoder_layer,
@@ -84,11 +67,9 @@ class FastASTTrans(nn.Module):
             max_rel_pos,
             d_model,
             dropout=dropout,
-            device=device,
-            dtype=dtype,
         )
 
-        self.generator = Generator(tgt_vocab_size, d_model, dropout, device=device, dtype=dtype)
+        self.generator = Generator(tgt_vocab_size, d_model, dropout)
 
         print("Init or load model.")
         if state_dict is None:

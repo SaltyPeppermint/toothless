@@ -8,18 +8,10 @@ from torch import Tensor
 
 
 class FeedForward(nn.Module):
-    def __init__(
-        self,
-        d_model: int,
-        dim_feed_forward: int,
-        dropout: float = 0.1,
-        activation=F.gelu,
-        device: torch.device | None = None,
-        dtype: torch.dtype | None = None,
-    ):
+    def __init__(self, d_model: int, dim_feed_forward: int, dropout: float = 0.1, activation=F.gelu):
         super(FeedForward, self).__init__()
-        self.linear1 = nn.Linear(d_model, dim_feed_forward, device=device, dtype=dtype)
-        self.linear2 = nn.Linear(dim_feed_forward, d_model, device=device, dtype=dtype)
+        self.linear1 = nn.Linear(d_model, dim_feed_forward)
+        self.linear2 = nn.Linear(dim_feed_forward, d_model)
         self.dropout = nn.Dropout(dropout)
         self.activation = activation
 
@@ -28,11 +20,9 @@ class FeedForward(nn.Module):
 
 
 class SublayerConnection(nn.Module):
-    def __init__(
-        self, size: int, dropout: float = 0.1, device: torch.device | None = None, dtype: torch.dtype | None = None
-    ):
+    def __init__(self, size: int, dropout: float = 0.1):
         super(SublayerConnection, self).__init__()
-        self.norm = nn.LayerNorm(size, device=device, dtype=dtype)
+        self.norm = nn.LayerNorm(size)
         self.dropout = nn.Dropout(dropout)
 
     def forward(self, x: Tensor, sublayer: nn.Module) -> Tensor:
@@ -65,16 +55,14 @@ class Embeddings(nn.Module):
         vocab_size: int,
         dropout: float = 0.1,
         with_pos: bool = False,
-        device: torch.device | None = None,
-        dtype: torch.dtype | None = None,
     ):
         super(Embeddings, self).__init__()
-        self.word_embeddings = nn.Embedding(vocab_size, embedding_dim, padding_idx=0, device=device, dtype=dtype)
+        self.word_embeddings = nn.Embedding(vocab_size, embedding_dim, padding_idx=0)
         if with_pos:
             self.pos_emb = PositionalEncoding(embedding_dim)
         else:
             self.pos_emb = None
-        self.norm = nn.LayerNorm(embedding_dim, device=device, dtype=dtype)
+        self.norm = nn.LayerNorm(embedding_dim)
         self.dropout = nn.Dropout(dropout)
 
     def forward(self, x: Tensor) -> Tensor:
@@ -93,14 +81,11 @@ class Generator(nn.Module):
         tgt_vocab_size: int,
         hidden_size: int,
         dropout: float = 0.1,
-        device: torch.device | None = None,
-        dtype: torch.dtype | None = None,
     ):
         super(Generator, self).__init__()
-        self.factory_kwargs = {"device": device, "dtype": dtype}
 
         self.dropout = nn.Dropout(dropout)
-        self.linear = nn.Linear(hidden_size, tgt_vocab_size, device=device, dtype=dtype)
+        self.linear = nn.Linear(hidden_size, tgt_vocab_size)
 
     def forward(self, outputs):
         out = self.linear(outputs)

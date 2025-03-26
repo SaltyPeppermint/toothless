@@ -1,4 +1,3 @@
-import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch import Tensor
@@ -20,11 +19,8 @@ class ASTDoubleDecoderLayer(nn.Module):
         dim_feed_forward: int,
         dropout: float = 0.2,
         activation=F.gelu,
-        device: torch.device | None = None,
-        dtype: torch.dtype | None = None,
     ):
         super(ASTDoubleDecoderLayer, self).__init__()
-        self.factory_kwargs = {"device": device, "dtype": dtype}
 
         self.num_heads = num_heads
         self.d_model = d_model
@@ -82,14 +78,10 @@ class ASTDoubleDecoder(RelCoder):
         max_rel_pos: int,
         d_model: int,
         dropout: float = 0.2,
-        device: torch.device | None = None,
-        dtype: torch.dtype | None = None,
     ):
-        super(ASTDoubleDecoder, self).__init__(
-            n_anc_heads, n_sib_heads, pos_type, max_rel_pos, d_model, dropout, device, dtype
-        )
+        super(ASTDoubleDecoder, self).__init__(n_anc_heads, n_sib_heads, pos_type, max_rel_pos, d_model, dropout)
         self.layers = stack_layers(decoder_layer, num_layers)
-        self.norm = nn.LayerNorm(d_model, device=device, dtype=dtype)
+        self.norm = nn.LayerNorm(d_model)
 
         self.tgt_pos_pad = None
         self.l_mem_pos_pad = None

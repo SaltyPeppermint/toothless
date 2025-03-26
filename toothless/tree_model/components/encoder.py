@@ -1,4 +1,3 @@
-import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch import Tensor
@@ -20,20 +19,15 @@ class ASTEncoderLayer(nn.Module):
         dim_feed_forward: int,
         dropout: float = 0.2,
         activation=F.gelu,
-        device: torch.device | None = None,
-        dtype: torch.dtype | None = None,
     ):
         super(ASTEncoderLayer, self).__init__()
-        self.factory_kwargs = {"device": device, "dtype": dtype}
 
         self.num_heads = num_heads
         self.d_model = d_model
 
-        self.self_attn = FastMHA(d_model, num_heads, dropout=dropout, cross_attn=False, device=device, dtype=dtype)
-        self.feed_forward = FeedForward(
-            d_model, dim_feed_forward, dropout=dropout, activation=activation, device=device, dtype=dtype
-        )
-        self.sublayers = stack_layers(SublayerConnection(d_model, dropout, device=device, dtype=dtype), 2)
+        self.self_attn = FastMHA(d_model, num_heads, dropout=dropout, cross_attn=False)
+        self.feed_forward = FeedForward(d_model, dim_feed_forward, dropout=dropout, activation=activation)
+        self.sublayers = stack_layers(SublayerConnection(d_model, dropout), 2)
 
     def forward(
         self,
@@ -60,14 +54,10 @@ class ASTEncoder(RelCoder):
         pos_type: list[str],
         max_rel_pos: int,
         dropout: float = 0.2,
-        device: torch.device | None = None,
-        dtype: torch.dtype | None = None,
     ):
-        super(ASTEncoder, self).__init__(
-            n_anc_heads, n_sib_heads, pos_type, max_rel_pos, d_model, dropout, device=device, dtype=dtype
-        )
+        super(ASTEncoder, self).__init__(n_anc_heads, n_sib_heads, pos_type, max_rel_pos, d_model, dropout)
         self.layers = stack_layers(encoder_layer, num_layers)
-        self.norm = nn.LayerNorm(d_model, device=device, dtype=dtype)
+        self.norm = nn.LayerNorm(d_model)
 
     def forward(self, src: Tensor, src_anc: Tensor, src_sib: Tensor, mask: Tensor) -> Tensor:
         """

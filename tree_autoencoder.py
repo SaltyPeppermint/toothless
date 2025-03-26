@@ -1,4 +1,5 @@
 import torch
+from torch import Tensor
 import torch.nn as nn
 import torch.optim as optim
 from torch.optim.lr_scheduler import CosineAnnealingLR
@@ -20,7 +21,9 @@ from toothless.tree_model.model import FastASTTrans
 from toothless.tree_model.args import DataArguments, TrainingArguments, ModelArguments
 
 
-def mk_loaders(rank: int, world_size: int, dataset: CustomDataset, data_args: DataArguments):
+def mk_loaders(
+    rank: int, world_size: int, dataset: CustomDataset, data_args: DataArguments
+) -> tuple[DataLoader[dict[str, Tensor]], DataLoader[dict[str, Tensor]]]:
     # Create and load dataset
     # split_idx = int(data_args.split_size * len(dataset))
     train_dataset, test_dataset = torch.utils.data.random_split(
@@ -133,6 +136,11 @@ def fsdp_main(
     setup_process_group(rank, world_size)
     rank0_print(rank, "Distributed Network ready")
 
+    if rank == 0:
+        writer = SummaryWriter()
+    else:
+        writer = None
+
     torch.cuda.set_device(rank)
 
     # Load Data
@@ -152,18 +160,25 @@ def fsdp_main(
         vocab_size,
         vocab_size,
         model_args.d_model,
-        model_args.num_layers,  # 1 for testing
+        model_args.num_layers,
         model_args.dim_feed_forward,
         model_args.dropout,
         "p2q_p2k_p2v",
         model_args.anc_heads,
         model_args.sib_heads,
         dataset.max_rel_distance,
-        device=torch.device("cuda", rank),
-        dtype=torch.bfloat16 if model_args.bf16 else torch.float32,
+        # # device=torch.device("cuda", rank),
+        # dtype=torch.bfloat16 if model_args.bf16 else torch.float32,
     )
+
     model.to(rank)
-    rank0_print(rank, "Model loaded")
+    rank0_print(rank, "Model created")
+
+    if writer:
+        example_batch, _ = next(iter(eval_dataloader))
+        example_batch = {k: v.to(rank) for k, v in example_batch.items()}
+        writer.add_graph(model, example_batch)
+        model.to(rank)
 
     # FSDP model
     model = FSDP(model)
@@ -179,11 +194,6 @@ def fsdp_main(
     lr_scheduler = CosineAnnealingLR(optimizer, T_max=train_args.tmax)
     criterion = CrossEntropyLoss(ignore_index=dataset.vocab.pad_token_id, label_smoothing=0.1)
     rank0_print(rank, "Optimizer and LR Scheduler ready")
-
-    if rank == 0:
-        writer = SummaryWriter()
-    else:
-        writer = None
 
     rank0_print(rank, "Starting training!")
 

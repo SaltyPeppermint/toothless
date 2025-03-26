@@ -7,15 +7,7 @@ from toothless.tree_model.components.utils import concat_vec
 
 class RelCoder(nn.Module):
     def __init__(
-        self,
-        anc_heads: int,
-        sib_heads: int,
-        pos_type: list[str],
-        max_rel_pos: int,
-        d_model: int,
-        dropout: float = 0.2,
-        device: torch.device | None = None,
-        dtype: torch.dtype | None = None,
+        self, anc_heads: int, sib_heads: int, pos_type: list[str], max_rel_pos: int, d_model: int, dropout: float = 0.2
     ):
         super(RelCoder, self).__init__()
         self.anc_heads = anc_heads
@@ -23,13 +15,9 @@ class RelCoder(nn.Module):
         d_k = d_model // (anc_heads + sib_heads)
 
         if anc_heads > 0:
-            self.anc_rel_emb = RelEmbeddings(
-                d_k, anc_heads, max_rel_pos, pos_type, dropout=dropout, device=device, dtype=dtype
-            )
+            self.anc_rel_emb = RelEmbeddings(d_k, anc_heads, max_rel_pos, pos_type, dropout=dropout)
         if sib_heads > 0:
-            self.sib_rel_emb = RelEmbeddings(
-                d_k, sib_heads, max_rel_pos, pos_type, dropout=dropout, device=device, dtype=dtype
-            )
+            self.sib_rel_emb = RelEmbeddings(d_k, sib_heads, max_rel_pos, pos_type, dropout=dropout)
 
     def rel_pos_emb(self) -> tuple[Tensor | None, Tensor | None]:
         rel_anc_q, rel_anc_k = None, None
@@ -57,16 +45,7 @@ class RelCoder(nn.Module):
 
 
 class RelEmbeddings(nn.Module):
-    def __init__(
-        self,
-        d_k: int,
-        num_heads: int,
-        k: int,
-        pos_type: list[str],
-        dropout: float = 0.0,
-        device: torch.device | None = None,
-        dtype: torch.dtype | None = None,
-    ):
+    def __init__(self, d_k: int, num_heads: int, k: int, pos_type: list[str], dropout: float = 0.0):
         super(RelEmbeddings, self).__init__()
 
         self.d_k = d_k
@@ -74,9 +53,9 @@ class RelEmbeddings(nn.Module):
         self.pos_type = pos_type
         self.num_heads = num_heads
         if "p2q" in pos_type:
-            self.rel_emb_q = nn.Embedding(self.k, d_k, padding_idx=0, device=device, dtype=dtype)  # pad inf -> zero
+            self.rel_emb_q = nn.Embedding(self.k, d_k, padding_idx=0)  # pad inf -> zero
         if "p2k" in pos_type:
-            self.rel_emb_k = nn.Embedding(self.k, d_k, padding_idx=0, device=device, dtype=dtype)
+            self.rel_emb_k = nn.Embedding(self.k, d_k, padding_idx=0)
 
         self.dropout = nn.Dropout(dropout)
 
