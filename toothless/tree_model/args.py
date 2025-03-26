@@ -7,7 +7,7 @@ from typing import Optional
 class ModelArguments:
     output_dir: str = field(default="model")
     d_model: int = field(default=256)
-    num_layers: int = field(default=2)
+    num_layers: int = field(default=8)
     embedding_size: int = field(default=256)
     dim_feed_forward: int = field(default=256)
     dropout: float = field(default=0.2)

@@ -1,9 +1,7 @@
-import json
 from pathlib import Path
 
 import polars as pl
 
-# import matplotlib.pyplot as plt
 from eggshell import rise  # type: ignore
 # from tokenizers import Tokenizer
 # from tokenizers.models import BPE
@@ -19,85 +17,10 @@ from torch import Tensor
 from torch.utils import data
 import torch.nn.functional as F
 
-
-# from eggshell import TreeData
+from toothless.tree_model.vocab import BOS_TOKEN, EOS_TOKEN, MASK_TOKEN, PAD_TOKEN, UNK_TOKEN, SimpleVocab
 from toothless.utils import loading
 
 CHUNK_SIZE = 128
-
-PAD_TOKEN = "<pad>"
-UNK_TOKEN = "<unk>"
-BOS_TOKEN = "<s>"
-EOS_TOKEN = "</s>"
-# SEP_TOKEN = "<sep>"
-MASK_TOKEN = "<mask>"
-
-
-class SimpleVocab:
-    def __init__(
-        self, pad_token: str, unk_token: str, mask_token: str, bos_token: str, eos_token: str, tokens: list[str]
-    ):
-        self.pad_token = pad_token
-        self.unk_token = unk_token
-        self.mask_token = mask_token
-        self.bos_token = bos_token
-        self.eos_token = eos_token
-        self.vocab = {}
-        for id, token in enumerate([pad_token, unk_token, mask_token, bos_token, eos_token] + tokens):
-            self.vocab[token] = id
-
-        self.rev_vocab = {v: k for k, v in self.vocab.items()}
-
-    def __len__(self):
-        return len(self.vocab)
-
-    def token2id(self, token: str) -> int:
-        if token in self.vocab.keys():
-            return self.vocab[token]
-        else:
-            return self.vocab[self.unk_token]
-
-    def id2token(self, id: int) -> str:
-        return self.rev_vocab[id]
-
-    @property
-    def pad_token_id(self):
-        return self.vocab[self.pad_token]
-
-    @property
-    def mask_token_id(self):
-        return self.vocab[self.mask_token]
-
-    @property
-    def unk_token_id(self):
-        return self.vocab[self.unk_token_id]
-
-    @property
-    def bos_token_id(self):
-        return self.vocab[self.bos_token]
-
-    @property
-    def eos_token_id(self):
-        return self.vocab[self.eos_token]
-
-    def save(self, path: Path):
-        d = {}
-        d["pad_token"] = self.pad_token
-        d["unk_token"] = self.unk_token
-        d["mask_token"] = self.mask_token
-        d["bos_token"] = self.bos_token
-        d["eos_token"] = self.eos_token
-        d["vocab"] = self.vocab
-        with open(path, mode="w", encoding="utf-8") as f:
-            json.dump(d, f)
-
-    @staticmethod
-    def load(path: Path):
-        with open(path, mode="r", encoding="utf-8") as f:
-            d = json.load(f)
-
-        v = [d["vocab"][i] for i in range(3, len(d["vocab"]))]
-        return SimpleVocab(d["pad_token"], d["unk_token"], d["mask_token"], d["bos_token"], d["eos_token"], v)
 
 
 class CustomDataset(data.Dataset):
@@ -261,17 +184,12 @@ class CustomDataset(data.Dataset):
 
 def make_std_mask(tgt: Tensor, pad_id: int):
     "Create a mask to hide padding and future words."
-    # print(f"tgt shape: {tgt.size()}")
     tgt_mask = (tgt == pad_id).unsqueeze(-2)
     # plt.imsave("padding_mask.png", tgt_mask[0])
-    # print(f"tgt_mask: {tgt_mask.size()}")
     triangle_mask = triangle_matrix(tgt.size(-1))
-    # print(f"triangle_matrix: {triangle_mask.size()}")
     # plt.imsave("triangle_mask.png", triangle_mask)
     tgt_mask = tgt_mask | triangle_mask
-    # print(f"combined_mask: {tgt_mask.size()}")
     # plt.imsave("combined_mask.png", tgt_mask[0])
-    # print("===")
     return tgt_mask.unsqueeze(-3)
 
 
@@ -289,74 +207,53 @@ class DictCollator:
         # batch is a list of dictionaries
         batched_data = {}
 
-        # Iterate over each key in the dictionary
-        for key in batch[0].keys():
-            # If the value is a tensor and represents a sequence (e.g., 1D or 2D tensor)
-            if isinstance(batch[0][key], torch.Tensor):
-                # Stack or pad the tensors for each key
-                if batch[0][key].dim() == 0:  # If it's a scalar tensor, stack them
-                    batched_data[key] = torch.stack([sample[key] for sample in batch])
-                elif batch[0][key].dim() == 1:  # Check if it's a sequence (1D)
-                    batched_data[key] = self.pad_1d([sample[key] for sample in batch], key)
-                elif batch[0][key].dim() == 2:  # Check if it's a 2D matrix
-                    batched_data[key] = self.pad_2d([sample[key] for sample in batch], key)
-                else:
-                    raise ValueError(f"Cannot deal with dimensions bigger than 2: {batch[0][key]}")
-            else:
-                # If the value is not a tensor, just collect them in a list
-                batched_data[key] = [sample[key] for sample in batch]
+        batched_data["distance"] = torch.stack([sample["distance"] for sample in batch])
 
+        batched_data["l_ids"] = self.pad_1d([sample["l_ids"] for sample in batch], False)
+        batched_data["l_anc"] = self.pad_2d([sample["l_anc"] for sample in batch], False)
+        batched_data["l_sib"] = self.pad_2d([sample["l_sib"] for sample in batch], False)
         batched_data["l_mask"] = (batched_data["l_ids"] == self.pad_id).unsqueeze(-2).unsqueeze(-2)
+
+        batched_data["r_ids"] = self.pad_1d([sample["r_ids"] for sample in batch], False)
+        batched_data["r_anc"] = self.pad_2d([sample["r_anc"] for sample in batch], False)
+        batched_data["r_sib"] = self.pad_2d([sample["r_sib"] for sample in batch], False)
         batched_data["r_mask"] = (batched_data["r_ids"] == self.pad_id).unsqueeze(-2).unsqueeze(-2)
 
-        if batched_data["tgt_ids"] is not None:
-            # The _y versions are always shifted right.
-            # For matrices this means right and down.
-            full_tgt_ids = batched_data["tgt_ids"]
-            batched_data["tgt_ids"] = full_tgt_ids[:, :-1]
-            batched_data["tgt_ids_y"] = full_tgt_ids[:, 1:]
-            batched_data["tgt_mask"] = make_std_mask(batched_data["tgt_ids"], self.pad_id)
+        # The _y versions are always shifted right.
+        # For matrices this means right and down.
+        full_tgt_ids = self.pad_1d([sample["tgt_ids"] for sample in batch], True)
+        batched_data["tgt_ids"] = full_tgt_ids[:, :-1]
+        batched_data["tgt_ids_y"] = full_tgt_ids[:, 1:]
+        batched_data["tgt_mask"] = make_std_mask(batched_data["tgt_ids"], self.pad_id)
 
-            full_tgt_anc = batched_data["tgt_anc"]
-            batched_data["tgt_anc"] = full_tgt_anc[:, :-1, :-1]
-            batched_data["tgt_anc_y"] = full_tgt_anc[:, :1, :1]
+        full_tgt_anc = self.pad_2d([sample["tgt_anc"] for sample in batch], True)
+        batched_data["tgt_anc"] = full_tgt_anc[:, :-1, :-1]
+        batched_data["tgt_anc_y"] = full_tgt_anc[:, :1, :1]
 
-            full_tgt_sib = batched_data["tgt_sib"]
-            batched_data["tgt_sib"] = full_tgt_sib[:, :-1, :-1]
-            batched_data["tgt_sib_y"] = full_tgt_sib[:, :1, :1]
+        full_tgt_sib = self.pad_2d([sample["tgt_sib"] for sample in batch], True)
+        batched_data["tgt_sib"] = full_tgt_sib[:, :-1, :-1]
+        batched_data["tgt_sib_y"] = full_tgt_sib[:, :1, :1]
 
-        return batched_data, (batched_data["tgt_ids_y"] != self.pad_id).data.sum()
+        n_tokens = int((full_tgt_ids != self.pad_id).data.sum())
+        return batched_data, n_tokens
 
-    def pad_1d(self, samples: list[Tensor], key: str) -> Tensor:
+    def pad_1d(self, samples: list[Tensor], extra_pad: bool) -> Tensor:
         # Pad sequences to the same length
         # Generate padding directions depending on max_len
         pad_len = self.max_len
-        if "tgt" in key:
+        if extra_pad:
             pad_len += 1  # Extra padding since tgt will be shifted
         paddings = [(0, pad_len - s.size(-1)) for s in samples]
         padded_elements = [F.pad(s, p, "constant", self.pad_id) for s, p in zip(samples, paddings)]
         return torch.stack(padded_elements)
 
-    def pad_2d(self, samples: list[Tensor], key: str) -> Tensor:
+    def pad_2d(self, samples: list[Tensor], extra_pad: bool) -> Tensor:
         # Find largest dimensions of the square 2-dimensional matrices
         # (they are always square)
         # Generate padding directions depending on largest element in batch
         pad_len = self.max_len
-        if "tgt" in key:
+        if extra_pad:
             pad_len += 1  # Extra padding since tgt will be shifted
         paddings = [(0, pad_len - s.size(-1), 0, pad_len - s.size(-2)) for s in samples]
         padded_elements = [F.pad(s, p, "constant", self.pad_id) for s, p in zip(samples, paddings)]
         return torch.stack(padded_elements)
-
-
-# def subsequent_mask(size: int):
-#     attn_shape = (1, size, size)
-#     sub_sequent_mask = torch.triu(np.ones(attn_shape), k=1).astype("uint8")
-#     return torch.from_numpy(sub_sequent_mask) != 0
-
-
-# def make_std_mask(nl: Tensor, pad: int):
-#     "Create a mask to hide padding and future words."
-#     nl_mask = (nl == pad).unsqueeze(-2)
-#     nl_mask = nl_mask | subsequent_mask(nl.size(-1)).type_as(nl_mask.data)
-#     return nl_mask

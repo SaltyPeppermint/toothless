@@ -11,7 +11,6 @@ import torch.multiprocessing as mp
 from torch.nn import CrossEntropyLoss
 from torch.utils.tensorboard.writer import SummaryWriter
 
-
 from tqdm.auto import tqdm
 import transformers
 
@@ -160,25 +159,22 @@ def fsdp_main(
         vocab_size,
         vocab_size,
         model_args.d_model,
-        model_args.num_layers,
+        model_args.num_layers,  # 1 for testing
         model_args.dim_feed_forward,
         model_args.dropout,
-        "p2q_p2k_p2v",
+        "p2q_p2k",
         model_args.anc_heads,
         model_args.sib_heads,
         dataset.max_rel_distance,
-        # # device=torch.device("cuda", rank),
-        # dtype=torch.bfloat16 if model_args.bf16 else torch.float32,
     )
-
-    model.to(rank)
-    rank0_print(rank, "Model created")
 
     if writer:
         example_batch, _ = next(iter(eval_dataloader))
-        example_batch = {k: v.to(rank) for k, v in example_batch.items()}
         writer.add_graph(model, example_batch)
         model.to(rank)
+
+    model.to(rank)
+    rank0_print(rank, "Model loaded")
 
     # FSDP model
     model = FSDP(model)
@@ -196,7 +192,6 @@ def fsdp_main(
     rank0_print(rank, "Optimizer and LR Scheduler ready")
 
     rank0_print(rank, "Starting training!")
-
     init_start_event.record(torch.cuda.current_stream())
 
     for epoch in range(train_args.num_train_epochs):

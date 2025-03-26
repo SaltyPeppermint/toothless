@@ -1,42 +1,77 @@
-# import logging
-# import os
-# from pathlib import Path
-# import pickle
-# import unicodedata
-# from collections import Counter
-# from tokenizers.trainers import BpeTrainer
-# from tokenizers import Tokenizer
-# from tokenizers.models import BPE
+import json
+from pathlib import Path
 
 
-# from tqdm import tqdm
-
-# PAD = 0
-# UNK = 1
-# BOS = 2
-# EOS = 3
-
-# PAD_WORD = "<pad>"
-# UNK_WORD = "<unk>"
-# BOS_WORD = "<s>"
-# EOS_WORD = "</s>"
-
-# log = logging.getLogger()
+PAD_TOKEN = "<pad>"
+UNK_TOKEN = "<unk>"
+BOS_TOKEN = "<s>"
+EOS_TOKEN = "</s>"
+# SEP_TOKEN = "<sep>"
+MASK_TOKEN = "<mask>"
 
 
-# def load_vocab(data_dir, is_split, data_type):
-#     log.info(f"load vocab from {data_dir}, is_split = {is_split}")
+class SimpleVocab:
+    def __init__(
+        self, pad_token: str, unk_token: str, mask_token: str, bos_token: str, eos_token: str, tokens: list[str]
+    ):
+        self.pad_token = pad_token
+        self.unk_token = unk_token
+        self.mask_token = mask_token
+        self.bos_token = bos_token
+        self.eos_token = eos_token
+        self.vocab = {}
+        for id, token in enumerate([pad_token, unk_token, mask_token, bos_token, eos_token] + tokens):
+            self.vocab[token] = id
 
-#     return src_vocab
+        self.rev_vocab = {v: k for k, v in self.vocab.items()}
 
+    def __len__(self):
+        return len(self.vocab)
 
-# def create_vocab(cache_dir: Path):
-#     # create vocab
-#     log.info("init vocab")
-#     tokenizer = Tokenizer(BPE(unk_token="<unk>"))
-#     trainer = BpeTrainer(special_tokens=["<unk>", "<pad>", "<s>", "</s>", "<mask>"])
-#     tokenizer.train(files=["wiki.train.raw", "wiki.valid.raw", "wiki.test.raw"], trainer=trainer)
-#     output_dir = cache_dir / "vocab.tok"
-#     os.makedirs(output_dir, exist_ok=True)
-#     tokenizer.save(output_dir)
-#     return tokenizer
+    def token2id(self, token: str) -> int:
+        if token in self.vocab.keys():
+            return self.vocab[token]
+        else:
+            return self.vocab[self.unk_token]
+
+    def id2token(self, id: int) -> str:
+        return self.rev_vocab[id]
+
+    @property
+    def pad_token_id(self):
+        return self.vocab[self.pad_token]
+
+    @property
+    def mask_token_id(self):
+        return self.vocab[self.mask_token]
+
+    @property
+    def unk_token_id(self):
+        return self.vocab[self.unk_token_id]
+
+    @property
+    def bos_token_id(self):
+        return self.vocab[self.bos_token]
+
+    @property
+    def eos_token_id(self):
+        return self.vocab[self.eos_token]
+
+    def save(self, path: Path):
+        d = {}
+        d["pad_token"] = self.pad_token
+        d["unk_token"] = self.unk_token
+        d["mask_token"] = self.mask_token
+        d["bos_token"] = self.bos_token
+        d["eos_token"] = self.eos_token
+        d["vocab"] = self.vocab
+        with open(path, mode="w", encoding="utf-8") as f:
+            json.dump(d, f)
+
+    @staticmethod
+    def load(path: Path):
+        with open(path, mode="r", encoding="utf-8") as f:
+            d = json.load(f)
+
+        v = [d["vocab"][i] for i in range(3, len(d["vocab"]))]
+        return SimpleVocab(d["pad_token"], d["unk_token"], d["mask_token"], d["bos_token"], d["eos_token"], v)
