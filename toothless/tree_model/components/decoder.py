@@ -29,8 +29,6 @@ class ASTDoubleDecoderLayer(nn.Module):
         self.l_cross_attn = FastMHA(d_model, num_heads, dropout=dropout, cross_attn=True)
         self.r_cross_attn = FastMHA(d_model, num_heads, dropout=dropout, cross_attn=True)
         self.feed_forward = FeedForward(d_model, dim_feed_forward, dropout=dropout, activation=activation)
-
-        self.dropout = nn.Dropout(dropout)
         self.sublayers = stack_layers(SublayerConnection(d_model, dropout), 4)
 
     def forward(
@@ -70,16 +68,20 @@ class ASTDoubleDecoderLayer(nn.Module):
 class ASTDoubleDecoder(RelCoder):
     def __init__(
         self,
-        decoder_layer: ASTDoubleDecoderLayer,
+        d_model: int,
+        dim_feed_forward: int,
         num_layers: int,
         n_anc_heads: int,
         n_sib_heads: int,
         pos_type: list[str],
         max_rel_pos: int,
-        d_model: int,
         dropout: float = 0.2,
     ):
         super(ASTDoubleDecoder, self).__init__(n_anc_heads, n_sib_heads, pos_type, max_rel_pos, d_model, dropout)
+        decoder_layer = ASTDoubleDecoderLayer(
+            d_model, n_anc_heads + n_sib_heads, dim_feed_forward, dropout=dropout, activation=F.gelu
+        )
+
         self.layers = stack_layers(decoder_layer, num_layers)
         self.norm = nn.LayerNorm(d_model)
 

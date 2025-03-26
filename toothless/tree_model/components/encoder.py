@@ -46,8 +46,8 @@ class ASTEncoderLayer(nn.Module):
 class ASTEncoder(RelCoder):
     def __init__(
         self,
-        encoder_layer: ASTEncoderLayer,
         d_model: int,
+        dim_feed_forward: int,
         num_layers: int,
         n_anc_heads: int,
         n_sib_heads: int,
@@ -56,6 +56,10 @@ class ASTEncoder(RelCoder):
         dropout: float = 0.2,
     ):
         super(ASTEncoder, self).__init__(n_anc_heads, n_sib_heads, pos_type, max_rel_pos, d_model, dropout)
+        encoder_layer = ASTEncoderLayer(
+            d_model, n_anc_heads + n_sib_heads, dim_feed_forward, dropout, activation=F.gelu
+        )
+
         self.layers = stack_layers(encoder_layer, num_layers)
         self.norm = nn.LayerNorm(d_model)
 
