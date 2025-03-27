@@ -1,13 +1,19 @@
+import sys
 import torch.distributed as dist
+import logging
 
+def rank0print(rank, message):
+    if rank ==0:
+        print(message)
 
-def rank0_print(rank, *args):
-    if rank == 0:
-        print(*args)
-
+def rank0eprint(rank, message):
+    if rank ==0:
+        print(message,file=sys.stderr)
 
 def setup_process_group(rank, world_size):
-    rank0_print(rank, "Setting up process group...")
+    if rank == 0:
+        logger = logging.getLogger(__name__)
+        logger.info("Setting up process group...")
     # os.environ["MASTER_ADDR"] = "localhost"
     # os.environ["MASTER_PORT"] = "12355"
 

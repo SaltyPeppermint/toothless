@@ -23,10 +23,9 @@ import sklearn.model_selection
 from tqdm.auto import tqdm
 
 
-import utils.loading as loading
+import toothless.utils.loading as loading
 from toothless.language_model.args import ModelArguments, DataArguments, TrainingArguments
-from toothless.utils.dist_helper import cleanup_process_group, setup_process_group, rank0_print
-from utils.consts import VAR_NAMES, IGNORE_UNKNOWN
+from toothless.utils.dist_helper import cleanup_process_group, rank0print, setup_process_group
 
 
 IGNORE_TOKEN_ID = LabelSmoother.ignore_index
@@ -111,7 +110,8 @@ class SupervisedDataset(Dataset):
     def __init__(self, raw_data: pl.DataFrame, tokenizer: transformers.PreTrainedTokenizer, max_len: int, rank: int):
         super(SupervisedDataset, self).__init__()
 
-        rank0_print(rank, "Formatting inputs...")
+        rank0print(rank, "Formatting inputs...")
+
         data_dict = preprocess(raw_data, tokenizer, max_len)
 
         self.input_ids = data_dict["input_ids"]
@@ -137,7 +137,8 @@ class LazySupervisedDataset(Dataset):
         self.tokenizer = tokenizer
         self.max_len = max_len
 
-        rank0_print(rank, "Formatting inputs...Skip in lazy mode")
+        rank0print(rank, "Formatting inputs...Skip in lazy mode")
+
         self.tokenizer = tokenizer
         self.raw_data = raw_data
         self.cached_data_dict = {}
@@ -167,9 +168,9 @@ def load_df(data_path) -> Tuple[pl.DataFrame, pl.DataFrame]:
 
     test_size = 0.2
     random_state = 42
-    train, eval = sklearn.model_selection.train_test_split(df, test_size=test_size, random_state=random_state)
+    train, evaluation = sklearn.model_selection.train_test_split(df, test_size=test_size, random_state=random_state)
 
-    return train, eval
+    return train, evaluation
 
 
 def make_supervised_data_module(
@@ -182,14 +183,17 @@ def make_supervised_data_module(
 
     dataset_cls = LazySupervisedDataset if data_args.lazy_preprocess else SupervisedDataset
 
-    rank0_print(rank, "Loading raw data...")
-    train_df, eval_df = load_df(data_args.data_path)
-    rank0_print(rank, "Raw data loaded")
+    rank0print(rank, "Loading raw data...")
 
-    rank0_print(rank, "Tokenizing and preprocessing data...")
+    train_df, eval_df = load_df(data_args.data_path)
+
+    rank0print(rank, "Raw data loaded")
+    rank0print(rank, "Tokenizing and preprocessing data...")
+
     train_dataset = dataset_cls(train_df, tokenizer=tokenizer, max_len=max_len, rank=rank)
     eval_dataset = dataset_cls(eval_df, tokenizer=tokenizer, max_len=max_len, rank=rank)
-    rank0_print(rank, "Data tokenized and preprocessed")
+
+    rank0print(rank, "Data tokenized and preprocessed")
 
     return train_dataset, eval_dataset
 
@@ -253,7 +257,8 @@ def train(rank, model, optimizer, train_args, train_dataloader, epoch, sampler=N
     train_loss = ddp_loss[0] / ddp_loss[1]
     if writer:
         writer.add_scalar("Loss/train-epoch", train_loss, epoch + 1)
-    rank0_print(rank, "Epoch: {} \tLoss: {:.6f}".format(epoch + 1, train_loss))
+
+    rank0print(rank, "Epoch: {} \tLoss: {:.6f}".format(epoch + 1, train_loss))
 
 
 def eval(rank, model, eval_dataloader, epoch, writer=None):
@@ -270,14 +275,15 @@ def eval(rank, model, eval_dataloader, epoch, writer=None):
     eval_loss = ddp_loss[0] / ddp_loss[1]
     if writer:
         writer.add_scalar("Loss/eval-epoch", eval_loss, epoch + 1)
-    rank0_print(rank, f"Epoch {epoch + 1}: Validation loss: {eval_loss:.4f}")
+
+    rank0print(rank, f"Epoch {epoch + 1}: Validation loss: {eval_loss:.4f}")
 
 
 def fsdp_main(
     rank: int, world_size: int, model_args: ModelArguments, data_args: DataArguments, train_args: TrainingArguments
 ):
     setup_process_group(rank, world_size)
-    rank0_print(rank, "Distributed Network ready")
+    rank0print(rank, "Distributed Network ready")
 
     torch.cuda.set_device(rank)
 
@@ -292,14 +298,13 @@ def fsdp_main(
         trust_remote_code=True,
         pad_token="<|endoftext|>",
     )
-    tokenizer.pad_token_id = tokenizer.pad_token_id
 
     # Load data
     train_dataloader, eval_dataloader = data_loaders(rank, world_size, data_args, train_args, tokenizer)
-    rank0_print(rank, "DataLoaders ready")
+    rank0print(rank, "DataLoaders ready")
 
     # Load Model
-    rank0_print(rank, "Loading model from disk...")
+    rank0print(rank, "Loading model from disk...")
     model_config = transformers.AutoConfig.from_pretrained(
         model_args.model_name_or_path, cache_dir=train_args.cache_dir, trust_remote_code=True
     )
@@ -315,11 +320,11 @@ def fsdp_main(
         trust_remote_code=True,
     )
     model.to(rank)
-    rank0_print(rank, "Model loaded")
+    rank0print(rank, "Model loaded")
 
     # FSDP model
     model = FSDP(model)
-    rank0_print(rank, "FSDP Model ready")
+    rank0print(rank, "FSDP Model ready")
 
     # Define optimizer and loss function
     optimizer = optim.AdamW(
@@ -329,14 +334,14 @@ def fsdp_main(
         weight_decay=train_args.weight_decay,
     )
     lr_scheduler = CosineAnnealingLR(optimizer, T_max=train_args.tmax)
-    rank0_print(rank, "Optimizer and LR Scheduler ready")
+    rank0print(rank, "Optimizer and LR Scheduler ready")
 
     if rank == 0:
         writer = SummaryWriter()
     else:
         writer = None
 
-    rank0_print(rank, "Starting training!")
+    rank0print(rank, "Starting training!")
 
     init_start_event.record(torch.cuda.current_stream())
 
@@ -349,15 +354,17 @@ def fsdp_main(
 
         lr_scheduler.step()
 
-    rank0_print(rank, "Training finished!")
+    rank0print(rank, "Training finished!")
+
     # eval(rank, model, eval_dataloader, train_args.num_train_epochs, writer=writer)
 
     init_end_event.record(torch.cuda.current_stream())
 
     if rank == 0:
         init_end_event.synchronize()
-        print(f"CUDA event elapsed time: {init_start_event.elapsed_time(init_end_event) / 1000}sec")
-        print(f"{model}")
+
+    rank0print(rank, f"CUDA event elapsed time: {init_start_event.elapsed_time(init_end_event) / 1000}sec")
+    rank0print(rank, f"{model}")
 
     if train_args.save_model_end:
         # use a barrier to make sure training is done on all ranks
@@ -371,7 +378,7 @@ def fsdp_main(
 
 if __name__ == "__main__":
     if "INVALIDATE_CACHE" in os.environ:
-        loading.update_cache(VAR_NAMES, IGNORE_UNKNOWN)
+        loading.update_cache()
 
     load_dotenv()
     hf_token = os.getenv("HUGGINGFACE_TOKEN")

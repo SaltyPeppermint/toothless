@@ -92,37 +92,6 @@ class Generator(nn.Module):
         return F.log_softmax(self.dropout(out), dim=-1)
 
 
-# class GreedyGenerator(nn.Module):
-#     def __init__(
-#         self, model: FastASTTrans, max_tgt_len: int, bos_token: int, unk_token
-#     ):  # smth about multi gpu and model.module?
-#         super(GreedyGenerator, self).__init__()
-
-#         self.model = model
-#         self.max_tgt_len = max_tgt_len
-#         self.start_pos = bos_token
-#         self.unk_pos = unk_token
-
-#     def forward(self, data):
-#         data.tgt_seq = None
-#         self.model.process_data(data)
-
-#         l_encoder_outputs = self.model.l_encode(data)
-#         r_encoder_outputs = self.model.r_encode(data)
-
-#         batch_size = r_encoder_outputs.size(0)
-#         ys = torch.ones(batch_size, 1, requires_grad=False).fill_(self.start_pos).long().to(r_encoder_outputs.device)
-#         for i in range(self.max_tgt_len - 1):
-#             # data.tgt_mask = make_std_mask(ys, 0)
-#             data.tgt_emb = self.model.tgt_embedding(ys)
-#             decoder_outputs, decoder_attn = self.model.decode(data, l_encoder_outputs, r_encoder_outputs)
-
-#             out = self.model.generator(decoder_outputs)
-#             out = out[:, -1, :]
-#             _, next_word = torch.max(out, dim=1)
-#             ys = torch.cat([ys, next_word.unsqueeze(1).long().to(r_encoder_outputs.device)], dim=1)
-
-#         return ys[:, 1:]
 
 
 def concat_vec(vec1, vec2, dim):
@@ -133,8 +102,8 @@ def concat_vec(vec1, vec2, dim):
     return torch.cat([vec1, vec2], dim=dim)
 
 
-def stack_layers(module: nn.Module, N: int) -> nn.ModuleList:
-    return nn.ModuleList([copy.deepcopy(module) for _ in range(N)])
+def stack_layers(module: nn.Module, n_layers: int) -> nn.ModuleList:
+    return nn.ModuleList([copy.deepcopy(module) for _ in range(n_layers)])
 
 
 def c2p_dynamic_expand(c2p_pos: Tensor, query_layer: Tensor, relative_pos: Tensor) -> Tensor:

@@ -1,12 +1,14 @@
 from torch import Tensor
 from torch import nn
+import torch
 
 from toothless.tree_model.components.decoder import ASTDoubleDecoder
 from toothless.tree_model.components.encoder import ASTEncoder
 from toothless.tree_model.components.utils import Embeddings, Generator
+from toothless.tree_model.data import make_std_mask
 
 
-class FastASTTrans(nn.Module):
+class ASTTransformer(nn.Module):
     def __init__(
         self,
         src_vocab_size: int,
@@ -21,7 +23,7 @@ class FastASTTrans(nn.Module):
         max_rel_pos: int,
         state_dict=None,
     ):
-        super(FastASTTrans, self).__init__()
+        super(ASTTransformer, self).__init__()
         self.num_heads = n_anc_heads + n_sib_heads
 
         self.pos_type = pos_type.split("_")
@@ -50,27 +52,21 @@ class FastASTTrans(nn.Module):
         else:
             self.load_state_dict(state_dict)
 
-    # @staticmethod
-    # def process_data(data):
-    #     batch_size = data.num_graphs
-    #     for key in data.keys:
-    #         new_value_shape = (batch_size, -1) + data[key].size()[1:]
-    #         data[key] = data[key].view(*new_value_shape)
 
     def forward(self, data: dict[str, Tensor]):
-        l_mem = self.encode_l(data)
-        r_mem = self.encode_r(data)
+        l_mem = self.l_encode(data)
+        r_mem = self.r_encode(data)
 
         decoder_outputs = self.decode(data, l_mem, r_mem)
         output = self.generator(decoder_outputs)
         return output
 
-    def encode_l(self, data: dict[str, Tensor]) -> Tensor:
+    def l_encode(self, data: dict[str, Tensor]) -> Tensor:
         l_emb = self.l_embedding(data["l_ids"])
         l_mem = self.l_encoder(l_emb, data["l_anc"], data["l_sib"], data["l_mask"])
         return l_mem
 
-    def encode_r(self, data: dict[str, Tensor]) -> Tensor:
+    def r_encode(self, data: dict[str, Tensor]) -> Tensor:
         r_emb = self.r_embedding(data["r_ids"])
         r_mem = self.r_encoder(r_emb, data["r_anc"], data["r_sib"], data["r_mask"])
         return r_mem
@@ -94,3 +90,36 @@ class FastASTTrans(nn.Module):
         )
         outputs = outputs.permute(1, 0, 2)
         return outputs
+
+
+class GreedyGenerator(nn.Module):
+    def __init__(
+        self, model: ASTTransformer, max_tgt_len: int, bos_token: int, unk_token
+    ):  # smth about multi gpu and model.module?
+        super(GreedyGenerator, self).__init__()
+
+        self.model = model
+        self.max_tgt_len = max_tgt_len
+        self.start_pos = bos_token
+        self.unk_pos = unk_token
+
+    def forward(self, data):
+        data.tgt_seq = None
+        # self.model.process_data(data)
+
+        l_encoder_outputs = self.model.l_encode(data)
+        r_encoder_outputs = self.model.r_encode(data)
+
+        batch_size = r_encoder_outputs.size(0)
+        ys = torch.ones(batch_size, 1, requires_grad=False).fill_(self.start_pos).long().to(r_encoder_outputs.device)
+        for _ in range(self.max_tgt_len - 1):
+            data.tgt_mask = make_std_mask(ys, 0)
+            data.tgt_emb = self.model.tgt_embedding(ys)
+            decoder_outputs, _ = self.model.decode(data, l_encoder_outputs, r_encoder_outputs)
+
+            out = self.model.generator(decoder_outputs)
+            out = out[:, -1, :]
+            _, next_word = torch.max(out, dim=1)
+            ys = torch.cat([ys, next_word.unsqueeze(1).long().to(r_encoder_outputs.device)], dim=1)
+
+        return ys[:, 1:]

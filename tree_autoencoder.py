@@ -1,3 +1,5 @@
+import copy
+import logging
 import torch
 from torch import Tensor
 import torch.nn as nn
@@ -14,9 +16,9 @@ from torch.utils.tensorboard.writer import SummaryWriter
 from tqdm.auto import tqdm
 import transformers
 
-from toothless.utils.dist_helper import cleanup_process_group, setup_process_group, rank0_print
+from toothless.utils.dist_helper import cleanup_process_group, rank0print, setup_process_group
 from toothless.tree_model.data import CustomDataset, DictCollator
-from toothless.tree_model.model import FastASTTrans
+from toothless.tree_model.model import ASTTransformer
 from toothless.tree_model.args import DataArguments, TrainingArguments, ModelArguments
 
 
@@ -101,7 +103,8 @@ def train(
     train_loss = ddp_loss[0] / ddp_loss[1]
     if writer:
         writer.add_scalar("Loss/train-epoch", train_loss, epoch + 1)
-    rank0_print(rank, "Epoch: {} \tLoss: {:.6f}".format(epoch + 1, train_loss))
+
+    rank0print(rank,   f"Epoch: {epoch + 1} \tLoss: {train_loss:.6f}")
 
 
 def eval(
@@ -126,19 +129,18 @@ def eval(
     eval_loss = ddp_loss[0] / ddp_loss[1]
     if writer:
         writer.add_scalar("Loss/eval-epoch", eval_loss, epoch + 1)
-    rank0_print(rank, f"Epoch {epoch + 1}: Validation loss: {eval_loss:.4f}")
+
+    rank0print(rank,   f"Epoch {epoch + 1}: Validation loss: {eval_loss:.4f}")
 
 
 def fsdp_main(
     rank: int, world_size: int, model_args: ModelArguments, data_args: DataArguments, train_args: TrainingArguments
 ):
     setup_process_group(rank, world_size)
-    rank0_print(rank, "Distributed Network ready")
 
-    if rank == 0:
-        writer = SummaryWriter()
-    else:
-        writer = None
+    rank0print(rank,"Distributed Network ready")
+
+    writer = SummaryWriter() if rank == 0 else None
 
     torch.cuda.set_device(rank)
 
@@ -146,16 +148,16 @@ def fsdp_main(
     dataset = CustomDataset(data_args.data_path, 5, data_args.max_rel_distance, random_state=data_args.random_state)
     train_dataloader, eval_dataloader = mk_loaders(rank, world_size, dataset, data_args)
 
-    rank0_print(rank, "DataLoaders ready")
+    rank0print(rank, "DataLoaders ready")
 
     vocab_size = len(dataset.vocab)
     # Load Model
-    rank0_print(rank, "Creating model...")
+    rank0print(rank, "Creating model...")
 
     init_start_event = torch.cuda.Event(enable_timing=True)
     init_end_event = torch.cuda.Event(enable_timing=True)
 
-    model = FastASTTrans(
+    model = ASTTransformer(
         vocab_size,
         vocab_size,
         model_args.d_model,
@@ -169,16 +171,16 @@ def fsdp_main(
     )
 
     if writer:
-        example_batch, _ = next(iter(eval_dataloader))
+        example_batch, _ = next(iter(copy.deepcopy(eval_dataloader)))
         writer.add_graph(model, example_batch)
         model.to(rank)
 
     model.to(rank)
-    rank0_print(rank, "Model loaded")
+    rank0print(rank,"Model loaded")
 
     # FSDP model
     model = FSDP(model)
-    rank0_print(rank, "FSDP Model ready")
+    rank0print(rank, "FSDP Model ready")
 
     # Define optimizer and loss function
     optimizer = optim.AdamW(
@@ -189,9 +191,9 @@ def fsdp_main(
     )
     lr_scheduler = CosineAnnealingLR(optimizer, T_max=train_args.tmax)
     criterion = CrossEntropyLoss(ignore_index=dataset.vocab.pad_token_id, label_smoothing=0.1)
-    rank0_print(rank, "Optimizer and LR Scheduler ready")
+    rank0print(rank,"Optimizer and LR Scheduler ready")
 
-    rank0_print(rank, "Starting training!")
+    rank0print(rank, "Starting training!")
     init_start_event.record(torch.cuda.current_stream())
 
     for epoch in range(train_args.num_train_epochs):
@@ -203,15 +205,15 @@ def fsdp_main(
 
         lr_scheduler.step()
 
-    rank0_print(rank, "Training finished!")
+    rank0print(rank, "Training finished!")
     # eval(rank, model, eval_dataloader, train_args.num_train_epochs, writer=writer)
 
     init_end_event.record(torch.cuda.current_stream())
 
     if rank == 0:
         init_end_event.synchronize()
-        print(f"CUDA event elapsed time: {init_start_event.elapsed_time(init_end_event) / 1000}sec")
-        print(f"{model}")
+    rank0print(rank, f"CUDA event elapsed time: {init_start_event.elapsed_time(init_end_event) / 1000} sec")
+    rank0print(rank,  f"{model}")
 
     if train_args.save_model_end:
         # use a barrier to make sure training is done on all ranks
@@ -230,6 +232,12 @@ if __name__ == "__main__":
         data_args,
         train_args,
     ) = parser.parse_args_into_dataclasses()
+
+    logging.basicConfig()
+    logging.getLogger().setLevel(logging.INFO)
+
+    logger = logging.getLogger(__name__)
+
     world_size = torch.cuda.device_count()
     mp.spawn(fsdp_main, args=(world_size, model_args, data_args, train_args), nprocs=world_size, join=True)  # type: ignore
-    print("DONE")
+    logger.info("DONE")

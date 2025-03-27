@@ -49,7 +49,6 @@ class CustomDataset(data.Dataset):
         return len(self.samples)
 
     def __getitem__(self, idx):
-        # TODO Implement an iterator for this
         sample = self.samples[idx]
         right = sample["right"].item()
         left = sample["left"].item()
@@ -65,7 +64,6 @@ class CustomDataset(data.Dataset):
 
         df = loading.load_df(self.json_root)
         df.write_parquet(self.raw_path)
-        return
 
     def _process(self) -> pl.DataFrame:
         if not self.force_reload and self.processed_path.is_file():
@@ -141,7 +139,6 @@ class CustomDataset(data.Dataset):
 
     def _pyrec_to_tensor(self, expr: rise.PyRecExpr) -> tuple[Tensor, Tensor, Tensor]:
         graph_data = expr.to_data()
-        # n_edges = graph_data.size()
 
         # node_ids = torch.tensor([node.id for node in graph_data.nodes], dtype=torch.int32)
         # tokenized_values = [
@@ -156,14 +153,7 @@ class CustomDataset(data.Dataset):
             + [self.vocab.eos_token_id],
             dtype=torch.int64,
         )
-        #     for node in graph_data.nodes]
 
-        # adjacency_matrix = torch.sparse_coo_tensor(
-        #     torch.tensor(graph_data.transposed_adjacency()),
-        #     torch.full((n_edges,), True, dtype=torch.bool),
-        #     dtype=torch.bool,
-        #     size=torch.Size((150, 150)),
-        # )
         anc_matrix = torch.tensor(graph_data.anc_matrix(self.max_rel_distance, double_pad=True), dtype=torch.int64)
         sib_matrix = torch.tensor(graph_data.sib_matrix(self.max_rel_distance, double_pad=True), dtype=torch.int64)
 
