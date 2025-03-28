@@ -5,7 +5,8 @@ import torch
 from toothless.tree_model.args import ModelArguments
 from toothless.tree_model.components.decoder import ASTDoubleDecoder
 from toothless.tree_model.components.encoder import ASTEncoder
-from toothless.tree_model.components.utils import Embeddings, Generator
+from toothless.tree_model.components.utils import Embeddings
+from toothless.tree_model.components.generator import Generator
 from toothless.tree_model.data import make_std_mask
 
 

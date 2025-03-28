@@ -6,7 +6,7 @@ from typing import Optional
 @dataclass
 class ModelArguments:
     output_dir: str = field(default="model")
-    d_model: int = field(default=256, metadata={"help": "Hidden state dimension size."})
+    d_model: int = field(default=2048, metadata={"help": "Hidden state dimension size."})
     num_layers: int = field(default=8)
     embedding_size: int = field(default=256)
     dim_feed_forward: int = field(default=256, metadata={"help": "Feed forward dimension size."})
