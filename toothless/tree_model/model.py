@@ -24,8 +24,8 @@ class ASTTransformer(nn.Module):
         self.with_anc_pos = conf.anc_heads > 0
         self.with_sib_pos = conf.sib_heads > 0
 
-        self.l_embedding = Embeddings(conf.d_model, src_vocab_size, dropout=conf.dropout)
-        self.r_embedding = Embeddings(conf.d_model, src_vocab_size, dropout=conf.dropout)
+        self.l_embedding = Embeddings(conf.d_model, src_vocab_size, dropout=conf.dropout, with_pos=conf.with_pos)
+        self.r_embedding = Embeddings(conf.d_model, src_vocab_size, dropout=conf.dropout, with_pos=conf.with_pos)
         self.tgt_embedding = Embeddings(conf.d_model, tgt_vocab_size, dropout=conf.dropout, with_pos=conf.with_pos)
 
         self.l_encoder = ASTEncoder(conf, k)

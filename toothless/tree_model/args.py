@@ -29,13 +29,13 @@ class DataArguments:
     )
     batch_size: int = field(default=8)
     k: int = field(default=15, metadata={"help": "Max relative positional distance."})
-    max_len: int = field(default=256)
+    max_len: int = field(default=128)
     force_reload: bool = field(default=False)
 
 
 @dataclass
 class TrainingArguments:
-    num_train_epochs: int = field(default=1)
+    num_train_epochs: int = field(default=4)
     eval_each_epoch: bool = field(default=True)
     save_model_end: bool = field(default=True)
     tmax: int = field(default=2)

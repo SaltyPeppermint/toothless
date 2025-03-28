@@ -6,7 +6,7 @@ import torch.nn as nn
 import torch.optim as optim
 from torch.optim.lr_scheduler import CosineAnnealingLR
 import torch.distributed as dist
-from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
+from torch.distributed.fsdp import FullyShardedDataParallel, MixedPrecision, ShardingStrategy
 from torch.utils.data.distributed import DistributedSampler
 from torch.utils.data import DataLoader
 import torch.multiprocessing as mp
@@ -65,7 +65,7 @@ def mk_loaders(
 
 def train(
     rank: int,
-    model: FSDP,
+    model: FullyShardedDataParallel,
     optimizer: optim.Optimizer,
     token_criterion: CrossEntropyLoss,
     train_dataloader: DataLoader,
@@ -173,7 +173,10 @@ def fsdp_main(
     rank0print(rank, "Model loaded")
 
     # FSDP model
-    model = FSDP(model)
+    mixed_precision = MixedPrecision(param_dtype=torch.bfloat16, cast_forward_inputs=True)
+    sharding_strategy = ShardingStrategy.FULL_SHARD if world_size > 1 else ShardingStrategy.NO_SHARD
+
+    model = FullyShardedDataParallel(model, sharding_strategy=sharding_strategy, mixed_precision=mixed_precision)
     rank0print(rank, "FSDP Model ready")
 
     # Define optimizer and loss function

@@ -1,13 +1,11 @@
 import copy
-from dataclasses import dataclass
 import math
 
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch import Tensor
-
-from toothless.tree_model.args import ModelArguments
+from torch.nn.parameter import Buffer
 
 
 class FeedForward(nn.Module):
@@ -33,9 +31,9 @@ class FeedForward(nn.Module):
 #         return x + self.dropout(output)
 
 
-class PositionalEncoding(nn.Module):
+class SinusoidalPositionalEncoding(nn.Module):
     def __init__(self, emb_size: int, max_len: int = 5000):
-        super(PositionalEncoding, self).__init__()
+        super(SinusoidalPositionalEncoding, self).__init__()
         # Compute the positional encodings once in log space.
         pe = torch.zeros(max_len, emb_size, requires_grad=False)
         position = torch.arange(0, max_len).unsqueeze(1)
@@ -51,6 +49,58 @@ class PositionalEncoding(nn.Module):
         return x
 
 
+class RotaryPositionalEncoding(nn.Module):
+    """
+    Initialize the Rotary Positional Encoding.
+
+    :param dim: Dimension of the embeddings (must be even)
+    :param max_seq_len: Maximum sequence length to cache positional encodings for
+    :param base: Base value for frequency computation (default: 5000.0)
+    """
+
+    def __init__(self, emb_size: int, max_seq_len: int = 256, base: float = 5000.0):
+        super().__init__()
+
+        # Compute inverse frequencies
+        inv_freq = 1.0 / (base ** (torch.arange(0, emb_size, 2) / emb_size))
+        # Position indices
+        t = torch.arange(max_seq_len)
+
+        # Compute frequencies
+        freqs = torch.outer(t, inv_freq)
+        emb = torch.cat((freqs, freqs), dim=-1)
+
+        self.inv_freq = Buffer(inv_freq, persistent=False)
+        self.cos_cached = Buffer(emb.cos()[None, None, :, :], persistent=False)
+        self.sin_cached = Buffer(emb.sin()[None, None, :, :], persistent=False)
+
+    def _rotate_half(self, x):
+        """
+        Rotate the second half of the feature dimension.
+
+        :param x: Input tensor to rotate
+        :return: Rotated tensor
+        """
+        x1, x2 = x.chunk(2, dim=-1)
+        return torch.cat((-x2, x1), dim=-1)
+
+    def forward(self, x: torch.Tensor):
+        """
+        Apply rotary positional encoding to input tensor.
+
+        :param x: Input tensor of shape [batch_size, seq_len, n_heads, d_k]
+        :return: Tensor with rotary positional encoding applied
+        """
+
+        seq_len = x.size(1)
+
+        # Apply rotary embedding
+        cos = self.cos_cached[:, :, :seq_len, ...].to(x.device)
+        sin = self.sin_cached[:, :, :seq_len, ...].to(x.device)
+
+        return (x * cos) + (self._rotate_half(x) * sin)
+
+
 class Embeddings(nn.Module):
     def __init__(
         self,
@@ -62,7 +112,7 @@ class Embeddings(nn.Module):
         super(Embeddings, self).__init__()
         self.word_embeddings = nn.Embedding(vocab_size, embedding_dim, padding_idx=0)
         if with_pos:
-            self.pos_emb = PositionalEncoding(embedding_dim)
+            self.pos_emb = RotaryPositionalEncoding(embedding_dim)
         else:
             self.pos_emb = None
         self.norm = nn.LayerNorm(embedding_dim)
