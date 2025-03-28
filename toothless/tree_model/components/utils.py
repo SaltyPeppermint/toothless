@@ -1,10 +1,13 @@
 import copy
+from dataclasses import dataclass
 import math
 
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch import Tensor
+
+from toothless.tree_model.args import ModelArguments
 
 
 class FeedForward(nn.Module):
@@ -76,22 +79,33 @@ class Embeddings(nn.Module):
 
 
 class Generator(nn.Module):
-    def __init__(
-        self,
-        tgt_vocab_size: int,
-        hidden_size: int,
-        dropout: float = 0.1,
-    ):
+    def __init__(self, conf: ModelArguments, tgt_vocab_size: int, seq_len: int, k: int):
         super(Generator, self).__init__()
 
-        self.dropout = nn.Dropout(dropout)
-        self.linear = nn.Linear(hidden_size, tgt_vocab_size)
+        self.seq_len = seq_len
+        self.k = k
 
-    def forward(self, outputs):
-        out = self.linear(outputs)
-        return F.log_softmax(self.dropout(out), dim=-1)
+        self.token_linear = nn.Linear(conf.d_model, tgt_vocab_size)
+        self.token_dropout = nn.Dropout(conf.dropout)
 
+        self.anc_linear = nn.Linear(conf.d_model, seq_len * (2 * k + 2))
+        self.anc_dropout = nn.Dropout(conf.dropout)
 
+        self.sib_linear = nn.Linear(conf.d_model, seq_len * (2 * k + 2))
+        self.sib_dropout = nn.Dropout(conf.dropout)
+
+    def forward(self, outputs: Tensor) -> tuple[Tensor, Tensor, Tensor]:
+        token_out = self.token_linear(outputs)
+        token_logits = F.log_softmax(self.token_dropout(token_out), dim=-1)
+        anc_out = self.anc_linear(outputs)
+        anc_logits = F.log_softmax(self.anc_dropout(anc_out), dim=-1).view(
+            self.seq_len, -1, self.seq_len, (2 * self.k + 2)
+        )
+        sib_out = self.sib_linear(outputs).view(self.seq_len, -1)
+        sib_logits = F.log_softmax(self.anc_dropout(sib_out), dim=-1).view(
+            self.seq_len, -1, self.seq_len, (2 * self.k + 2)
+        )
+        return token_logits, anc_logits, sib_logits
 
 
 def concat_vec(vec1, vec2, dim):

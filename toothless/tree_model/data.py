@@ -17,6 +17,7 @@ from torch import Tensor
 from torch.utils import data
 import torch.nn.functional as F
 
+from toothless.tree_model.args import DataArguments
 from toothless.tree_model.vocab import BOS_TOKEN, EOS_TOKEN, MASK_TOKEN, PAD_TOKEN, UNK_TOKEN, SimpleVocab
 from toothless.utils import loading
 
@@ -24,19 +25,15 @@ CHUNK_SIZE = 128
 
 
 class CustomDataset(data.Dataset):
-    def __init__(
-        self,
-        json_root: Path,
-        pairs_per_expl: int,
-        max_rel_distance: int = 15,
-        random_state: int = 42,
-        force_reload: bool = False,
-    ):
-        self.json_root = Path(json_root)
-        self.pairs_per_expl = pairs_per_expl
-        self.max_rel_distance = max_rel_distance
-        self.force_reload = force_reload
-        torch.manual_seed(random_state)
+    def __init__(self, conf: DataArguments):
+        """
+        :param k represents the max relative distance
+        """
+        self.json_root = Path(conf.data_path)
+        self.min_expl_distance = conf.min_expl_distance
+        self.k = conf.k
+        self.force_reload = conf.force_reload
+        torch.manual_seed(conf.random_state)
 
         self.cache_dir = Path("cache") / Path(*self.json_root.parts[2:])
         self.cache_dir.mkdir(parents=True, exist_ok=True)
@@ -72,7 +69,7 @@ class CustomDataset(data.Dataset):
         raw_data = pl.read_parquet(self.raw_path)
         expl_chains = raw_data.get_column("explanation_chain")
 
-        picked_tripples = [self._pick_indices(len(chain)) for chain in expl_chains]
+        picked_tripples = [self._pick_indices(len(chain) - 1) for chain in expl_chains]
         length = sum([len(chain_pairs) for chain_pairs in picked_tripples])
         print(f"Total pairs: {length}")
 
@@ -107,17 +104,34 @@ class CustomDataset(data.Dataset):
     #             yield chain[middle].to_data().values()
     #             yield chain[right].to_data().values()
 
-    def _pick_indices(self, max_index: int) -> set[tuple[int, int, int]]:
-        xs = torch.randint(0, max_index, (self.pairs_per_expl,))
-        ys = torch.randint(0, max_index, (self.pairs_per_expl,))
-        r = set()
-        for x, y in zip(xs, ys):
-            distance = torch.abs(x - y)
-            if distance < 2:
-                continue
-            r.add((torch.minimum(x, y), distance // 2, torch.maximum(x, y)))
+    # def _pick_indices(self, max_index: int) -> set[tuple[int, int, int]]:
+    #     xs = torch.randint(0, max_index, (self.pairs_per_expl,))
+    #     ys = torch.randint(0, max_index, (self.pairs_per_expl,))
+    #     r = set()
+    #     for x, y in zip(xs, ys):
+    #         distance = torch.abs(x - y)
+    #         if distance < 2:
+    #             continue
+    #         r.add((torch.minimum(x, y), distance // 2, torch.maximum(x, y)))
 
-        return r
+    #     return r
+
+    def _pick_indices(self, max_index: int) -> set[tuple[int, int, int]]:
+        def rec(start: int, end: int, acc: set[tuple[int, int, int]], min_distance):
+            distance = end - start
+            if distance < min_distance:
+                return
+            else:
+                midpoint = start + (distance // 2)
+                # print((start, midpoint, end))
+                acc.add((start, midpoint, end))
+                rec(start, midpoint, acc, min_distance)
+                rec(midpoint, end, acc, min_distance)
+
+        acc = set()
+        rec(0, max_index, acc, self.min_expl_distance)
+        # print(acc)
+        return acc
 
     def _vectorize(self, left: str, middle: str, right: str, distance: float) -> dict:
         l_ids, l_anc, l_sib = self._pyrec_to_tensor(rise.PyRecExpr(left))
@@ -154,8 +168,8 @@ class CustomDataset(data.Dataset):
             dtype=torch.int64,
         )
 
-        anc_matrix = torch.tensor(graph_data.anc_matrix(self.max_rel_distance, double_pad=True), dtype=torch.int64)
-        sib_matrix = torch.tensor(graph_data.sib_matrix(self.max_rel_distance, double_pad=True), dtype=torch.int64)
+        anc_matrix = torch.tensor(graph_data.anc_matrix(self.k, double_pad=True), dtype=torch.int64)
+        sib_matrix = torch.tensor(graph_data.sib_matrix(self.k, double_pad=True), dtype=torch.int64)
 
         return ids, anc_matrix, sib_matrix
 
@@ -218,11 +232,11 @@ class DictCollator:
 
         full_tgt_anc = self.pad_2d([sample["tgt_anc"] for sample in batch], True)
         batched_data["tgt_anc"] = full_tgt_anc[:, :-1, :-1]
-        batched_data["tgt_anc_y"] = full_tgt_anc[:, :1, :1]
+        batched_data["tgt_anc_y"] = full_tgt_anc[:, 1:, 1:]
 
         full_tgt_sib = self.pad_2d([sample["tgt_sib"] for sample in batch], True)
         batched_data["tgt_sib"] = full_tgt_sib[:, :-1, :-1]
-        batched_data["tgt_sib_y"] = full_tgt_sib[:, :1, :1]
+        batched_data["tgt_sib_y"] = full_tgt_sib[:, 1:, 1:]
 
         n_tokens = int((full_tgt_ids != self.pad_id).data.sum())
         return batched_data, n_tokens

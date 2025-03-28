@@ -2,6 +2,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch import Tensor
 
+from toothless.tree_model.args import ModelArguments
 from toothless.tree_model.components.mha import MultiHeadAttention
 from toothless.tree_model.components.rel_pos import RelCoder
 from toothless.tree_model.components.utils import FeedForward, stack_layers
@@ -10,29 +11,29 @@ from toothless.tree_model.components.utils import FeedForward, stack_layers
 class ASTDoubleDecoderLayer(nn.Module):
     def __init__(
         self,
-        d_model: int,
-        num_heads: int,
-        dim_feed_forward: int,
-        dropout: float = 0.2,
+        conf: ModelArguments,
         activation=F.gelu,
     ):
         super(ASTDoubleDecoderLayer, self).__init__()
 
-        self.self_norm = nn.LayerNorm(d_model)
-        self.self_attn = MultiHeadAttention(d_model, num_heads, dropout=dropout, cross_attn=False)
-        self.self_dropout = nn.Dropout(dropout)
+        num_heads = conf.anc_heads + conf.sib_heads
+        self.self_norm = nn.LayerNorm(conf.d_model)
+        self.self_attn = MultiHeadAttention(conf.d_model, num_heads, dropout=conf.dropout, cross_attn=False)
+        self.self_dropout = nn.Dropout(conf.dropout)
 
-        self.l_norm = nn.LayerNorm(d_model)
-        self.l_cross_attn = MultiHeadAttention(d_model, num_heads, dropout=dropout, cross_attn=True)
-        self.l_dropout = nn.Dropout(dropout)
+        self.l_norm = nn.LayerNorm(conf.d_model)
+        self.l_cross_attn = MultiHeadAttention(conf.d_model, num_heads, dropout=conf.dropout, cross_attn=True)
+        self.l_dropout = nn.Dropout(conf.dropout)
 
-        self.r_norm = nn.LayerNorm(d_model)
-        self.r_cross_attn = MultiHeadAttention(d_model, num_heads, dropout=dropout, cross_attn=True)
-        self.r_dropout = nn.Dropout(dropout)
+        self.r_norm = nn.LayerNorm(conf.d_model)
+        self.r_cross_attn = MultiHeadAttention(conf.d_model, num_heads, dropout=conf.dropout, cross_attn=True)
+        self.r_dropout = nn.Dropout(conf.dropout)
 
-        self.ff_norm = nn.LayerNorm(d_model)
-        self.feed_forward = FeedForward(d_model, dim_feed_forward, dropout=dropout, activation=activation)
-        self.ff_dropout = nn.Dropout(dropout)
+        self.ff_norm = nn.LayerNorm(conf.d_model)
+        self.feed_forward = FeedForward(
+            conf.d_model, conf.dim_feed_forward, dropout=conf.dropout, activation=activation
+        )
+        self.ff_dropout = nn.Dropout(conf.dropout)
 
     def forward(
         self,
@@ -98,24 +99,12 @@ class ASTDoubleDecoderLayer(nn.Module):
 
 
 class ASTDoubleDecoder(RelCoder):
-    def __init__(
-        self,
-        d_model: int,
-        dim_feed_forward: int,
-        num_layers: int,
-        n_anc_heads: int,
-        n_sib_heads: int,
-        pos_type: list[str],
-        max_rel_pos: int,
-        dropout: float = 0.2,
-    ):
-        super(ASTDoubleDecoder, self).__init__(n_anc_heads, n_sib_heads, pos_type, max_rel_pos, d_model, dropout)
-        decoder_layer = ASTDoubleDecoderLayer(
-            d_model, n_anc_heads + n_sib_heads, dim_feed_forward, dropout=dropout, activation=F.gelu
-        )
+    def __init__(self, conf: ModelArguments, k: int):
+        super(ASTDoubleDecoder, self).__init__(conf, k)
+        decoder_layer = ASTDoubleDecoderLayer(conf, activation=F.gelu)
 
-        self.layers = stack_layers(decoder_layer, num_layers)
-        self.norm = nn.LayerNorm(d_model)
+        self.layers = stack_layers(decoder_layer, conf.num_layers)
+        self.norm = nn.LayerNorm(conf.d_model)
 
         self.tgt_pos_pad = None
         self.l_mem_pos_pad = None

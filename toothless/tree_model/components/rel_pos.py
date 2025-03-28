@@ -2,22 +2,21 @@ import torch
 import torch.nn as nn
 from torch import Tensor
 
+from toothless.tree_model.args import ModelArguments
 from toothless.tree_model.components.utils import concat_vec
 
 
 class RelCoder(nn.Module):
-    def __init__(
-        self, anc_heads: int, sib_heads: int, pos_type: list[str], max_rel_pos: int, d_model: int, dropout: float = 0.2
-    ):
+    def __init__(self, conf: ModelArguments, k: int):
         super(RelCoder, self).__init__()
-        self.anc_heads = anc_heads
-        self.sib_heads = sib_heads
-        d_k = d_model // (anc_heads + sib_heads)
+        d_k = conf.d_model // (conf.anc_heads + conf.sib_heads)
+        self.anc_heads = conf.anc_heads
+        self.sib_heads = conf.sib_heads
 
-        if anc_heads > 0:
-            self.anc_rel_emb = RelEmbeddings(d_k, anc_heads, max_rel_pos, pos_type, dropout=dropout)
-        if sib_heads > 0:
-            self.sib_rel_emb = RelEmbeddings(d_k, sib_heads, max_rel_pos, pos_type, dropout=dropout)
+        if conf.anc_heads > 0:
+            self.anc_rel_emb = RelEmbeddings(d_k, conf.anc_heads, k, conf.pos_type, dropout=conf.dropout)
+        if conf.sib_heads > 0:
+            self.sib_rel_emb = RelEmbeddings(d_k, conf.sib_heads, k, conf.pos_type, dropout=conf.dropout)
 
     def rel_pos_emb(self) -> tuple[Tensor | None, Tensor | None]:
         rel_anc_q, rel_anc_k = None, None
@@ -45,7 +44,7 @@ class RelCoder(nn.Module):
 
 
 class RelEmbeddings(nn.Module):
-    def __init__(self, d_k: int, num_heads: int, k: int, pos_type: list[str], dropout: float = 0.0):
+    def __init__(self, d_k: int, num_heads: int, k: int, pos_type: str, dropout: float = 0.0):
         super(RelEmbeddings, self).__init__()
 
         self.d_k = d_k

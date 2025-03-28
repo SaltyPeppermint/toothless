@@ -2,29 +2,27 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch import Tensor
 
+from toothless.tree_model.args import ModelArguments
 from toothless.tree_model.components.mha import MultiHeadAttention
 from toothless.tree_model.components.rel_pos import RelCoder
 from toothless.tree_model.components.utils import FeedForward, stack_layers
 
 
 class ASTEncoderLayer(nn.Module):
-    def __init__(
-        self,
-        d_model: int,
-        num_heads: int,
-        dim_feed_forward: int,
-        dropout: float = 0.2,
-        activation=F.gelu,
-    ):
+    def __init__(self, conf: ModelArguments, activation=F.gelu):
         super(ASTEncoderLayer, self).__init__()
 
-        self.self_attn = MultiHeadAttention(d_model, num_heads, dropout=dropout, cross_attn=False)
-        self.self_norm = nn.LayerNorm(d_model)
-        self.self_dropout = nn.Dropout(dropout)
+        num_heads = conf.anc_heads + conf.sib_heads
 
-        self.feed_forward = FeedForward(d_model, dim_feed_forward, dropout=dropout, activation=activation)
-        self.ff_norm = nn.LayerNorm(d_model)
-        self.ff_dropout = nn.Dropout(dropout)
+        self.self_attn = MultiHeadAttention(conf.d_model, num_heads, dropout=conf.dropout, cross_attn=False)
+        self.self_norm = nn.LayerNorm(conf.d_model)
+        self.self_dropout = nn.Dropout(conf.dropout)
+
+        self.feed_forward = FeedForward(
+            conf.d_model, conf.dim_feed_forward, dropout=conf.dropout, activation=activation
+        )
+        self.ff_norm = nn.LayerNorm(conf.d_model)
+        self.ff_dropout = nn.Dropout(conf.dropout)
 
     def forward(
         self,
@@ -44,24 +42,12 @@ class ASTEncoderLayer(nn.Module):
 
 
 class ASTEncoder(RelCoder):
-    def __init__(
-        self,
-        d_model: int,
-        dim_feed_forward: int,
-        num_layers: int,
-        n_anc_heads: int,
-        n_sib_heads: int,
-        pos_type: list[str],
-        max_rel_pos: int,
-        dropout: float = 0.2,
-    ):
-        super(ASTEncoder, self).__init__(n_anc_heads, n_sib_heads, pos_type, max_rel_pos, d_model, dropout)
-        encoder_layer = ASTEncoderLayer(
-            d_model, n_anc_heads + n_sib_heads, dim_feed_forward, dropout, activation=F.gelu
-        )
+    def __init__(self, conf: ModelArguments, k: int):
+        super(ASTEncoder, self).__init__(conf, k)
+        encoder_layer = ASTEncoderLayer(conf, activation=F.gelu)
 
-        self.layers = stack_layers(encoder_layer, num_layers)
-        self.norm = nn.LayerNorm(d_model)
+        self.layers = stack_layers(encoder_layer, conf.num_layers)
+        self.norm = nn.LayerNorm(conf.d_model)
 
     def forward(self, src: Tensor, src_anc: Tensor, src_sib: Tensor, mask: Tensor) -> Tensor:
         """

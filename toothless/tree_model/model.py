@@ -2,6 +2,7 @@ from torch import Tensor
 from torch import nn
 import torch
 
+from toothless.tree_model.args import ModelArguments
 from toothless.tree_model.components.decoder import ASTDoubleDecoder
 from toothless.tree_model.components.encoder import ASTEncoder
 from toothless.tree_model.components.utils import Embeddings, Generator
@@ -11,47 +12,34 @@ from toothless.tree_model.data import make_std_mask
 class ASTTransformer(nn.Module):
     def __init__(
         self,
+        conf: ModelArguments,
         src_vocab_size: int,
         tgt_vocab_size: int,
-        d_model: int,
-        num_layers: int,
-        dim_feed_forward: int,
-        dropout: float,
-        pos_type: str,
-        n_anc_heads: int,
-        n_sib_heads: int,
-        max_rel_pos: int,
+        k: int,
+        seq_len: int,
         state_dict=None,
     ):
         super(ASTTransformer, self).__init__()
-        self.num_heads = n_anc_heads + n_sib_heads
 
-        self.pos_type = pos_type.split("_")
+        self.with_anc_pos = conf.anc_heads > 0
+        self.with_sib_pos = conf.sib_heads > 0
 
-        self.l_embedding = Embeddings(d_model, src_vocab_size, dropout=dropout, with_pos=False)
-        self.r_embedding = Embeddings(d_model, src_vocab_size, dropout=dropout, with_pos=False)
-        self.tgt_embedding = Embeddings(d_model, tgt_vocab_size, dropout=dropout, with_pos=True)
+        self.l_embedding = Embeddings(conf.d_model, src_vocab_size, dropout=conf.dropout)
+        self.r_embedding = Embeddings(conf.d_model, src_vocab_size, dropout=conf.dropout)
+        self.tgt_embedding = Embeddings(conf.d_model, tgt_vocab_size, dropout=conf.dropout, with_pos=conf.with_pos)
 
-        self.l_encoder = ASTEncoder(
-            d_model, dim_feed_forward, num_layers, n_anc_heads, n_sib_heads, self.pos_type, max_rel_pos, dropout=dropout
-        )
-        self.r_encoder = ASTEncoder(
-            d_model, dim_feed_forward, num_layers, n_anc_heads, n_sib_heads, self.pos_type, max_rel_pos, dropout=dropout
-        )
-        self.decoder = ASTDoubleDecoder(
-            d_model, dim_feed_forward, num_layers, n_anc_heads, n_sib_heads, self.pos_type, max_rel_pos, dropout=dropout
-        )
+        self.l_encoder = ASTEncoder(conf, k)
+        self.r_encoder = ASTEncoder(conf, k)
+        self.decoder = ASTDoubleDecoder(conf, k)
 
-        self.generator = Generator(tgt_vocab_size, d_model, dropout)
+        self.generator = Generator(conf, tgt_vocab_size, seq_len, k)
 
-        print("Init or load model.")
         if state_dict is None:
             for p in self.parameters():
                 if p.dim() > 1:
                     nn.init.xavier_uniform_(p)
         else:
             self.load_state_dict(state_dict)
-
 
     def forward(self, data: dict[str, Tensor]):
         l_mem = self.l_encode(data)
