@@ -68,16 +68,13 @@ def train(
     model: FSDP,
     optimizer: optim.Optimizer,
     token_criterion: CrossEntropyLoss,
-    distance_criterion: CrossEntropyLoss,
     train_dataloader: DataLoader,
     epoch: int,
     train_args: TrainingArguments,
-    with_anc: bool = False,
-    with_sib: bool = False,
     writer: SummaryWriter | None = None,
 ):
     model.train()
-    ddp_loss = torch.zeros(5).to(rank)
+    ddp_loss = torch.zeros(2).to(rank)
 
     for batch_idx, (batch, num_tokens) in enumerate(
         tqdm(train_dataloader, desc=f"Epoch {epoch + 1}/{train_args.num_train_epochs}")
@@ -86,41 +83,16 @@ def train(
         batch = {k: v.to(rank) for k, v in batch.items()}
 
         # Forward pass
-        tok_out, anc_out, sib_out = model(batch)
+        out = model(batch)
+        loss = token_criterion(out.view(-1, out.size(-1)), batch["tgt_ids_y"].view(-1))
 
-        tok_loss = token_criterion(tok_out.view(-1, tok_out.size(-1)), batch["tgt_ids_y"].view(-1))
-        ddp_loss[2] += tok_loss.item()
-        loss = tok_loss
-        scale_factor = 1
-        if writer:
-            writer.add_scalar("Train Loss Batch/tok", loss, batch_idx + epoch * len(train_dataloader))
-
-        if with_anc:
-            anc_loss = distance_criterion(anc_out.view(-1, anc_out.size(-1)), batch["tgt_anc_y"].view(-1))
-            anc_loss = anc_loss / anc_out.size(-2)  # Scale for dim
-            ddp_loss[3] += anc_loss.item()
-            loss = loss + anc_loss
-            scale_factor = scale_factor + 1
-            if writer:
-                writer.add_scalar("Train Loss Batch/anc", loss, batch_idx + epoch * len(train_dataloader))
-
-        if with_sib:
-            sib_loss = distance_criterion(sib_out.view(-1, anc_out.size(-1)), batch["tgt_sib_y"].view(-1))
-            sib_loss = sib_loss / sib_out.size(-2)  # Scale for dim
-            ddp_loss[4] += sib_loss.item()
-            loss = loss + sib_loss
-            scale_factor = scale_factor + 1
-            if writer:
-                writer.add_scalar("Train Loss Batch/sib", loss, batch_idx + epoch * len(train_dataloader))
-
-        loss = loss / scale_factor
         # Backwards pass
         optimizer.zero_grad()
         loss.backward()
         optimizer.step()
 
         if writer:
-            writer.add_scalar("Train Loss Batch/total", loss, batch_idx + epoch * len(train_dataloader))
+            writer.add_scalar("Train Loss/batch", loss, batch_idx + epoch * len(train_dataloader))
             writer.add_scalar("Toks/in-batch", num_tokens, batch_idx + epoch * len(train_dataloader))
 
         # Record loss
@@ -130,12 +102,7 @@ def train(
     dist.all_reduce(ddp_loss, op=dist.ReduceOp.SUM)
     train_loss = ddp_loss[0] / ddp_loss[1]
     if writer:
-        writer.add_scalar("Train Loss Epoch/total", train_loss, epoch + 1)
-        writer.add_scalar("Train Loss Epoch/tok", ddp_loss[2] / ddp_loss[1], epoch + 1)
-        if with_anc:
-            writer.add_scalar("Train Loss Epoch/anc", ddp_loss[3] / ddp_loss[1], epoch + 1)
-        if with_anc:
-            writer.add_scalar("Train Loss Epoch/sib", ddp_loss[4] / ddp_loss[1], epoch + 1)
+        writer.add_scalar("Train Loss/epoch", train_loss, epoch + 1)
 
     rank0print(rank, f"Epoch: {epoch + 1} \tLoss: {train_loss:.6f}")
 
@@ -145,10 +112,7 @@ def eval(
     model: nn.Module,
     eval_dataloader: DataLoader,
     token_criterion: CrossEntropyLoss,
-    distance_criterion: CrossEntropyLoss,
     epoch: int,
-    with_anc: bool = False,
-    with_pos: bool = False,
     writer: SummaryWriter | None = None,
 ):
     model.eval()
@@ -156,38 +120,16 @@ def eval(
     for batch in eval_dataloader:
         batch = {k: v.to(rank) for k, v in batch.items()}
         with torch.no_grad():
-            tok_out, anc_out, sib_out = model(batch)
+            out = model(batch)
+            loss = token_criterion(out.view(-1, out.size(-1)), batch["tgt_ids_y"].view(-1))
 
-            tok_loss = token_criterion(tok_out.view(-1, tok_out.size(-1)), batch["tgt_ids_y"].view(-1))
-            ddp_loss[2] += tok_loss
-
-            loss = tok_loss
-            scale_factor = 1
-
-            if with_anc:
-                anc_loss = distance_criterion(anc_out.view(-1, anc_out.size(-1)), batch["tgt_anc_y"].view(-1))
-                ddp_loss[3] += anc_loss
-                loss = loss + anc_loss
-                scale_factor = scale_factor + 1
-
-            if with_pos:
-                sib_loss = distance_criterion(sib_out.view(-1, anc_out.size(-1)), batch["tgt_sib_y"].view(-1))
-                ddp_loss[4] += sib_loss
-                loss = loss + sib_loss
-                scale_factor = scale_factor + 1
-
-            ddp_loss[0] += loss / scale_factor
+            ddp_loss[0] += loss
             ddp_loss[1] += len(batch)
 
     dist.all_reduce(ddp_loss, op=dist.ReduceOp.SUM)
     eval_loss = ddp_loss[0] / ddp_loss[1]
     if writer:
-        writer.add_scalar("Loss Eval/total", eval_loss, epoch + 1)
-        writer.add_scalar("Loss Eval/tok", ddp_loss[2] / ddp_loss[1], epoch + 1)
-        if with_anc:
-            writer.add_scalar("Loss Eval/anc", ddp_loss[3] / ddp_loss[1], epoch + 1)
-        if with_anc:
-            writer.add_scalar("Loss Eval/sib", ddp_loss[4] / ddp_loss[1], epoch + 1)
+        writer.add_scalar("Eval loss/epoch", eval_loss, epoch + 1)
 
     rank0print(rank, f"Epoch {epoch + 1}: Validation loss: {eval_loss:.4f}")
 
@@ -220,7 +162,6 @@ def fsdp_main(
         vocab_size,
         vocab_size,
         data_args.k,
-        data_args.max_len,
     )
 
     if writer:
@@ -243,43 +184,18 @@ def fsdp_main(
         weight_decay=train_args.weight_decay,
     )
     lr_scheduler = CosineAnnealingLR(optimizer, T_max=train_args.tmax)
-    token_criterion = CrossEntropyLoss(ignore_index=dataset.vocab.pad_token_id, label_smoothing=0.1)
-    distance_criterion = CrossEntropyLoss()
+    criterion = CrossEntropyLoss(ignore_index=dataset.vocab.pad_token_id, label_smoothing=0.1)
     rank0print(rank, "Optimizer and LR Scheduler ready")
 
-    with_anc = model_args.anc_heads > 0
-    with_sib = model_args.sib_heads > 0
     rank0print(rank, "Starting training!")
     init_start_event.record(torch.cuda.current_stream())
 
     for epoch in range(train_args.num_train_epochs):
-        train(
-            rank,
-            model,
-            optimizer,
-            token_criterion,
-            distance_criterion,
-            train_dataloader,
-            epoch,
-            train_args,
-            with_anc,
-            with_sib,
-            writer,
-        )
+        train(rank, model, optimizer, criterion, train_dataloader, epoch, train_args, writer)
 
         # Optionally, evaluate the model on the validation set after each epoch
         if train_args.eval_each_epoch:
-            eval(
-                rank,
-                model,
-                copy.deepcopy(eval_dataloader),
-                token_criterion,
-                distance_criterion,
-                epoch,
-                with_anc,
-                with_sib,
-                writer,
-            )
+            eval(rank, model, copy.deepcopy(eval_dataloader), criterion, epoch, writer)
 
         lr_scheduler.step()
 

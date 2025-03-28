@@ -7,7 +7,7 @@ from typing import Optional
 class ModelArguments:
     output_dir: str = field(default="model")
     d_model: int = field(default=2048, metadata={"help": "Hidden state dimension size."})
-    num_layers: int = field(default=8)
+    num_layers: int = field(default=4)
     embedding_size: int = field(default=256)
     dim_feed_forward: int = field(default=256, metadata={"help": "Feed forward dimension size."})
     dropout: float = field(default=0.2)

@@ -17,7 +17,6 @@ class ASTTransformer(nn.Module):
         src_vocab_size: int,
         tgt_vocab_size: int,
         k: int,
-        seq_len: int,
         state_dict=None,
     ):
         super(ASTTransformer, self).__init__()
@@ -33,7 +32,7 @@ class ASTTransformer(nn.Module):
         self.r_encoder = ASTEncoder(conf, k)
         self.decoder = ASTDoubleDecoder(conf, k)
 
-        self.generator = Generator(conf, tgt_vocab_size, seq_len, k)
+        self.generator = Generator(conf, tgt_vocab_size)
 
         if state_dict is None:
             for p in self.parameters():
