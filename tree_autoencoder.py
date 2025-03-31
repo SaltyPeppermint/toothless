@@ -194,7 +194,7 @@ def fsdp_main(
     init_start_event.record(torch.cuda.current_stream())
 
     for epoch in range(train_args.num_train_epochs):
-        train(rank, model, optimizer, criterion, train_dataloader, epoch, train_args, writer)
+        train(rank, model, optimizer, criterion, copy.deepcopy(train_dataloader), epoch, train_args, writer)
 
         # Optionally, evaluate the model on the validation set after each epoch
         if train_args.eval_each_epoch:
