@@ -5,9 +5,9 @@ import torch
 from toothless.tree_model.args import ModelArguments
 from toothless.tree_model.components.decoder import ASTDoubleDecoder
 from toothless.tree_model.components.encoder import ASTEncoder
-from toothless.tree_model.components.utils import Embeddings
-from toothless.tree_model.components.generator import Generator
+from toothless.tree_model.components.utils import Embeddings, Generator
 from toothless.tree_model.data import make_std_mask
+from toothless.tree_model.vocab import SimpleVocab
 
 
 class ASTTransformer(nn.Module):
@@ -59,7 +59,7 @@ class ASTTransformer(nn.Module):
         r_mem = self.r_encoder(r_emb, data["r_anc"], data["r_sib"], data["r_mask"])
         return r_mem
 
-    def decode(self, data: dict[str, Tensor], l_mem: Tensor, r_mem: Tensor):
+    def decode(self, data: dict[str, Tensor], l_mem: Tensor, r_mem: Tensor) -> Tensor:
         tgt = self.tgt_embedding(data["tgt_ids"])
 
         outputs = self.decoder(
@@ -82,32 +82,44 @@ class ASTTransformer(nn.Module):
 
 class GreedyGenerator(nn.Module):
     def __init__(
-        self, model: ASTTransformer, max_tgt_len: int, bos_token: int, unk_token
+        self, model: ASTTransformer, max_tgt_len: int, vocab: SimpleVocab
     ):  # smth about multi gpu and model.module?
         super(GreedyGenerator, self).__init__()
 
         self.model = model
         self.max_tgt_len = max_tgt_len
-        self.start_pos = bos_token
-        self.unk_pos = unk_token
+        self.vocab = vocab
 
-    def forward(self, data):
-        data.tgt_seq = None
+    def forward(self, data: dict[str, Tensor]):
         # self.model.process_data(data)
 
-        l_encoder_outputs = self.model.l_encode(data)
-        r_encoder_outputs = self.model.r_encode(data)
+        l_mem = self.model.l_encode(data)
+        r_mem = self.model.r_encode(data)
 
-        batch_size = r_encoder_outputs.size(0)
-        ys = torch.ones(batch_size, 1, requires_grad=False).fill_(self.start_pos).long().to(r_encoder_outputs.device)
-        for _ in range(self.max_tgt_len - 1):
-            data.tgt_mask = make_std_mask(ys, 0)
-            data.tgt_emb = self.model.tgt_embedding(ys)
-            decoder_outputs, _ = self.model.decode(data, l_encoder_outputs, r_encoder_outputs)
+        batch_size = r_mem.size(0)
 
+        # data["tgt_ids"] = torch.zeros(batch_size, 0, requires_grad=False)
+
+        assert self.vocab.pad_token_id == 0
+
+        tgt_ids = torch.zeros(batch_size, 1, requires_grad=False, dtype=torch.long)
+        tgt_ids[:, 0] = self.vocab.bos_token_id
+        data["tgt_ids"] = tgt_ids.to(l_mem.device)
+        for i in range(self.max_tgt_len - 1):
+            data["tgt_mask"] = make_std_mask(data["tgt_ids"], 0)
+            data["tgt_anc"], data["tgt_sib"] = make_anc_sib_matrix(data["tgt_ids"])
+
+            decoder_outputs, _ = self.model.decode(data, l_mem, r_mem)
             out = self.model.generator(decoder_outputs)
-            out = out[:, -1, :]
-            _, next_word = torch.max(out, dim=1)
-            ys = torch.cat([ys, next_word.unsqueeze(1).long().to(r_encoder_outputs.device)], dim=1)
+            out = out[:, i, :].squeeze(1)
 
-        return ys[:, 1:]
+            _prob, next_token = torch.max(out, dim=1)
+            data["tgt_ids"][:, i] = next_token
+            if next_token == self.vocab.eos_token_id:
+                break
+
+        return data["tgt_ids"]
+
+
+def make_anc_sib_matrix(i: Tensor) -> tuple[Tensor, Tensor]:
+    return Tensor(), Tensor()

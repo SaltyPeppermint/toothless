@@ -7,6 +7,20 @@ import torch.nn.functional as F
 from torch import Tensor
 from torch.nn.parameter import Buffer
 
+from toothless.tree_model.args import ModelArguments
+
+
+class Generator(nn.Module):
+    def __init__(self, conf: ModelArguments, tgt_vocab_size: int):
+        super(Generator, self).__init__()
+
+        self.token_linear = nn.Linear(conf.d_model, tgt_vocab_size)
+        self.token_dropout = nn.Dropout(conf.dropout)
+
+    def forward(self, outputs: Tensor) -> Tensor:
+        out = self.token_linear(outputs)
+        return F.log_softmax(self.token_dropout(out), dim=-1)
+
 
 class FeedForward(nn.Module):
     def __init__(self, d_model: int, dim_feed_forward: int, dropout: float = 0.1, activation=F.gelu):
@@ -18,17 +32,6 @@ class FeedForward(nn.Module):
 
     def forward(self, x: Tensor) -> Tensor:
         return self.linear2(self.dropout(self.activation(self.linear1(x))))
-
-
-# class SublayerConnection(nn.Module):
-#     def __init__(self, size: int, dropout: float = 0.1):
-#         super(SublayerConnection, self).__init__()
-#         self.norm = nn.LayerNorm(size)
-#         self.dropout = nn.Dropout(dropout)
-
-#     def forward(self, x: Tensor, sublayer: nn.Module) -> Tensor:
-#         output = sublayer(self.norm(x))
-#         return x + self.dropout(output)
 
 
 class SinusoidalPositionalEncoding(nn.Module):
@@ -140,27 +143,27 @@ def stack_layers(module: nn.Module, n_layers: int) -> nn.ModuleList:
     return nn.ModuleList([copy.deepcopy(module) for _ in range(n_layers)])
 
 
-def c2p_dynamic_expand(c2p_pos: Tensor, query_layer: Tensor, relative_pos: Tensor) -> Tensor:
-    return c2p_pos.expand(
-        [
-            query_layer.size(0),
-            query_layer.size(1),
-            query_layer.size(2),
-            relative_pos.size(-1),
-        ]
-    )
+# def c2p_dynamic_expand(c2p_pos: Tensor, query_layer: Tensor, relative_pos: Tensor) -> Tensor:
+#     return c2p_pos.expand(
+#         [
+#             query_layer.size(0),
+#             query_layer.size(1),
+#             query_layer.size(2),
+#             relative_pos.size(-1),
+#         ]
+#     )
 
 
-def p2c_dynamic_expand(c2p_pos: Tensor, query_layer: Tensor, key_layer: Tensor) -> Tensor:
-    return c2p_pos.expand(
-        [
-            query_layer.size(0),
-            query_layer.size(1),
-            key_layer.size(-2),
-            key_layer.size(-2),
-        ]
-    )
+# def p2c_dynamic_expand(c2p_pos: Tensor, query_layer: Tensor, key_layer: Tensor) -> Tensor:
+#     return c2p_pos.expand(
+#         [
+#             query_layer.size(0),
+#             query_layer.size(1),
+#             key_layer.size(-2),
+#             key_layer.size(-2),
+#         ]
+#     )
 
 
-def pos_dynamic_expand(pos_index: Tensor, p2c_att: Tensor, key_layer: Tensor) -> Tensor:
-    return pos_index.expand(p2c_att.size()[:2] + (pos_index.size(-2), key_layer.size(-2)))
+# def pos_dynamic_expand(pos_index: Tensor, p2c_att: Tensor, key_layer: Tensor) -> Tensor:
+#     return pos_index.expand(p2c_att.size()[:2] + (pos_index.size(-2), key_layer.size(-2)))
