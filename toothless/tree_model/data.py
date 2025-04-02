@@ -15,7 +15,10 @@ from eggshell import rise  # type: ignore
 import torch
 from torch import Tensor
 from torch.utils import data
+from torch.utils.data.distributed import DistributedSampler
 import torch.nn.functional as F
+from torch.utils.data import DataLoader
+
 
 from toothless.tree_model.args import DataArguments
 from toothless.tree_model.vocab import BOS_TOKEN, EOS_TOKEN, MASK_TOKEN, PAD_TOKEN, UNK_TOKEN, SimpleVocab
@@ -154,16 +157,9 @@ class CustomDataset(data.Dataset):
     def _pyrec_to_tensor(self, expr: rise.PyRecExpr) -> tuple[Tensor, Tensor, Tensor]:
         graph_data = expr.to_data()
 
-        # node_ids = torch.tensor([node.id for node in graph_data.nodes], dtype=torch.int32)
-        # tokenized_values = [
-        #     tokenizer.encode(BOS_TOKEN + node.name + SEP_TOKEN + node.value + EOS_TOKEN)
-        #     if node.value
-        #     else tokenizer.encode(BOS_TOKEN + node.name + EOS_TOKEN)
-        #     for node in graph_data.nodes
-        # ]
         ids = torch.tensor(
             [self.vocab.bos_token_id]
-            + [self.vocab.token2id(node.name) for node in graph_data.nodes]
+            + [self.vocab.token2id(node.name) for node in graph_data.nodes()]
             + [self.vocab.eos_token_id],
             dtype=torch.int64,
         )
@@ -223,22 +219,24 @@ class DictCollator:
         batched_data["r_sib"] = self.pad_2d([sample["r_sib"] for sample in batch], False)
         batched_data["r_mask"] = (batched_data["r_ids"] == self.pad_id).unsqueeze(-2).unsqueeze(-2)
 
-        # The _y versions are always shifted right.
-        # For matrices this means right and down.
-        full_tgt_ids = self.pad_1d([sample["tgt_ids"] for sample in batch], True)
-        batched_data["tgt_ids"] = full_tgt_ids[:, :-1]
-        batched_data["tgt_ids_y"] = full_tgt_ids[:, 1:]
-        batched_data["tgt_mask"] = make_std_mask(batched_data["tgt_ids"], self.pad_id)
+        n_tokens = 0
+        if batch[0]["tgt_ids"] and batch[0]["tgt_anc"] and batch[0]["tgt_sib"]:
+            # The _y versions are always shifted right.
+            # For matrices this means right and down.
+            full_tgt_ids = self.pad_1d([sample["tgt_ids"] for sample in batch], True)
+            batched_data["tgt_ids"] = full_tgt_ids[:, :-1]
+            batched_data["tgt_ids_y"] = full_tgt_ids[:, 1:]
+            batched_data["tgt_mask"] = make_std_mask(batched_data["tgt_ids"], self.pad_id)
 
-        full_tgt_anc = self.pad_2d([sample["tgt_anc"] for sample in batch], True)
-        batched_data["tgt_anc"] = full_tgt_anc[:, :-1, :-1]
-        batched_data["tgt_anc_y"] = full_tgt_anc[:, 1:, 1:]
+            full_tgt_anc = self.pad_2d([sample["tgt_anc"] for sample in batch], True)
+            batched_data["tgt_anc"] = full_tgt_anc[:, :-1, :-1]
+            batched_data["tgt_anc_y"] = full_tgt_anc[:, 1:, 1:]
 
-        full_tgt_sib = self.pad_2d([sample["tgt_sib"] for sample in batch], True)
-        batched_data["tgt_sib"] = full_tgt_sib[:, :-1, :-1]
-        batched_data["tgt_sib_y"] = full_tgt_sib[:, 1:, 1:]
+            full_tgt_sib = self.pad_2d([sample["tgt_sib"] for sample in batch], True)
+            batched_data["tgt_sib"] = full_tgt_sib[:, :-1, :-1]
+            batched_data["tgt_sib_y"] = full_tgt_sib[:, 1:, 1:]
 
-        n_tokens = int((full_tgt_ids != self.pad_id).data.sum())
+            n_tokens = int((full_tgt_ids != self.pad_id).data.sum())
         return batched_data, n_tokens
 
     def pad_1d(self, samples: list[Tensor], extra_pad: bool) -> Tensor:
@@ -261,3 +259,44 @@ class DictCollator:
         paddings = [(0, pad_len - s.size(-1), 0, pad_len - s.size(-2)) for s in samples]
         padded_elements = [F.pad(s, p, "constant", self.pad_id) for s, p in zip(samples, paddings)]
         return torch.stack(padded_elements)
+
+
+def mk_loaders(
+    rank: int, world_size: int, dataset: CustomDataset, data_args: DataArguments
+) -> tuple[DataLoader[dict[str, Tensor]], DataLoader[dict[str, Tensor]]]:
+    # Create and load dataset
+    # split_idx = int(data_args.split_size * len(dataset))
+    train_dataset, test_dataset = torch.utils.data.random_split(
+        dataset, [data_args.split_size, 1 - data_args.split_size]
+    )
+
+    # Create samplers
+    train_sampler = DistributedSampler(train_dataset, rank=rank, num_replicas=world_size, shuffle=True)
+    test_sampler = DistributedSampler(test_dataset, rank=rank, num_replicas=world_size)
+
+    pad_id = dataset.vocab.pad_token_id
+    assert pad_id == 0
+
+    collator = DictCollator(pad_id, data_args.max_len)
+
+    # Create the dataloaders
+    train_dataloader = DataLoader(
+        train_dataset,
+        batch_size=data_args.batch_size,
+        sampler=train_sampler,
+        num_workers=2,
+        pin_memory=True,
+        shuffle=False,
+        collate_fn=collator,
+    )
+    test_dataloader = DataLoader(
+        test_dataset,
+        batch_size=data_args.batch_size,
+        sampler=test_sampler,
+        num_workers=2,
+        pin_memory=True,
+        shuffle=False,
+        collate_fn=collator,
+    )
+
+    return train_dataloader, test_dataloader

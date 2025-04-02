@@ -7,7 +7,6 @@ import torch.optim as optim
 from torch.optim.lr_scheduler import CosineAnnealingLR
 import torch.distributed as dist
 from torch.distributed.fsdp import FullyShardedDataParallel, MixedPrecision, ShardingStrategy
-from torch.utils.data.distributed import DistributedSampler
 from torch.utils.data import DataLoader
 import torch.multiprocessing as mp
 from torch.nn import CrossEntropyLoss
@@ -17,50 +16,9 @@ from tqdm.auto import tqdm
 import transformers
 
 from toothless.utils.dist_helper import cleanup_process_group, rank0print, setup_process_group
-from toothless.tree_model.data import CustomDataset, DictCollator
+from toothless.tree_model.data import CustomDataset, mk_loaders
 from toothless.tree_model.model import ASTTransformer
 from toothless.tree_model.args import DataArguments, TrainingArguments, ModelArguments
-
-
-def mk_loaders(
-    rank: int, world_size: int, dataset: CustomDataset, data_args: DataArguments
-) -> tuple[DataLoader[dict[str, Tensor]], DataLoader[dict[str, Tensor]]]:
-    # Create and load dataset
-    # split_idx = int(data_args.split_size * len(dataset))
-    train_dataset, test_dataset = torch.utils.data.random_split(
-        dataset, [data_args.split_size, 1 - data_args.split_size]
-    )
-
-    # Create samplers
-    train_sampler = DistributedSampler(train_dataset, rank=rank, num_replicas=world_size, shuffle=True)
-    test_sampler = DistributedSampler(test_dataset, rank=rank, num_replicas=world_size)
-
-    pad_id = dataset.vocab.pad_token_id
-    assert pad_id == 0
-
-    collator = DictCollator(pad_id, data_args.max_len)
-
-    # Create the dataloaders
-    train_dataloader = DataLoader(
-        train_dataset,
-        batch_size=data_args.batch_size,
-        sampler=train_sampler,
-        num_workers=2,
-        pin_memory=True,
-        shuffle=False,
-        collate_fn=collator,
-    )
-    test_dataloader = DataLoader(
-        test_dataset,
-        batch_size=data_args.batch_size,
-        sampler=test_sampler,
-        num_workers=2,
-        pin_memory=True,
-        shuffle=False,
-        collate_fn=collator,
-    )
-
-    return train_dataloader, test_dataloader
 
 
 def train(
@@ -68,7 +26,7 @@ def train(
     model: FullyShardedDataParallel,
     optimizer: optim.Optimizer,
     token_criterion: CrossEntropyLoss,
-    train_dataloader: DataLoader,
+    train_dataloader: DataLoader[dict[str, Tensor]],
     epoch: int,
     train_args: TrainingArguments,
     writer: SummaryWriter | None = None,
@@ -110,7 +68,7 @@ def train(
 def eval(
     rank: int,
     model: nn.Module,
-    eval_dataloader: DataLoader,
+    eval_dataloader: DataLoader[dict[str, Tensor]],
     token_criterion: CrossEntropyLoss,
     epoch: int,
     writer: SummaryWriter | None = None,
@@ -165,7 +123,8 @@ def fsdp_main(
     )
 
     if writer:
-        example_batch, _ = next(iter(copy.deepcopy(eval_dataloader)))
+        trace_dataloader = copy.deepcopy(train_dataloader)
+        example_batch, _ = next(iter(trace_dataloader))
         writer.add_graph(model, example_batch)
         model.to(rank)
 
