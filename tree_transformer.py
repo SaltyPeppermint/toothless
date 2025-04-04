@@ -7,14 +7,20 @@ from typing import Any
 
 import torch
 from torch import Tensor
-import torch.nn as nn
-import torch.optim as optim
+from torch import nn
+from torch.nn import CrossEntropyLoss
+from torch import optim
 from torch.optim.lr_scheduler import CosineAnnealingLR
 import torch.distributed as dist
-from torch.distributed.fsdp import FullyShardedDataParallel, MixedPrecision, ShardingStrategy
+from torch.distributed.fsdp import (
+    FullyShardedDataParallel as FSDP,
+    MixedPrecision,
+    ShardingStrategy,
+    StateDictType,
+    FullStateDictConfig,
+)
 from torch.utils.data import DataLoader
 import torch.multiprocessing as mp
-from torch.nn import CrossEntropyLoss
 from torch.utils.tensorboard.writer import SummaryWriter
 
 from tqdm.auto import tqdm
@@ -59,12 +65,7 @@ def fsdp_main(
     mixed_precision = MixedPrecision(param_dtype=torch.bfloat16, cast_forward_inputs=True) if train_args.bf16 else None
     sharding_strategy = ShardingStrategy.FULL_SHARD if world_size > 1 else ShardingStrategy.NO_SHARD
 
-    model = FullyShardedDataParallel(
-        model,
-        sharding_strategy=sharding_strategy,
-        mixed_precision=mixed_precision,
-        device_id=rank,
-    )
+    model = FSDP(model, sharding_strategy=sharding_strategy, mixed_precision=mixed_precision, device_id=rank)
     rank0print(rank, "FSDP Model loaded to GPU and ready")
 
     # Define optimizer and loss function
@@ -100,16 +101,18 @@ def fsdp_main(
     if train_args.save_model_end:
         # use a barrier to make sure training is done on all ranks
         dist.barrier()
-        states = model.state_dict()
-        if rank == 0:
-            save(model_args, data_args, train_args, states, start_time)
+        save_policy = FullStateDictConfig(offload_to_cpu=True, rank0_only=True)
+        with FSDP.state_dict_type(model, StateDictType.FULL_STATE_DICT, save_policy):
+            states = model.state_dict()
+            if rank == 0:
+                save(model_args, data_args, train_args, states, start_time)
 
     cleanup_process_group()
 
 
 def train(
     rank: int,
-    model: FullyShardedDataParallel,
+    model: FSDP,
     dataloader: DataLoader[dict[str, Tensor]],
     criterion: CrossEntropyLoss,
     optimizer: optim.Optimizer,
