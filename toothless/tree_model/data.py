@@ -117,18 +117,6 @@ class CustomDataset(data.Dataset):
     #             yield chain[middle].to_data().values()
     #             yield chain[right].to_data().values()
 
-    # def _pick_indices(self, max_index: int) -> set[tuple[int, int, int]]:
-    #     xs = torch.randint(0, max_index, (self.pairs_per_expl,))
-    #     ys = torch.randint(0, max_index, (self.pairs_per_expl,))
-    #     r = set()
-    #     for x, y in zip(xs, ys):
-    #         distance = torch.abs(x - y)
-    #         if distance < 2:
-    #             continue
-    #         r.add((torch.minimum(x, y), distance // 2, torch.maximum(x, y)))
-
-    #     return r
-
     def _pick_indices(self, max_index: int) -> set[tuple[int, int, int]]:
         def rec(start: int, end: int, acc: set[tuple[int, int, int]], min_distance):
             distance = end - start
@@ -248,8 +236,13 @@ class DictCollator:
         return batched_data, n_tokens
 
     def pad_1d(self, samples: list[Tensor], extra_pad: bool) -> Tensor:
-        # Pad sequences to the same length
-        # Generate padding directions depending on max_len
+        """
+        Pad sequences to the same length along one simple dimension
+        Generate padding directions depending on max_len
+
+        :param samples: List of input tensors to pad and stack
+        :return: Padded and stacked samples
+        """
         pad_len = self.max_len
         if extra_pad:
             pad_len += 1  # Extra padding since tgt will be shifted
@@ -258,9 +251,13 @@ class DictCollator:
         return torch.stack(padded_elements)
 
     def pad_2d(self, samples: list[Tensor], extra_pad: bool) -> Tensor:
-        # Find largest dimensions of the square 2-dimensional matrices
-        # (they are always square)
-        # Generate padding directions depending on largest element in batch
+        """
+        Find largest dimensions of the square 2-dimensional matrices (they are always square)
+        Generate padding directions depending on largest element in batch
+
+        :param samples: List of input tensors to pad and stack
+        :return: Padded and stacked samples
+        """
         pad_len = self.max_len
         if extra_pad:
             pad_len += 1  # Extra padding since tgt will be shifted
@@ -273,7 +270,6 @@ def mk_loaders(
     rank: int, world_size: int, dataset: CustomDataset, data_args: DataArguments
 ) -> tuple[DataLoader[dict[str, Tensor]], DataLoader[dict[str, Tensor]]]:
     # Create and load dataset
-    # split_idx = int(data_args.split_size * len(dataset))
     train_dataset, eval_dataset = torch.utils.data.random_split(
         dataset, [data_args.split_size, 1 - data_args.split_size]
     )

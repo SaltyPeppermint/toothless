@@ -9,11 +9,7 @@ from toothless.tree_model.components.utils import FeedForward, stack_layers
 
 
 class ASTDoubleDecoderLayer(nn.Module):
-    def __init__(
-        self,
-        conf: ModelArguments,
-        activation=F.gelu,
-    ):
+    def __init__(self, conf: ModelArguments, activation=F.gelu):
         super(ASTDoubleDecoderLayer, self).__init__()
 
         num_heads = conf.anc_heads + conf.sib_heads
@@ -63,7 +59,6 @@ class ASTDoubleDecoderLayer(nn.Module):
                 rel_k=rel_k,
             )
         )
-
         tgt = tgt + self.r_dropout(
             self.r_cross_attn(
                 self.r_norm(tgt),
@@ -75,26 +70,8 @@ class ASTDoubleDecoderLayer(nn.Module):
                 rel_k=rel_k,
             )
         )
-
         tgt = tgt + self.ff_dropout(self.feed_forward(self.ff_norm(tgt)))
 
-        # tgt = self.sublayers[0](tgt, lambda x: self.self_attn(x, tgt_pos_indices, tgt_mask, rel_q=rel_q, rel_k=rel_k))
-
-        # tgt = self.sublayers[1](
-        #     tgt,
-        #     lambda x: self.l_cross_attn(
-        #         x, tgt_pos_indices, l_mask, cross_state=l_mem, cross_pos_indices=l_pos_indices, rel_q=rel_q, rel_k=rel_k
-        #     ),
-        # )
-
-        # tgt = self.sublayers[2](
-        #     tgt,
-        #     lambda x: self.r_cross_attn(
-        #         x, tgt_pos_indices, r_mask, cross_state=r_mem, cross_pos_indices=r_pos_indices, rel_q=rel_q, rel_k=rel_k
-        #     ),
-        # )
-
-        # tgt = self.sublayers[3](tgt, self.feed_forward)
         return tgt
 
 

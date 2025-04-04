@@ -11,14 +11,7 @@ from toothless.tree_model.vocab import SimpleVocab
 
 
 class ASTTransformer(nn.Module):
-    def __init__(
-        self,
-        conf: ModelArguments,
-        src_vocab_size: int,
-        tgt_vocab_size: int,
-        k: int,
-        state_dict=None,
-    ):
+    def __init__(self, conf: ModelArguments, src_vocab_size: int, tgt_vocab_size: int, k: int, state_dict=None):
         super(ASTTransformer, self).__init__()
 
         self.with_anc_pos = conf.anc_heads > 0
@@ -81,9 +74,8 @@ class ASTTransformer(nn.Module):
 
 
 class GreedyGenerator(nn.Module):
-    def __init__(
-        self, model: ASTTransformer, max_len: int, vocab: SimpleVocab, k: int
-    ):  # smth about multi gpu and model.module?
+    # smth about multi gpu and model.module?
+    def __init__(self, model: ASTTransformer, max_len: int, vocab: SimpleVocab, k: int):
         super(GreedyGenerator, self).__init__()
 
         self.model = model
@@ -92,20 +84,17 @@ class GreedyGenerator(nn.Module):
         self.k = k
 
     def forward(self, data: dict[str, Tensor]):
-        # self.model.process_data(data)
-
         l_mem = self.model.l_encode(data)
         r_mem = self.model.r_encode(data)
 
         batch_size = r_mem.size(0)
 
-        # data["tgt_ids"] = torch.zeros(batch_size, 0, requires_grad=False)
-
         assert self.vocab.pad_token_id == 0
-
         tgt_ids = torch.zeros(batch_size, 1, requires_grad=False, dtype=torch.long)
         tgt_ids[:, 0] = self.vocab.bos_token_id
+
         data["tgt_ids"] = tgt_ids.to(l_mem.device)
+
         for i in range(self.max_len - 1):
             data["tgt_mask"] = make_std_mask(data["tgt_ids"], 0)
             data["tgt_anc"], data["tgt_sib"] = self.pos_matrices(data["tgt_ids"])

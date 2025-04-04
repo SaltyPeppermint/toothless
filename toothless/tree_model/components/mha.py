@@ -6,13 +6,7 @@ from torch import Tensor
 
 
 class MultiHeadAttention(nn.Module):
-    def __init__(
-        self,
-        d_model: int,
-        num_heads: int,
-        dropout: float = 0.1,
-        cross_attn: bool = False,
-    ):
+    def __init__(self, d_model: int, num_heads: int, dropout: float = 0.1, cross_attn: bool = False):
         super(MultiHeadAttention, self).__init__()
 
         self.d_k = d_model // num_heads

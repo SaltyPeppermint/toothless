@@ -105,13 +105,7 @@ class RotaryPositionalEncoding(nn.Module):
 
 
 class Embeddings(nn.Module):
-    def __init__(
-        self,
-        embedding_dim: int,
-        vocab_size: int,
-        dropout: float = 0.1,
-        with_pos: bool = False,
-    ):
+    def __init__(self, embedding_dim: int, vocab_size: int, dropout: float = 0.1, with_pos: bool = False):
         super(Embeddings, self).__init__()
         self.word_embeddings = nn.Embedding(vocab_size, embedding_dim, padding_idx=0)
         if with_pos:

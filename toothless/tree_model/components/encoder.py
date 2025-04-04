@@ -25,19 +25,11 @@ class ASTEncoderLayer(nn.Module):
         self.ff_dropout = nn.Dropout(conf.dropout)
 
     def forward(
-        self,
-        src: Tensor,
-        pos_indices: Tensor,
-        mask: Tensor,
-        rel_q: Tensor | None,
-        rel_k: Tensor | None,
+        self, src: Tensor, pos_indices: Tensor, mask: Tensor, rel_q: Tensor | None, rel_k: Tensor | None
     ) -> Tensor:
-        """ """
-
         src = src + self.self_dropout(self.self_attn(self.self_norm(src), pos_indices, mask, rel_q=rel_q, rel_k=rel_k))
         src = src + self.ff_dropout(self.feed_forward(self.ff_norm(src)))
-        # src = self.sublayers[0](src, lambda x: self.self_attn(x, pos_indices, mask, rel_q=rel_q, rel_k=rel_k))
-        # src = self.sublayers[1](src, self.feed_forward)
+
         return src
 
 
