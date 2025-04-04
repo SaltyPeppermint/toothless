@@ -120,30 +120,42 @@ def train(
     writer: SummaryWriter | None = None,
 ):
     model.train()
+
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    # BF16 does not need scaling!
+    # scaler = torch.GradScaler(device)
+
     ddp_loss = torch.zeros(2).to(rank)
 
     for batch_idx, (batch, num_tokens) in enumerate(
         tqdm(dataloader, desc=f"Training Epoch {epoch + 1}/{train_args.num_train_epochs}")
     ):
-        # Move batch to device
-        batch = {k: v.to(rank) for k, v in batch.items()}
+        with torch.autocast(device_type=device, dtype=torch.bfloat16, enabled=train_args.bf16):
+            # Move batch to device
+            batch = {k: v.to(rank) for k, v in batch.items()}
 
-        # Forward pass
-        out = model(batch)
-        loss = criterion(out.view(-1, out.size(-1)), batch["tgt_ids_y"].view(-1))
+            # Forward pass
+            out = model(batch)
+            loss = criterion(out.view(-1, out.size(-1)), batch["tgt_ids_y"].view(-1))
 
-        # Backwards pass
-        optimizer.zero_grad()
-        loss.backward()
-        optimizer.step()
+            # Backwards pass
+            # scaler.scale(loss).backward()
+            optimizer.step()
+            # otherwise, optimizer.step() is skipped.
+            optimizer.step()
+            # scaler.step(optimizer)
+            # Updates the scale for next iteration.
+            # scaler.update()
+            # Dont forget...
+            optimizer.zero_grad()
 
-        if writer:
-            writer.add_scalar("Train Loss/batch", loss, batch_idx + epoch * len(dataloader))
-            writer.add_scalar("Toks/in-batch", num_tokens, batch_idx + epoch * len(dataloader))
+            if writer:
+                writer.add_scalar("Train Loss/batch", loss, batch_idx + epoch * len(dataloader))
+                writer.add_scalar("Toks/in-batch", num_tokens, batch_idx + epoch * len(dataloader))
 
-        # Record loss
-        ddp_loss[0] += loss.item()
-        ddp_loss[1] += len(batch)
+            # Record loss
+            ddp_loss[0] += loss.item()
+            ddp_loss[1] += len(batch)
 
     dist.all_reduce(ddp_loss, op=dist.ReduceOp.SUM)
     train_loss = ddp_loss[0] / ddp_loss[1]

@@ -14,7 +14,6 @@ class ModelArguments:
     sib_heads: int = field(default=1)
     pos_type: str = field(default="p2q_p2k", metadata={"help": "Position type seperated by underscore."})
     with_pos: bool = field(default=False, metadata={"help": "Enable rotary positional encoding for decoder."})
-    bf16: bool = field(default=False)
 
 
 @dataclass
@@ -45,3 +44,4 @@ class TrainingArguments:
     adam_beta2: float = field(default=0.95)
     logging_steps: int = field(default=1)
     warmup_ratio: Optional[float] = field(default=0.01)
+    bf16: bool = field(default=True)
