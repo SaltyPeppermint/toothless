@@ -220,7 +220,7 @@ class DictCollator:
         batched_data["r_mask"] = (batched_data["r_ids"] == self.pad_id).unsqueeze(-2).unsqueeze(-2)
 
         n_tokens = 0
-        if batch[0]["tgt_ids"] and batch[0]["tgt_anc"] and batch[0]["tgt_sib"]:
+        if not any([x is None for x in [batch[0]["tgt_ids"], batch[0]["tgt_anc"], batch[0]["tgt_sib"]]]):
             # The _y versions are always shifted right.
             # For matrices this means right and down.
             full_tgt_ids = self.pad_1d([sample["tgt_ids"] for sample in batch], True)
