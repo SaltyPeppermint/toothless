@@ -1,5 +1,6 @@
 import copy
 import logging
+from pathlib import Path
 import torch
 from torch import Tensor
 import torch.nn as nn
@@ -24,9 +25,9 @@ from toothless.tree_model.args import DataArguments, TrainingArguments, ModelArg
 def train(
     rank: int,
     model: FullyShardedDataParallel,
+    dataloader: DataLoader[dict[str, Tensor]],
+    criterion: CrossEntropyLoss,
     optimizer: optim.Optimizer,
-    token_criterion: CrossEntropyLoss,
-    train_dataloader: DataLoader[dict[str, Tensor]],
     epoch: int,
     train_args: TrainingArguments,
     writer: SummaryWriter | None = None,
@@ -35,14 +36,14 @@ def train(
     ddp_loss = torch.zeros(2).to(rank)
 
     for batch_idx, (batch, num_tokens) in enumerate(
-        tqdm(train_dataloader, desc=f"Epoch {epoch + 1}/{train_args.num_train_epochs}")
+        tqdm(dataloader, desc=f"Training Epoch {epoch + 1}/{train_args.num_train_epochs}")
     ):
         # Move batch to device
         batch = {k: v.to(rank) for k, v in batch.items()}
 
         # Forward pass
         out = model(batch)
-        loss = token_criterion(out.view(-1, out.size(-1)), batch["tgt_ids_y"].view(-1))
+        loss = criterion(out.view(-1, out.size(-1)), batch["tgt_ids_y"].view(-1))
 
         # Backwards pass
         optimizer.zero_grad()
@@ -50,8 +51,8 @@ def train(
         optimizer.step()
 
         if writer:
-            writer.add_scalar("Train Loss/batch", loss, batch_idx + epoch * len(train_dataloader))
-            writer.add_scalar("Toks/in-batch", num_tokens, batch_idx + epoch * len(train_dataloader))
+            writer.add_scalar("Train Loss/batch", loss, batch_idx + epoch * len(dataloader))
+            writer.add_scalar("Toks/in-batch", num_tokens, batch_idx + epoch * len(dataloader))
 
         # Record loss
         ddp_loss[0] += loss.item()
@@ -62,24 +63,25 @@ def train(
     if writer:
         writer.add_scalar("Train Loss/epoch", train_loss, epoch + 1)
 
-    rank0print(rank, f"Epoch: {epoch + 1} \tLoss: {train_loss:.6f}")
+    rank0print(rank, f"Epoch: {epoch + 1}/{train_args.num_train_epochs} \tTrain Loss: {train_loss:.6f}")
 
 
 def eval(
     rank: int,
     model: nn.Module,
-    eval_dataloader: DataLoader[dict[str, Tensor]],
-    token_criterion: CrossEntropyLoss,
+    dataloader: DataLoader[dict[str, Tensor]],
+    criterion: CrossEntropyLoss,
     epoch: int,
+    max_epochs: int,
     writer: SummaryWriter | None = None,
 ):
     model.eval()
-    ddp_loss = torch.zeros(5).to(rank)
-    for batch in eval_dataloader:
+    ddp_loss = torch.zeros(2).to(rank)
+    for batch, _num_tokens in dataloader:
         batch = {k: v.to(rank) for k, v in batch.items()}
         with torch.no_grad():
             out = model(batch)
-            loss = token_criterion(out.view(-1, out.size(-1)), batch["tgt_ids_y"].view(-1))
+            loss = criterion(out.view(-1, out.size(-1)), batch["tgt_ids_y"].view(-1))
 
             ddp_loss[0] += loss
             ddp_loss[1] += len(batch)
@@ -89,7 +91,7 @@ def eval(
     if writer:
         writer.add_scalar("Eval loss/epoch", eval_loss, epoch + 1)
 
-    rank0print(rank, f"Epoch {epoch + 1}: Validation loss: {eval_loss:.4f}")
+    rank0print(rank, f"Epoch: {epoch + 1}/{max_epochs} \tValidation loss: {eval_loss:.4f}")
 
 
 def fsdp_main(
@@ -104,7 +106,7 @@ def fsdp_main(
     torch.cuda.set_device(rank)
 
     # Load Data
-    dataset = CustomDataset(data_args)
+    dataset = CustomDataset(data_args, len_limit=100)
     train_dataloader, eval_dataloader = mk_loaders(rank, world_size, dataset, data_args)
 
     rank0print(rank, "DataLoaders ready")
@@ -123,8 +125,7 @@ def fsdp_main(
     )
 
     if writer:
-        trace_dataloader = copy.deepcopy(train_dataloader)
-        example_batch, _ = next(iter(trace_dataloader))
+        example_batch, _ = next(iter(copy.deepcopy(train_dataloader)))
         writer.add_graph(model, example_batch)
         model.to(rank)
 
@@ -153,11 +154,11 @@ def fsdp_main(
     init_start_event.record(torch.cuda.current_stream())
 
     for epoch in range(train_args.num_train_epochs):
-        train(rank, model, optimizer, criterion, copy.deepcopy(train_dataloader), epoch, train_args, writer)
+        train(rank, model, copy.deepcopy(train_dataloader), criterion, optimizer, epoch, train_args, writer)
 
         # Optionally, evaluate the model on the validation set after each epoch
         if train_args.eval_each_epoch:
-            eval(rank, model, copy.deepcopy(eval_dataloader), criterion, epoch, writer)
+            eval(rank, model, copy.deepcopy(eval_dataloader), criterion, epoch, train_args.num_train_epochs, writer)
 
         lr_scheduler.step()
 
@@ -176,7 +177,8 @@ def fsdp_main(
         dist.barrier()
         states = model.state_dict()
         if rank == 0:
-            torch.save(states, f"{model_args.output_dir}/graph_autoencoder.pt")
+            Path(model_args.output_dir).mkdir(exist_ok=True)
+            torch.save(states, f"{model_args.output_dir}/tree_nn.pt")
 
     cleanup_process_group()
 

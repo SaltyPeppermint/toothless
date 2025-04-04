@@ -28,7 +28,7 @@ CHUNK_SIZE = 128
 
 
 class CustomDataset(data.Dataset):
-    def __init__(self, conf: DataArguments):
+    def __init__(self, conf: DataArguments, len_limit: None | int = None):
         """
         :param k represents the max relative distance
         """
@@ -36,6 +36,7 @@ class CustomDataset(data.Dataset):
         self.min_expl_distance = conf.min_expl_distance
         self.k = conf.k
         self.force_reload = conf.force_reload
+        self.len_limit = len_limit
         torch.manual_seed(conf.random_state)
 
         self.cache_dir = Path("cache") / Path(*self.json_root.parts[2:])
@@ -67,7 +68,10 @@ class CustomDataset(data.Dataset):
 
     def _process(self) -> pl.DataFrame:
         if not self.force_reload and self.processed_path.is_file():
-            return pl.read_parquet(self.processed_path)
+            df = pl.read_parquet(self.processed_path)
+            if self.len_limit:
+                return df.limit(self.len_limit)
+            return df
 
         raw_data = pl.read_parquet(self.raw_path)
         expl_chains = raw_data.get_column("explanation_chain")
@@ -89,7 +93,12 @@ class CustomDataset(data.Dataset):
 
         df = pl.DataFrame(total_samples)
         df.write_parquet(self.processed_path)
-        print(f"Total samples: {len(total_samples)}")
+        print(f"Total samples: {len(df)}")
+
+        if self.len_limit:
+            df = df.limit(self.len_limit)
+
+        print(f"Using {len(df)} samples!")
 
         print("Data processed!")
         return df
@@ -266,13 +275,13 @@ def mk_loaders(
 ) -> tuple[DataLoader[dict[str, Tensor]], DataLoader[dict[str, Tensor]]]:
     # Create and load dataset
     # split_idx = int(data_args.split_size * len(dataset))
-    train_dataset, test_dataset = torch.utils.data.random_split(
+    train_dataset, eval_dataset = torch.utils.data.random_split(
         dataset, [data_args.split_size, 1 - data_args.split_size]
     )
 
     # Create samplers
     train_sampler = DistributedSampler(train_dataset, rank=rank, num_replicas=world_size, shuffle=True)
-    test_sampler = DistributedSampler(test_dataset, rank=rank, num_replicas=world_size)
+    eval_sampler = DistributedSampler(eval_dataset, rank=rank, num_replicas=world_size)
 
     pad_id = dataset.vocab.pad_token_id
     assert pad_id == 0
@@ -289,17 +298,17 @@ def mk_loaders(
         shuffle=False,
         collate_fn=collator,
     )
-    test_dataloader = DataLoader(
-        test_dataset,
+    eval_dataloader = DataLoader(
+        eval_dataset,
         batch_size=data_args.batch_size,
-        sampler=test_sampler,
+        sampler=eval_sampler,
         num_workers=2,
         pin_memory=True,
         shuffle=False,
         collate_fn=collator,
     )
 
-    return train_dataloader, test_dataloader
+    return train_dataloader, eval_dataloader
 
 
 def partial_to_matrices(partial_tok: list[str], k: int) -> tuple[Tensor, Tensor]:
