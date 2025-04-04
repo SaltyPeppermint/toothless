@@ -45,3 +45,4 @@ class TrainingArguments:
     logging_steps: int = field(default=1)
     warmup_ratio: Optional[float] = field(default=0.01)
     bf16: bool = field(default=True)
+    trace: bool = field(default=False)

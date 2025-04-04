@@ -40,32 +40,32 @@ def fsdp_main(
 
     # Load Data
     dataset = CustomDataset(data_args, rank)
+    vocab_size = len(dataset.vocab)
     train_dataloader, eval_dataloader = mk_loaders(rank, world_size, dataset, data_args)
-
     rank0print(rank, "DataLoaders ready")
 
-    vocab_size = len(dataset.vocab)
-    # Load Model
-
+    # Construct Base Model
     init_start_event = torch.cuda.Event(enable_timing=True)
     init_end_event = torch.cuda.Event(enable_timing=True)
 
     model = ASTTransformer(model_args, vocab_size, vocab_size, data_args.k)
 
-    if writer:
+    if writer and train_args.trace:
         example_batch, _ = next(iter(copy.deepcopy(train_dataloader)))
         writer.add_graph(model, example_batch)
-        model.to(rank)
+    rank0print(rank, "Base Model ready")
 
-    model.to(rank)
-    rank0print(rank, "Model loaded")
-
-    # FSDP model
+    # FSDP model and Mixed Precision Config
     mixed_precision = MixedPrecision(param_dtype=torch.bfloat16, cast_forward_inputs=True) if train_args.bf16 else None
     sharding_strategy = ShardingStrategy.FULL_SHARD if world_size > 1 else ShardingStrategy.NO_SHARD
 
-    model = FullyShardedDataParallel(model, sharding_strategy=sharding_strategy, mixed_precision=mixed_precision)
-    rank0print(rank, "FSDP Model ready")
+    model = FullyShardedDataParallel(
+        model,
+        sharding_strategy=sharding_strategy,
+        mixed_precision=mixed_precision,
+        device_id=rank,
+    )
+    rank0print(rank, "FSDP Model loaded to GPU and ready")
 
     # Define optimizer and loss function
     optimizer = optim.AdamW(
@@ -90,10 +90,8 @@ def fsdp_main(
 
         lr_scheduler.step()
 
-    rank0print(rank, "Training finished!")
-    # eval(rank, model, eval_dataloader, train_args.num_train_epochs, writer=writer)
-
     init_end_event.record(torch.cuda.current_stream())
+    rank0print(rank, "Training finished!")
 
     if rank == 0:
         init_end_event.synchronize()
