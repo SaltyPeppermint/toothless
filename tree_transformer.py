@@ -39,7 +39,7 @@ def fsdp_main(
     torch.cuda.set_device(rank)
 
     # Load Data
-    dataset = CustomDataset(data_args, len_limit=100)
+    dataset = CustomDataset(data_args)
     train_dataloader, eval_dataloader = mk_loaders(rank, world_size, dataset, data_args)
 
     rank0print(rank, "DataLoaders ready")
@@ -50,12 +50,7 @@ def fsdp_main(
     init_start_event = torch.cuda.Event(enable_timing=True)
     init_end_event = torch.cuda.Event(enable_timing=True)
 
-    model = ASTTransformer(
-        model_args,
-        vocab_size,
-        vocab_size,
-        data_args.k,
-    )
+    model = ASTTransformer(model_args, vocab_size, vocab_size, data_args.k)
 
     if writer:
         example_batch, _ = next(iter(copy.deepcopy(train_dataloader)))
@@ -103,7 +98,6 @@ def fsdp_main(
     if rank == 0:
         init_end_event.synchronize()
     rank0print(rank, f"CUDA event elapsed time: {init_start_event.elapsed_time(init_end_event) / 1000} sec")
-    rank0print(rank, f"{model}")
 
     if train_args.save_model_end:
         # use a barrier to make sure training is done on all ranks

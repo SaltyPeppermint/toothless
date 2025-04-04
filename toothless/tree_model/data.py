@@ -28,7 +28,7 @@ CHUNK_SIZE = 128
 
 
 class CustomDataset(data.Dataset):
-    def __init__(self, conf: DataArguments, len_limit: None | int = None):
+    def __init__(self, conf: DataArguments):
         """
         :param k represents the max relative distance
         """
@@ -36,7 +36,7 @@ class CustomDataset(data.Dataset):
         self.min_expl_distance = conf.min_expl_distance
         self.k = conf.k
         self.force_reload = conf.force_reload
-        self.len_limit = len_limit
+        self.len_limit = conf.data_limit
         torch.manual_seed(conf.random_state)
 
         self.cache_dir = Path("cache") / Path(*self.json_root.parts[2:])

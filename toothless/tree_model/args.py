@@ -1,5 +1,4 @@
 from dataclasses import dataclass, field
-from pathlib import Path
 from typing import Optional
 
 
@@ -20,7 +19,7 @@ class ModelArguments:
 
 @dataclass
 class DataArguments:
-    data_path: Path = field(metadata={"help": "Path to the training data."})
+    data_path: str = field(metadata={"help": "Path to the training data."})
     split_size: float = field(default=0.9, metadata={"help": "Train/Test split ratio."})
     random_state: int = field(default=42)
     # pairs_per_expl: int = field(default=4)
@@ -31,6 +30,7 @@ class DataArguments:
     k: int = field(default=15, metadata={"help": "Max relative positional distance."})
     max_len: int = field(default=128)
     force_reload: bool = field(default=False)
+    data_limit: int | None = field(default=None)
 
 
 @dataclass
