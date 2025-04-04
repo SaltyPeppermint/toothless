@@ -155,17 +155,17 @@ class CustomDataset(data.Dataset):
         }
 
     def _pyrec_to_tensor(self, expr: rise.PyRecExpr) -> tuple[Tensor, Tensor, Tensor]:
-        graph_data = expr.to_data()
+        tree_data = expr.to_data()
 
         ids = torch.tensor(
             [self.vocab.bos_token_id]
-            + [self.vocab.token2id(node.name) for node in graph_data.nodes()]
+            + [self.vocab.token2id(node.name) for node in tree_data.nodes()]
             + [self.vocab.eos_token_id],
-            dtype=torch.int64,
+            dtype=torch.long,
         )
 
-        anc_matrix = torch.tensor(graph_data.anc_matrix(self.k, double_pad=True), dtype=torch.int64)
-        sib_matrix = torch.tensor(graph_data.sib_matrix(self.k, double_pad=True), dtype=torch.int64)
+        anc_matrix = torch.tensor(tree_data.anc_matrix(self.k, double_pad=True), dtype=torch.long)
+        sib_matrix = torch.tensor(tree_data.sib_matrix(self.k, double_pad=True), dtype=torch.long)
 
         return ids, anc_matrix, sib_matrix
 
@@ -300,3 +300,10 @@ def mk_loaders(
     )
 
     return train_dataloader, test_dataloader
+
+
+def partial_to_matrices(partial_tok: list[str], k: int) -> tuple[Tensor, Tensor]:
+    tree_data = rise.partial_parse(partial_tok)
+    anc_matrix = torch.tensor(tree_data.anc_matrix(k, double_pad=True), dtype=torch.long)
+    sib_matrix = torch.tensor(tree_data.sib_matrix(k, double_pad=True), dtype=torch.long)
+    return anc_matrix[:-1, :-1], sib_matrix[:-1, :-1]

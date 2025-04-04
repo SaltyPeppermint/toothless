@@ -6,7 +6,7 @@ from toothless.tree_model.args import ModelArguments
 from toothless.tree_model.components.decoder import ASTDoubleDecoder
 from toothless.tree_model.components.encoder import ASTEncoder
 from toothless.tree_model.components.utils import Embeddings, Generator
-from toothless.tree_model.data import make_std_mask
+from toothless.tree_model.data import make_std_mask, partial_to_matrices
 from toothless.tree_model.vocab import SimpleVocab
 
 
@@ -82,13 +82,14 @@ class ASTTransformer(nn.Module):
 
 class GreedyGenerator(nn.Module):
     def __init__(
-        self, model: ASTTransformer, max_tgt_len: int, vocab: SimpleVocab
+        self, model: ASTTransformer, max_len: int, vocab: SimpleVocab, k: int
     ):  # smth about multi gpu and model.module?
         super(GreedyGenerator, self).__init__()
 
         self.model = model
-        self.max_tgt_len = max_tgt_len
+        self.max_len = max_len
         self.vocab = vocab
+        self.k = k
 
     def forward(self, data: dict[str, Tensor]):
         # self.model.process_data(data)
@@ -105,9 +106,9 @@ class GreedyGenerator(nn.Module):
         tgt_ids = torch.zeros(batch_size, 1, requires_grad=False, dtype=torch.long)
         tgt_ids[:, 0] = self.vocab.bos_token_id
         data["tgt_ids"] = tgt_ids.to(l_mem.device)
-        for i in range(self.max_tgt_len - 1):
+        for i in range(self.max_len - 1):
             data["tgt_mask"] = make_std_mask(data["tgt_ids"], 0)
-            data["tgt_anc"], data["tgt_sib"] = make_anc_sib_matrix(data["tgt_ids"])
+            data["tgt_anc"], data["tgt_sib"] = self.pos_matrices(data["tgt_ids"])
 
             decoder_outputs, _ = self.model.decode(data, l_mem, r_mem)
             out = self.model.generator(decoder_outputs)
@@ -120,6 +121,12 @@ class GreedyGenerator(nn.Module):
 
         return data["tgt_ids"]
 
+    def pos_matrices(self, tgt_ids: Tensor) -> tuple[Tensor, Tensor]:
+        batch_tgt_anc, batch_tgt_sib = [], []
+        for partial_ids in tgt_ids.tolist():
+            partial_tok = [self.vocab.id2token(i) for i in partial_ids]
+            tgt_anc, tgt_sib = partial_to_matrices(partial_tok, self.k)
+            batch_tgt_anc.append(tgt_anc)
+            batch_tgt_sib.append(tgt_sib)
 
-def make_anc_sib_matrix(i: Tensor) -> tuple[Tensor, Tensor]:
-    return Tensor(), Tensor()
+        return torch.stack(batch_tgt_anc), torch.stack(batch_tgt_sib)
