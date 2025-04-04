@@ -39,7 +39,7 @@ def fsdp_main(
     torch.cuda.set_device(rank)
 
     # Load Data
-    dataset = CustomDataset(data_args)
+    dataset = CustomDataset(data_args, rank)
     train_dataloader, eval_dataloader = mk_loaders(rank, world_size, dataset, data_args)
 
     rank0print(rank, "DataLoaders ready")

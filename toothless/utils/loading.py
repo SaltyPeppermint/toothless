@@ -30,7 +30,7 @@ def load_df(data_path: Path, rank: int) -> pl.DataFrame:
     rank0print(rank, "All data fragments loading, now concating...")
     all_data = pl.concat(all_dfs, parallel=True)
     rank0print(rank, "Data concatenated")
-    rank0print(rank, f"Estimated size: {all_data.estimated_size(unit='gb')}")
+    rank0print(rank, f"Estimated size: {all_data.estimated_size(unit='gb')} GB")
     return all_data
 
 
