@@ -1,6 +1,8 @@
 import copy
 import logging
 from pathlib import Path
+from datetime import datetime
+
 import torch
 from torch import Tensor
 import torch.nn as nn
@@ -177,8 +179,10 @@ def fsdp_main(
         dist.barrier()
         states = model.state_dict()
         if rank == 0:
-            Path(model_args.output_dir).mkdir(exist_ok=True)
-            torch.save(states, f"{model_args.output_dir}/tree_nn.pt")
+            folder = Path(model_args.output_dir)
+            Path(folder).mkdir(exist_ok=True, parents=True)
+
+            torch.save(states, f"{folder}/tree_transformer.pt")
 
     cleanup_process_group()
 
