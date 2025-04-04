@@ -23,12 +23,13 @@ from torch.utils.data import DataLoader
 from toothless.tree_model.args import DataArguments
 from toothless.tree_model.vocab import BOS_TOKEN, EOS_TOKEN, MASK_TOKEN, PAD_TOKEN, UNK_TOKEN, SimpleVocab
 from toothless.utils import loading
+from toothless.utils.dist_helper import rank0print
 
 CHUNK_SIZE = 128
 
 
 class CustomDataset(data.Dataset):
-    def __init__(self, conf: DataArguments):
+    def __init__(self, conf: DataArguments, rank: int):
         """
         :param k represents the max relative distance
         """
@@ -42,9 +43,9 @@ class CustomDataset(data.Dataset):
         self.cache_dir = Path("cache") / Path(*self.json_root.parts[2:])
         self.cache_dir.mkdir(parents=True, exist_ok=True)
 
-        self._process_raw()
-        self.vocab = self._build_vocab()
-        self.samples = self._process()
+        self._process_raw(rank)
+        self.vocab = self._build_vocab(rank)
+        self.samples = self._process(rank)
 
     def __len__(self) -> int:
         return len(self.samples)
@@ -59,14 +60,14 @@ class CustomDataset(data.Dataset):
         vectorized = self._vectorize(right, middle, left, distance)
         return vectorized
 
-    def _process_raw(self):
+    def _process_raw(self, rank: int):
         if not self.force_reload and self.raw_path.is_file():
             return
 
-        df = loading.load_df(self.json_root)
+        df = loading.load_df(self.json_root, rank)
         df.write_parquet(self.raw_path)
 
-    def _process(self) -> pl.DataFrame:
+    def _process(self, rank: int) -> pl.DataFrame:
         if not self.force_reload and self.processed_path.is_file():
             df = pl.read_parquet(self.processed_path)
             if self.len_limit:
@@ -78,7 +79,7 @@ class CustomDataset(data.Dataset):
 
         picked_tripples = [self._pick_indices(len(chain) - 1) for chain in expl_chains]
         length = sum([len(chain_pairs) for chain_pairs in picked_tripples])
-        print(f"Total pairs: {length}")
+        rank0print(rank, f"Total pairs: {length}")
 
         total_samples = {"left": [], "right": [], "middle": [], "distance": []}
         for chain, tripple in zip(expl_chains, picked_tripples):
@@ -93,17 +94,17 @@ class CustomDataset(data.Dataset):
 
         df = pl.DataFrame(total_samples)
         df.write_parquet(self.processed_path)
-        print(f"Total samples: {len(df)}")
+        rank0print(rank, f"Total samples: {len(df)}")
 
         if self.len_limit:
             df = df.limit(self.len_limit)
 
-        print(f"Using {len(df)} samples!")
+        rank0print(rank, f"Using {len(df)} samples!")
 
-        print("Data processed!")
+        rank0print(rank, "Data processed!")
         return df
 
-    def _build_vocab(self) -> SimpleVocab:
+    def _build_vocab(self, _rank: int) -> SimpleVocab:
         normal_tokens = rise.operators() + ["[constant]", "[variable]"]
         vocab = SimpleVocab(PAD_TOKEN, UNK_TOKEN, MASK_TOKEN, BOS_TOKEN, EOS_TOKEN, normal_tokens)
         vocab.save(self.vocab_path)
@@ -135,14 +136,12 @@ class CustomDataset(data.Dataset):
                 return
             else:
                 midpoint = start + (distance // 2)
-                # print((start, midpoint, end))
                 acc.add((start, midpoint, end))
                 rec(start, midpoint, acc, min_distance)
                 rec(midpoint, end, acc, min_distance)
 
         acc = set()
         rec(0, max_index, acc, self.min_expl_distance)
-        # print(acc)
         return acc
 
     def _vectorize(self, left: str, middle: str, right: str, distance: float) -> dict:

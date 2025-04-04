@@ -2,7 +2,9 @@ import json
 from pathlib import Path
 
 import polars as pl
-from eggshell import rise  # type: ignore
+from eggshell import rise
+
+from toothless.utils.dist_helper import rank0print  # type: ignore
 
 DATASETS = {
     "start": "data/start_goal_with_expl/start_and_goal-2025-01-29-b33b4ba4-ee88-48b5-981b-c2b809d6504f/0",
@@ -10,30 +12,29 @@ DATASETS = {
 }
 
 
-def update_cache():
-    print("Updating Cache...")
+def update_cache(rank: int):
+    rank0print(rank, "Updating Cache...")
     for name, path in DATASETS.items():
-        data = load_df(Path(path))
+        data = load_df(Path(path), rank)
         data.write_parquet(f"cache/{name}.parquet")
 
-    print("Cache updated!")
+    rank0print(rank, "Cache updated!")
 
 
-def load_df(data_path: Path) -> pl.DataFrame:
+def load_df(data_path: Path, rank: int) -> pl.DataFrame:
     all_dfs = []
     for data_file in sorted(Path(data_path).glob("*.json")):
-        df = _load_fragment(data_file)
+        df = _load_fragment(data_file, rank)
         all_dfs.append(df)
 
-    print("All data fragments loading, now concating...")
+    rank0print(rank, "All data fragments loading, now concating...")
     all_data = pl.concat(all_dfs, parallel=True)
-    print("Data concatenated")
-    print(all_data.columns)
-    print(all_data.estimated_size(unit="gb"))
+    rank0print(rank, "Data concatenated")
+    rank0print(rank, f"Estimated size: {all_data.estimated_size(unit='gb')}")
     return all_data
 
 
-def _load_fragment(data_file: Path) -> pl.DataFrame:
+def _load_fragment(data_file: Path, rank: int) -> pl.DataFrame:
     with open(data_file) as f:
         json_content = json.load(f)
 
@@ -47,22 +48,15 @@ def _load_fragment(data_file: Path) -> pl.DataFrame:
 
     expl_chain = pl.Series(
         name="explanation_chain",
-        values=[
-            [y["rec_expr"] for y in x["explanation"]["explanation_chain"]]
-            for x in json_content["sample_data"]
-        ],
+        values=[[y["rec_expr"] for y in x["explanation"]["explanation_chain"]] for x in json_content["sample_data"]],
     )
-    generation = pl.Series(
-        name="generation", values=[i["generation"] for i in json_content["sample_data"]]
-    )
+    generation = pl.Series(name="generation", values=[i["generation"] for i in json_content["sample_data"]])
     goal_expr = pl.Series(name="goal_expr", values=[str(i) for i in exprs])
     df = df.with_columns([generation, expl_chain, goal_expr])
     df = df.with_columns(
-        pl.col("explanation_chain")
-        .map_elements(lambda x: x[len(x) // 2], return_dtype=pl.String)
-        .alias("middle_expr")
+        pl.col("explanation_chain").map_elements(lambda x: x[len(x) // 2], return_dtype=pl.String).alias("middle_expr")
     )
     df = df.with_columns(pl.lit(str(start_term)).alias("start_expr"))
 
-    print(f"Loaded data fragment {data_file}")
+    rank0print(rank, f"Loaded data fragment {data_file}")
     return df
