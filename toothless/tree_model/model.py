@@ -9,7 +9,6 @@ from toothless.tree_model.components.encoder import ASTEncoder
 from toothless.tree_model.components.utils import Embeddings, Generator
 from toothless.tree_model.data import make_std_mask, partial_to_matrices
 from toothless.tree_model.vocab import SimpleVocab
-from toothless.utils.dist_helper import rank0print
 
 
 class ASTTransformer(nn.Module):
