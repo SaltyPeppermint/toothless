@@ -1,3 +1,4 @@
+from prettytable import PrettyTable
 from torch import Tensor
 from torch import nn
 import torch
@@ -8,6 +9,7 @@ from toothless.tree_model.components.encoder import ASTEncoder
 from toothless.tree_model.components.utils import Embeddings, Generator
 from toothless.tree_model.data import make_std_mask, partial_to_matrices
 from toothless.tree_model.vocab import SimpleVocab
+from toothless.utils.dist_helper import rank0print
 
 
 class ASTTransformer(nn.Module):
@@ -71,6 +73,18 @@ class ASTTransformer(nn.Module):
         )
         outputs = outputs.permute(1, 0, 2)
         return outputs
+
+
+def count_parameters(model: nn.Module) -> tuple[PrettyTable, int]:
+    table = PrettyTable(["Modules", "Parameters"])
+    total_params = 0
+    for name, parameter in model.named_parameters():
+        if not parameter.requires_grad:
+            continue
+        params = parameter.numel()
+        table.add_row([name, params])
+        total_params += params
+    return table, total_params
 
 
 class GreedyGenerator(nn.Module):

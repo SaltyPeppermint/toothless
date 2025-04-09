@@ -29,7 +29,7 @@ import transformers
 from toothless.tree_model.vocab import SimpleVocab
 from toothless.utils.dist_helper import cleanup_process_group, rank0print, setup_process_group
 from toothless.tree_model.data import CustomDataset, mk_loaders
-from toothless.tree_model.model import ASTTransformer
+from toothless.tree_model.model import ASTTransformer, count_parameters
 from toothless.tree_model.args import DataArguments, TrainingArguments, ModelArguments
 
 
@@ -61,6 +61,9 @@ def fsdp_main(
         example_batch, _ = next(iter(copy.deepcopy(train_dataloader)))
         writer.add_graph(model, example_batch)
     rank0print(rank, "Base Model ready")
+    table, total_params = count_parameters(model)
+    rank0print(rank, table)
+    rank0print(rank, f"Total Parameters: {total_params}")
 
     # FSDP model and Mixed Precision Config
     mixed_precision = MixedPrecision(param_dtype=torch.bfloat16, cast_forward_inputs=True) if train_args.bf16 else None

@@ -12,7 +12,7 @@ from eggshell import rise  # type: ignore
 from toothless.tree_model.vocab import SimpleVocab
 from toothless.utils.dist_helper import cleanup_process_group, rank0print, setup_process_group
 from toothless.tree_model.data import DictCollator, pyrec_to_tensor  # , CustomDataset
-from toothless.tree_model.model import ASTTransformer, GreedyGenerator
+from toothless.tree_model.model import ASTTransformer, GreedyGenerator, count_parameters
 from toothless.tree_model.args import DataArguments, InferenceArguments, ModelArguments
 
 
@@ -36,6 +36,9 @@ def fsdp_main(
     model.eval()
     generator = GreedyGenerator(model, data_args.max_len, vocab, data_args.k)
     rank0print(rank, "Base Model and Generator ready")
+    table, total_params = count_parameters(model)
+    rank0print(rank, table)
+    rank0print(rank, f"Total Parameters: {total_params}")
 
     # FSDP model and Mixed Precision Config
     mixed_precision = MixedPrecision(param_dtype=torch.bfloat16, cast_forward_inputs=True) if infer_args.bf16 else None
