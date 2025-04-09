@@ -5,13 +5,12 @@ from typing import Optional
 @dataclass
 class ModelArguments:
     output_dir: str = field(default="model")
-    d_model: int = field(default=2048, metadata={"help": "Hidden state dimension size."})
-    num_layers: int = field(default=4)
-    embedding_size: int = field(default=256)
-    dim_feed_forward: int = field(default=256, metadata={"help": "Feed forward dimension size."})
+    d_model: int = field(default=512, metadata={"help": "Hidden state dimension size."})
+    num_layers: int = field(default=8)
+    dim_feed_forward: int = field(default=2048, metadata={"help": "Feed forward dimension size."})
     dropout: float = field(default=0.2)
-    anc_heads: int = field(default=3)
-    sib_heads: int = field(default=1)
+    anc_heads: int = field(default=6)
+    sib_heads: int = field(default=2)
     pos_type: str = field(default="p2q_p2k", metadata={"help": "Position type seperated by underscore."})
     with_pos: bool = field(default=False, metadata={"help": "Enable rotary positional encoding for decoder."})
 
@@ -24,7 +23,7 @@ class DataArguments:
     min_expl_distance: int = field(
         default=8, metadata={"help": "Minimum distance when splitting the explanation chains recursively."}
     )
-    batch_size: int = field(default=8)
+    batch_size: int = field(default=64)
     k: int = field(default=15, metadata={"help": "Max relative positional distance."})
     max_len: int = field(default=128)
     force_reload: bool = field(default=False)
