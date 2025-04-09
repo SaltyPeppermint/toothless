@@ -83,39 +83,53 @@ class GreedyGenerator(nn.Module):
         self.vocab = vocab
         self.k = k
 
-    def forward(self, data: dict[str, Tensor]):
-        l_mem = self.model.l_encode(data)
-        r_mem = self.model.r_encode(data)
+    def model_device(self) -> torch.device:
+        return next(self.parameters()).device
+
+    def forward(self, batch: dict[str, Tensor]):
+        l_mem = self.model.l_encode(batch)
+        r_mem = self.model.r_encode(batch)
 
         batch_size = r_mem.size(0)
+        device = self.model_device()
 
         assert self.vocab.pad_token_id == 0
-        tgt_ids = torch.zeros(batch_size, 1, requires_grad=False, dtype=torch.long)
-        tgt_ids[:, 0] = self.vocab.bos_token_id
+        batch["tgt_ids"] = torch.zeros(batch_size, self.max_len, requires_grad=False, device=device, dtype=torch.long)
+        batch["tgt_ids"][:, 0] = self.vocab.bos_token_id
 
-        data["tgt_ids"] = tgt_ids.to(l_mem.device)
+        eos_reached = torch.full((batch_size,), False).to(device)
 
         for i in range(self.max_len - 1):
-            data["tgt_mask"] = make_std_mask(data["tgt_ids"], 0)
-            data["tgt_anc"], data["tgt_sib"] = self.pos_matrices(data["tgt_ids"])
+            batch["tgt_mask"] = make_std_mask(batch["tgt_ids"], 0)
+            batch["tgt_anc"], batch["tgt_sib"] = self.pos_matrices(batch["tgt_ids"])
 
-            decoder_outputs, _ = self.model.decode(data, l_mem, r_mem)
+            batch = {k: v.to(device) for k, v in batch.items()}
+            decoder_outputs = self.model.decode(batch, l_mem, r_mem)
             out = self.model.generator(decoder_outputs)
-            out = out[:, i, :].squeeze(1)
+            fresh_out = out[i, :, :].squeeze(0)
 
-            _prob, next_token = torch.max(out, dim=1)
-            data["tgt_ids"][:, i] = next_token
-            if next_token == self.vocab.eos_token_id:
+            _prob, next_token = torch.max(fresh_out, dim=-1)
+            batch["tgt_ids"][:, i + 1] = next_token
+
+            eos_reached = eos_reached | next_token == self.vocab.eos_token_id
+            if torch.all(eos_reached):
                 break
 
-        return data["tgt_ids"]
+        return batch["tgt_ids"]
 
     def pos_matrices(self, tgt_ids: Tensor) -> tuple[Tensor, Tensor]:
         batch_tgt_anc, batch_tgt_sib = [], []
         for partial_ids in tgt_ids.tolist():
             partial_tok = [self.vocab.id2token(i) for i in partial_ids]
             tgt_anc, tgt_sib = partial_to_matrices(partial_tok, self.k)
-            batch_tgt_anc.append(tgt_anc)
-            batch_tgt_sib.append(tgt_sib)
+
+            padded_tgt_anc = torch.zeros((self.max_len, self.max_len), device=self.model_device(), dtype=tgt_anc.dtype)
+            padded_tgt_anc[: tgt_anc.size(0), : tgt_anc.size(1)] = tgt_anc
+
+            padded_tgt_sib = torch.zeros((self.max_len, self.max_len), device=self.model_device(), dtype=tgt_sib.dtype)
+            padded_tgt_sib[: tgt_sib.size(0), : tgt_sib.size(1)] = tgt_sib
+            # Extra padding since tgt will be shifted
+            batch_tgt_anc.append(padded_tgt_anc)
+            batch_tgt_sib.append(padded_tgt_sib)
 
         return torch.stack(batch_tgt_anc), torch.stack(batch_tgt_sib)

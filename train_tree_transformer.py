@@ -26,6 +26,7 @@ from torch.utils.tensorboard.writer import SummaryWriter
 from tqdm.auto import tqdm
 import transformers
 
+from toothless.tree_model.vocab import SimpleVocab
 from toothless.utils.dist_helper import cleanup_process_group, rank0print, setup_process_group
 from toothless.tree_model.data import CustomDataset, mk_loaders
 from toothless.tree_model.model import ASTTransformer
@@ -105,7 +106,7 @@ def fsdp_main(
         with FSDP.state_dict_type(model, StateDictType.FULL_STATE_DICT, save_policy):
             states = model.state_dict()
             if rank == 0:
-                save(model_args, data_args, train_args, states, start_time)
+                save(model_args, data_args, train_args, dataset.vocab, states, start_time)
 
     cleanup_process_group()
 
@@ -187,6 +188,7 @@ def save(
     model_args: ModelArguments,
     data_args: DataArguments,
     train_args: TrainingArguments,
+    vocab: SimpleVocab,
     states: dict[str, Any],
     start_time: datetime,
 ):
@@ -199,6 +201,7 @@ def save(
         json.dump(dataclasses.asdict(data_args), f)
     with open(folder / "train_args.json", mode="w", encoding="utf-8") as f:
         json.dump(dataclasses.asdict(train_args), f)
+    vocab.save(folder / "vocab.json")
     torch.save(states, f"{folder}/tree_transformer.pt")
 
 

@@ -50,7 +50,7 @@ class CustomDataset(data.Dataset):
     def __len__(self) -> int:
         return len(self.samples)
 
-    def __getitem__(self, idx):
+    def __getitem__(self, idx) -> dict[str, Tensor]:
         sample = self.samples[idx]
         right = sample["right"].item()
         left = sample["left"].item()
@@ -133,9 +133,9 @@ class CustomDataset(data.Dataset):
         return acc
 
     def _vectorize(self, left: str, middle: str, right: str, distance: float) -> dict:
-        l_ids, l_anc, l_sib = self._pyrec_to_tensor(rise.PyRecExpr(left))
-        tgt_ids, tgt_anc, tgt_sib = self._pyrec_to_tensor(rise.PyRecExpr(middle))
-        r_ids, r_anc, r_sib = self._pyrec_to_tensor(rise.PyRecExpr(right))
+        l_ids, l_anc, l_sib = pyrec_to_tensor(rise.PyRecExpr(left), self.vocab, self.k)
+        tgt_ids, tgt_anc, tgt_sib = pyrec_to_tensor(rise.PyRecExpr(middle), self.vocab, self.k)
+        r_ids, r_anc, r_sib = pyrec_to_tensor(rise.PyRecExpr(right), self.vocab, self.k)
 
         return {
             "l_ids": l_ids,
@@ -150,21 +150,6 @@ class CustomDataset(data.Dataset):
             "distance": torch.tensor([distance]),
         }
 
-    def _pyrec_to_tensor(self, expr: rise.PyRecExpr) -> tuple[Tensor, Tensor, Tensor]:
-        tree_data = expr.to_data()
-
-        ids = torch.tensor(
-            [self.vocab.bos_token_id]
-            + [self.vocab.token2id(node.name) for node in tree_data.nodes()]
-            + [self.vocab.eos_token_id],
-            dtype=torch.long,
-        )
-
-        anc_matrix = torch.tensor(tree_data.anc_matrix(self.k, double_pad=True), dtype=torch.long)
-        sib_matrix = torch.tensor(tree_data.sib_matrix(self.k, double_pad=True), dtype=torch.long)
-
-        return ids, anc_matrix, sib_matrix
-
     @property
     def raw_path(self) -> Path:
         return self.cache_dir / Path("df_raw.parquet")
@@ -178,11 +163,25 @@ class CustomDataset(data.Dataset):
         return self.cache_dir / Path("processed.parquet")
 
 
+def pyrec_to_tensor(expr: rise.PyRecExpr, vocab: SimpleVocab, k: int) -> tuple[Tensor, Tensor, Tensor]:
+    tree_data = expr.to_data()
+
+    ids = torch.tensor(
+        [vocab.bos_token_id] + [vocab.token2id(node.name) for node in tree_data.nodes()] + [vocab.eos_token_id],
+        dtype=torch.long,
+    )
+
+    anc_matrix = torch.tensor(tree_data.anc_matrix(k, double_pad=True), dtype=torch.long)
+    sib_matrix = torch.tensor(tree_data.sib_matrix(k, double_pad=True), dtype=torch.long)
+
+    return ids, anc_matrix, sib_matrix
+
+
 def make_std_mask(tgt: Tensor, pad_id: int):
     "Create a mask to hide padding and future words."
     tgt_mask = (tgt == pad_id).unsqueeze(-2)
     # plt.imsave("padding_mask.png", tgt_mask[0])
-    triangle_mask = triangle_matrix(tgt.size(-1))
+    triangle_mask = triangle_matrix(tgt.size(-1), device=tgt.device)
     # plt.imsave("triangle_mask.png", triangle_mask)
     tgt_mask = tgt_mask | triangle_mask
     # plt.imsave("combined_mask.png", tgt_mask[0])
@@ -216,7 +215,7 @@ class DictCollator:
         batched_data["r_mask"] = (batched_data["r_ids"] == self.pad_id).unsqueeze(-2).unsqueeze(-2)
 
         n_tokens = 0
-        if not any([x is None for x in [batch[0]["tgt_ids"], batch[0]["tgt_anc"], batch[0]["tgt_sib"]]]):
+        if all(["tgt_ids" in batch[0], "tgt_anc" in batch[0], "tgt_sib" in batch[0]]):
             # The _y versions are always shifted right.
             # For matrices this means right and down.
             full_tgt_ids = self.pad_1d([sample["tgt_ids"] for sample in batch], True)

@@ -45,3 +45,11 @@ class TrainingArguments:
     warmup_ratio: Optional[float] = field(default=0.01)
     bf16: bool = field(default=True)
     trace: bool = field(default=False)
+
+
+@dataclass
+class InferenceArguments:
+    infer_data: str
+    weights_path: str
+    vocab_path: str
+    bf16: bool = field(default=True)

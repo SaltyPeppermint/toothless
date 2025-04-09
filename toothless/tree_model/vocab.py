@@ -38,23 +38,23 @@ class SimpleVocab:
         return self.rev_vocab[id]
 
     @property
-    def pad_token_id(self):
+    def pad_token_id(self) -> int:
         return self.vocab[self.pad_token]
 
     @property
-    def mask_token_id(self):
+    def mask_token_id(self) -> int:
         return self.vocab[self.mask_token]
 
     @property
-    def unk_token_id(self):
+    def unk_token_id(self) -> int:
         return self.vocab[self.unk_token_id]
 
     @property
-    def bos_token_id(self):
+    def bos_token_id(self) -> int:
         return self.vocab[self.bos_token]
 
     @property
-    def eos_token_id(self):
+    def eos_token_id(self) -> int:
         return self.vocab[self.eos_token]
 
     def save(self, path: Path):
@@ -73,5 +73,5 @@ class SimpleVocab:
         with open(path, mode="r", encoding="utf-8") as f:
             d = json.load(f)
 
-        v = [d["vocab"][i] for i in range(3, len(d["vocab"]))]
+        v = list(d["vocab"].keys())[5:]
         return SimpleVocab(d["pad_token"], d["unk_token"], d["mask_token"], d["bos_token"], d["eos_token"], v)
