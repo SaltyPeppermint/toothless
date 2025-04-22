@@ -32,11 +32,13 @@ class DataArguments:
 
 @dataclass
 class TrainingArguments:
-    num_train_epochs: int = field(default=4)
+    epochs: int = field(default=4)
     eval_each_epoch: bool = field(default=True)
     save_model_end: bool = field(default=True)
     tmax: int = field(default=2)
     learning_rate: float = field(default=1e-5)
+    min_lr: float = field(default=1e-6)
+    warmup_steps: int = field(default=1000)
     weight_decay: float = field(default=0.1)
     adam_beta1: float = field(default=0.9)
     adam_beta2: float = field(default=0.95)

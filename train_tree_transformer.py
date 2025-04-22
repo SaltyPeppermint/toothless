@@ -10,7 +10,7 @@ from torch import Tensor
 from torch import nn
 from torch.nn import CrossEntropyLoss
 from torch import optim
-from torch.optim.lr_scheduler import CosineAnnealingLR
+from torch.optim.lr_scheduler import CosineAnnealingLR, LinearLR
 import torch.distributed as dist
 from torch.distributed.fsdp import (
     FullyShardedDataParallel as FSDP,
@@ -39,8 +39,6 @@ def fsdp_main(
     start_time = datetime.now()
     setup_process_group(rank, world_size)
 
-    rank0print(rank, "Distributed Network ready")
-
     writer = SummaryWriter() if rank == 0 else None
 
     torch.cuda.set_device(rank)
@@ -60,7 +58,7 @@ def fsdp_main(
     if writer and train_args.trace:
         example_batch, _ = next(iter(copy.deepcopy(train_dataloader)))
         writer.add_graph(model, example_batch)
-    rank0print(rank, "Base Model ready")
+
     table, total_params = count_parameters(model)
     rank0print(rank, table)
     rank0print(rank, f"Total Parameters: {total_params}")
@@ -70,7 +68,6 @@ def fsdp_main(
     sharding_strategy = ShardingStrategy.FULL_SHARD if world_size > 1 else ShardingStrategy.NO_SHARD
 
     model = FSDP(model, sharding_strategy=sharding_strategy, mixed_precision=mixed_precision, device_id=rank)
-    rank0print(rank, "FSDP Model loaded to GPU and ready")
 
     # Define optimizer and loss function
     optimizer = optim.AdamW(
@@ -79,21 +76,43 @@ def fsdp_main(
         betas=(train_args.adam_beta1, train_args.adam_beta2),
         weight_decay=train_args.weight_decay,
     )
-    lr_scheduler = CosineAnnealingLR(optimizer, T_max=train_args.tmax)
+    total_steps = train_args.epochs * len(train_dataloader)
+    warmup_scheduler = LinearLR(
+        optimizer,
+        start_factor=0.01,  # Start from 1% of max_lr
+        end_factor=1.0,
+        total_iters=train_args.warmup_steps,
+    )
+    cosine_scheduler = CosineAnnealingLR(
+        optimizer,
+        T_max=total_steps - train_args.warmup_steps,  # Cosine After Warmup
+        eta_min=train_args.min_lr,
+    )
+
     criterion = CrossEntropyLoss(ignore_index=dataset.vocab.pad_token_id, label_smoothing=0.1)
-    rank0print(rank, "Optimizer and LR Scheduler ready")
 
     rank0print(rank, "Starting training!")
     init_start_event.record(torch.cuda.current_stream())
 
-    for epoch in range(train_args.num_train_epochs):
-        train(rank, model, copy.deepcopy(train_dataloader), criterion, optimizer, epoch, train_args, writer)
+    for epoch in range(train_args.epochs):
+        train(
+            rank,
+            model,
+            copy.deepcopy(train_dataloader),
+            criterion,
+            optimizer,
+            warmup_scheduler,
+            cosine_scheduler,
+            epoch,
+            train_args,
+            writer,
+        )
 
         # Optionally, evaluate the model on the validation set after each epoch
         if train_args.eval_each_epoch:
-            eval(rank, model, copy.deepcopy(eval_dataloader), criterion, epoch, train_args.num_train_epochs, writer)
+            eval(rank, model, copy.deepcopy(eval_dataloader), criterion, epoch, train_args.epochs, writer)
 
-        lr_scheduler.step()
+        cosine_scheduler.step()
 
     init_end_event.record(torch.cuda.current_stream())
     rank0print(rank, "Training finished!")
@@ -120,6 +139,8 @@ def train(
     dataloader: DataLoader[dict[str, Tensor]],
     criterion: CrossEntropyLoss,
     optimizer: optim.Optimizer,
+    warmup_scheduler: LinearLR,
+    cosine_scheduler: CosineAnnealingLR,
     epoch: int,
     train_args: TrainingArguments,
     writer: SummaryWriter | None = None,
@@ -128,7 +149,7 @@ def train(
     ddp_loss = torch.zeros(2).to(rank)
 
     for batch_idx, (batch, num_tokens) in enumerate(
-        tqdm(dataloader, desc=f"Training Epoch {epoch + 1}/{train_args.num_train_epochs}")
+        tqdm(dataloader, desc=f"Training Epoch {epoch + 1}/{train_args.epochs}")
     ):
         # Move batch to device
         batch = {k: v.to(rank) for k, v in batch.items()}
@@ -143,8 +164,17 @@ def train(
         # Dont forget...
         optimizer.zero_grad()
 
+        # LR Scheduling
+        if batch_idx + epoch * len(dataloader) < train_args.warmup_steps:
+            warmup_scheduler.step()  # Linear warmup
+            last_lr = warmup_scheduler.get_last_lr()
+        else:
+            cosine_scheduler.step()  # Cosine decay
+            last_lr = cosine_scheduler.get_last_lr()
+
         if writer:
             writer.add_scalar("Train Loss/batch", loss, batch_idx + epoch * len(dataloader))
+            writer.add_scalar("Train LR/batch", last_lr[-1], batch_idx + epoch * len(dataloader))
             writer.add_scalar("Toks/in-batch", num_tokens, batch_idx + epoch * len(dataloader))
 
         # Record loss
@@ -156,7 +186,7 @@ def train(
     if writer:
         writer.add_scalar("Train Loss/epoch", train_loss, epoch + 1)
 
-    rank0print(rank, f"Epoch: {epoch + 1}/{train_args.num_train_epochs} \tTrain Loss: {train_loss:.6f}")
+    rank0print(rank, f"Epoch: {epoch + 1}/{train_args.epochs} \tTrain Loss: {train_loss:.6f}")
 
 
 def eval(
@@ -203,7 +233,7 @@ def save(
     with open(folder / "data_args.json", mode="w", encoding="utf-8") as f:
         json.dump(dataclasses.asdict(data_args), f)
     with open(folder / "train_args.json", mode="w", encoding="utf-8") as f:
-        json.dump(dataclasses.asdict(train_args), f)
+        json.dump(dataclasses.asdict(train_args), f)  # type: ignore
     vocab.save(folder / "vocab.json")
     torch.save(states, f"{folder}/tree_transformer.pt")
 
