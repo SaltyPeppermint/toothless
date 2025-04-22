@@ -34,7 +34,7 @@ class CustomDataset(data.Dataset):
         :param k represents the max relative distance
         """
         self.json_root = Path(conf.data_path)
-        self.min_expl_distance = conf.min_expl_distance
+        self.sample_distance = conf.sample_distance
         self.k = conf.k
         self.force_reload = conf.force_reload
         self.len_limit = conf.data_limit
@@ -77,7 +77,8 @@ class CustomDataset(data.Dataset):
         raw_data = pl.read_parquet(self.raw_path)
         expl_chains = raw_data.get_column("explanation_chain")
 
-        picked_tripples = [self._pick_indices(len(chain) - 1) for chain in expl_chains]
+        # picked_tripples = [self._pick_recursive_indices(len(chain) - 1) for chain in expl_chains]
+        picked_tripples = [self._pick_fixed_distance_indices(len(chain) - 1) for chain in expl_chains]
         length = sum([len(chain_pairs) for chain_pairs in picked_tripples])
         rank0print(rank, f"Total pairs: {length}")
 
@@ -116,8 +117,16 @@ class CustomDataset(data.Dataset):
     #             yield chain[left].to_data().values()
     #             yield chain[middle].to_data().values()
     #             yield chain[right].to_data().values()
+    def _pick_fixed_distance_indices(self, max_index: int) -> set[tuple[int, int, int]]:
+        s = set()
+        starts = range(0, max_index - self.sample_distance)
+        ends = range(self.sample_distance, max_index)
+        for start, end in zip(starts, ends):
+            midpoint = start + (self.sample_distance // 2)
+            s.add((start, midpoint, end))
+        return s
 
-    def _pick_indices(self, max_index: int) -> set[tuple[int, int, int]]:
+    def _pick_recursive_indices(self, max_index: int) -> set[tuple[int, int, int]]:
         def rec(start: int, end: int, acc: set[tuple[int, int, int]], min_distance):
             distance = end - start
             if distance < min_distance:
@@ -129,7 +138,7 @@ class CustomDataset(data.Dataset):
                 rec(midpoint, end, acc, min_distance)
 
         acc = set()
-        rec(0, max_index, acc, self.min_expl_distance)
+        rec(0, max_index, acc, self.sample_distance)
         return acc
 
     def _vectorize(self, left: str, middle: str, right: str, distance: float) -> dict:

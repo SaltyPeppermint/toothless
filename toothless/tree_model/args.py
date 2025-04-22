@@ -20,7 +20,7 @@ class DataArguments:
     data_path: str = field(metadata={"help": "Path to the training data."})
     split_size: float = field(default=0.9, metadata={"help": "Train/Test split ratio."})
     random_state: int = field(default=42)
-    min_expl_distance: int = field(
+    sample_distance: int = field(
         default=8, metadata={"help": "Minimum distance when splitting the explanation chains recursively."}
     )
     batch_size: int = field(default=16)
