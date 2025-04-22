@@ -15,6 +15,8 @@ class ASTTransformer(nn.Module):
     def __init__(self, conf: ModelArguments, src_vocab_size: int, tgt_vocab_size: int, k: int, state_dict=None):
         super(ASTTransformer, self).__init__()
 
+        assert conf.attn_heads == conf.anc_heads + conf.sib_heads
+
         self.l_embedding = Embeddings(conf.d_model, src_vocab_size, dropout=conf.dropout, with_pos=conf.with_pos)
         self.r_embedding = Embeddings(conf.d_model, src_vocab_size, dropout=conf.dropout, with_pos=conf.with_pos)
         self.tgt_embedding = Embeddings(conf.d_model, tgt_vocab_size, dropout=conf.dropout, with_pos=conf.with_pos)

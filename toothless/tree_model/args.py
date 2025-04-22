@@ -9,6 +9,8 @@ class ModelArguments:
     num_layers: int = field(default=12)
     dim_feed_forward: int = field(default=3072, metadata={"help": "Feed forward dimension size."})
     dropout: float = field(default=0.1)
+    attn_heads: int = field(default=12)
+    enable_dis_attn: bool = field(default=True)
     anc_heads: int = field(default=8)
     sib_heads: int = field(default=4)
     pos_type: str = field(default="p2q_p2k", metadata={"help": "Position type seperated by underscore."})

@@ -12,17 +12,22 @@ class ASTDoubleDecoderLayer(nn.Module):
     def __init__(self, conf: ModelArguments, activation=F.gelu):
         super(ASTDoubleDecoderLayer, self).__init__()
 
-        num_heads = conf.anc_heads + conf.sib_heads
         self.self_norm = nn.LayerNorm(conf.d_model)
-        self.self_attn = MultiHeadAttention(conf.d_model, num_heads, dropout=conf.dropout, cross_attn=False)
+        self.self_attn = MultiHeadAttention(
+            conf.d_model, conf.attn_heads, conf.enable_dis_attn, dropout=conf.dropout, cross_attn=False
+        )
         self.self_dropout = nn.Dropout(conf.dropout)
 
         self.l_norm = nn.LayerNorm(conf.d_model)
-        self.l_cross_attn = MultiHeadAttention(conf.d_model, num_heads, dropout=conf.dropout, cross_attn=True)
+        self.l_cross_attn = MultiHeadAttention(
+            conf.d_model, conf.attn_heads, conf.enable_dis_attn, dropout=conf.dropout, cross_attn=True
+        )
         self.l_dropout = nn.Dropout(conf.dropout)
 
         self.r_norm = nn.LayerNorm(conf.d_model)
-        self.r_cross_attn = MultiHeadAttention(conf.d_model, num_heads, dropout=conf.dropout, cross_attn=True)
+        self.r_cross_attn = MultiHeadAttention(
+            conf.d_model, conf.attn_heads, conf.enable_dis_attn, dropout=conf.dropout, cross_attn=True
+        )
         self.r_dropout = nn.Dropout(conf.dropout)
 
         self.ff_norm = nn.LayerNorm(conf.d_model)

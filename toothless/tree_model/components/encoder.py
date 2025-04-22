@@ -12,9 +12,9 @@ class ASTEncoderLayer(nn.Module):
     def __init__(self, conf: ModelArguments, activation=F.gelu):
         super(ASTEncoderLayer, self).__init__()
 
-        num_heads = conf.anc_heads + conf.sib_heads
-
-        self.self_attn = MultiHeadAttention(conf.d_model, num_heads, dropout=conf.dropout, cross_attn=False)
+        self.self_attn = MultiHeadAttention(
+            conf.d_model, conf.attn_heads, conf.enable_dis_attn, dropout=conf.dropout, cross_attn=False
+        )
         self.self_norm = nn.LayerNorm(conf.d_model)
         self.self_dropout = nn.Dropout(conf.dropout)
 
