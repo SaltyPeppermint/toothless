@@ -3,7 +3,7 @@ import torch.nn.functional as F
 from torch import Tensor
 
 from toothless.tree_model.args import ModelArguments
-from toothless.tree_model.components.mha import MultiHeadAttention
+from toothless.tree_model.components.mha import MHTreeAttention
 from toothless.tree_model.components.rel_pos import RelCoder
 from toothless.tree_model.components.utils import FeedForward, stack_layers
 
@@ -12,8 +12,8 @@ class ASTEncoderLayer(nn.Module):
     def __init__(self, conf: ModelArguments, activation=F.gelu):
         super(ASTEncoderLayer, self).__init__()
 
-        self.self_attn = MultiHeadAttention(
-            conf.d_model, conf.attn_heads, conf.enable_dis_attn, dropout=conf.dropout, cross_attn=False
+        self.self_attn = MHTreeAttention(
+            conf.d_model, conf.n_heads, conf.with_dis_attn, dropout=conf.dropout, cross_attn=False
         )
         self.self_norm = nn.LayerNorm(conf.d_model)
         self.self_dropout = nn.Dropout(conf.dropout)

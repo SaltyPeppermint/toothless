@@ -5,21 +5,21 @@ import torch.nn as nn
 from torch import Tensor
 
 
-class MultiHeadAttention(nn.Module):
+class MHTreeAttention(nn.Module):
     def __init__(
         self,
         d_model: int,
         num_heads: int,
-        enable_dis_attn: bool,
+        with_dis_attn: bool,
         dropout: float = 0.1,
         cross_attn: bool = False,
     ):
-        super(MultiHeadAttention, self).__init__()
+        super(MHTreeAttention, self).__init__()
 
         self.d_k = d_model // num_heads
         self.cross_attn = cross_attn
         self.num_heads = num_heads
-        self.enable_dis_attn = enable_dis_attn
+        self.with_dis_attn = with_dis_attn
 
         self.dropout = nn.Dropout(dropout)
 
@@ -108,14 +108,14 @@ class MultiHeadAttention(nn.Module):
         # (presumably a lot will have the same distance)
 
         # position -> context
-        if rel_q is not None and self.enable_dis_attn:
+        if rel_q is not None and self.with_dis_attn:
             scale = 1 / math.sqrt(self.d_k * scale_factor)
             p2c_attn = torch.matmul(rel_q * scale, key.transpose(-1, -2))
             p2c_attn = torch.gather(p2c_attn, dim=-2, index=q_pos_indices)
             attn_scores += p2c_attn
 
         # context -> position
-        if rel_k is not None and self.enable_dis_attn:
+        if rel_k is not None and self.with_dis_attn:
             scale = 1 / math.sqrt(self.d_k * scale_factor)
             c2p_attn = torch.matmul(query, rel_k.transpose(-1, -2) * scale)
             # (

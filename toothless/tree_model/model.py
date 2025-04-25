@@ -15,7 +15,7 @@ class ASTTransformer(nn.Module):
     def __init__(self, conf: ModelArguments, src_vocab_size: int, tgt_vocab_size: int, k: int, state_dict=None):
         super(ASTTransformer, self).__init__()
 
-        assert conf.attn_heads == conf.anc_heads + conf.sib_heads
+        assert conf.n_heads == conf.anc_heads + conf.sib_heads
 
         self.l_embedding = Embeddings(conf.d_model, src_vocab_size, dropout=conf.dropout, with_pos=conf.with_pos)
         self.r_embedding = Embeddings(conf.d_model, src_vocab_size, dropout=conf.dropout, with_pos=conf.with_pos)
@@ -25,7 +25,7 @@ class ASTTransformer(nn.Module):
         self.r_encoder = ASTEncoder(conf, k)
         self.decoder = ASTDoubleDecoder(conf, k)
 
-        self.generator = UnEmbedding(conf, tgt_vocab_size)
+        self.unembedding = UnEmbedding(conf, tgt_vocab_size)
 
         if state_dict is None:
             for p in self.parameters():
@@ -39,23 +39,19 @@ class ASTTransformer(nn.Module):
         r_mem = self.r_encode(data)
 
         decoder_outputs = self.decode(data, l_mem, r_mem)
-        output = self.generator(decoder_outputs)
-        return output
+        return self.unembedding(decoder_outputs)
 
     def l_encode(self, data: dict[str, Tensor]) -> Tensor:
         l_emb = self.l_embedding(data["l_ids"])
-        l_mem = self.l_encoder(l_emb, data["l_anc"], data["l_sib"], data["l_mask"])
-        return l_mem
+        return self.l_encoder(l_emb, data["l_anc"], data["l_sib"], data["l_mask"])
 
     def r_encode(self, data: dict[str, Tensor]) -> Tensor:
         r_emb = self.r_embedding(data["r_ids"])
-        r_mem = self.r_encoder(r_emb, data["r_anc"], data["r_sib"], data["r_mask"])
-        return r_mem
+        return self.r_encoder(r_emb, data["r_anc"], data["r_sib"], data["r_mask"])
 
     def decode(self, data: dict[str, Tensor], l_mem: Tensor, r_mem: Tensor) -> Tensor:
         tgt = self.tgt_embedding(data["tgt_ids"])
-
-        outputs = self.decoder(
+        return self.decoder(
             tgt,
             data["tgt_anc"],
             data["tgt_sib"],
@@ -69,7 +65,6 @@ class ASTTransformer(nn.Module):
             data["r_sib"],
             data["r_mask"],
         )
-        return outputs
 
 
 def count_parameters(model: nn.Module) -> tuple[PrettyTable, int]:
@@ -116,7 +111,7 @@ class GreedyGenerator(nn.Module):
 
             batch = {k: v.to(device) for k, v in batch.items()}
             decoder_outputs = self.model.decode(batch, l_mem, r_mem)
-            out = self.model.generator(decoder_outputs)
+            out = self.model.unembedding(decoder_outputs)
             fresh_out = out[i, :, :].squeeze(0)
 
             _prob, next_token = torch.max(fresh_out, dim=-1)
