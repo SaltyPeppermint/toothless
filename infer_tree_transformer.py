@@ -16,22 +16,26 @@ from toothless.tree_model.model import ASTTransformer, GreedyGenerator, count_pa
 from toothless.tree_model.args import DataArguments, InferenceArguments, ModelArguments
 
 
-def fsdp_main(
-    rank: int, world_size: int, model_args: ModelArguments, data_args: DataArguments, infer_args: InferenceArguments
-):
+def fsdp_main(rank: int, world_size: int, infer_args: InferenceArguments):
     setup_process_group(rank, world_size)
 
     rank0print(rank, "Distributed Network ready")
 
     torch.cuda.set_device(rank)
+    print(infer_args)
 
     # Load Data
 
-    vocab = SimpleVocab.load(Path(infer_args.vocab_path))
-    rank0print(rank, "DataLoaders ready")
+    vocab = SimpleVocab.load(Path(infer_args.folder) / "vocab.json")
+    with open(Path(infer_args.folder) / "data_args.json") as f:
+        data_args = DataArguments.from_json(f.read())
+        assert type(data_args) is DataArguments
+    with open(Path(infer_args.folder) / "model_args.json") as f:
+        model_args = ModelArguments.from_json(f.read())
+        assert type(model_args) is ModelArguments
 
     # Construct Base Model
-    weights = torch.load(infer_args.weights_path)
+    weights = torch.load(infer_args.folder + "/" + "tree_transformer.pt")
     model = ASTTransformer(model_args, len(vocab), len(vocab), data_args.k, state_dict=weights)
     model.eval()
     generator = GreedyGenerator(model, data_args.max_len, vocab, data_args.k)
@@ -51,9 +55,12 @@ def fsdp_main(
         pairs = json.load(f)
 
     data = []
+    ground_truths = []
     for pair in pairs:
-        l_ids, l_anc, l_sib = pyrec_to_tensor(rise.PyRecExpr(pair["left"]), vocab, data_args.k)
-        r_ids, r_anc, r_sib = pyrec_to_tensor(rise.PyRecExpr(pair["right"]), vocab, data_args.k)
+        l_ids, l_anc, l_sib = pyrec_to_tensor(rise.PyRecExpr(pair["start"]), vocab, data_args.k)
+        r_ids, r_anc, r_sib = pyrec_to_tensor(rise.PyRecExpr(pair["goal"]), vocab, data_args.k)
+        guide_ids, _, _ = pyrec_to_tensor(rise.PyRecExpr(pair["goal"]), vocab, data_args.k)
+        ground_truths.append(guide_ids)
         data.append(
             {
                 "l_ids": l_ids,
@@ -81,26 +88,25 @@ def fsdp_main(
     tgt_ids = generator(batch)
 
     rank0print(rank, "Inference done!\n")
-    for i, entry in enumerate(tgt_ids):
+    for i, (entry) in enumerate(tgt_ids):
         rank0print(rank, f"RESULT: {i}")
         start = [vocab.id2token(int(id)) for id in batch["l_ids"][i]]
         rank0print(rank, f"START: {start}")
         guide = [vocab.id2token(int(id)) for id in entry]
-        rank0print(rank, f"GUIDE {guide}")
+        rank0print(rank, f"GENERATED GUIDE {guide}")
         end = [vocab.id2token(int(id)) for id in batch["r_ids"][i]]
         rank0print(rank, f"END: {end}")
+        ground_truth = [vocab.id2token(int(id)) for id in ground_truths[i]]
+        rank0print(rank, f"GROUND TRUTH {ground_truth}")
+
         rank0print(rank, "---")
 
     cleanup_process_group()
 
 
 if __name__ == "__main__":
-    parser = transformers.HfArgumentParser((ModelArguments, DataArguments, InferenceArguments))  # type: ignore
-    (
-        model_args,
-        data_args,
-        infer_args,
-    ) = parser.parse_args_into_dataclasses()
+    parser = transformers.HfArgumentParser(InferenceArguments)  # type: ignore
+    infer_args = parser.parse_args_into_dataclasses()[0]
     world_size = torch.cuda.device_count()
-    mp.spawn(fsdp_main, args=(world_size, model_args, data_args, infer_args), nprocs=world_size, join=True)  # type: ignore
+    mp.spawn(fsdp_main, args=(world_size, infer_args), nprocs=world_size, join=True)  # type: ignore
     print("DONE")

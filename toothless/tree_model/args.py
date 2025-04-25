@@ -1,9 +1,11 @@
 from dataclasses import dataclass, field
 from typing import Optional
 
+from dataclass_wizard import JSONWizard
+
 
 @dataclass
-class ModelArguments:
+class ModelArguments(JSONWizard):
     output_dir: str = field(default="model")
     d_model: int = field(default=768, metadata={"help": "Hidden state dimension size."})
     num_layers: int = field(default=12)
@@ -18,7 +20,7 @@ class ModelArguments:
 
 
 @dataclass
-class DataArguments:
+class DataArguments(JSONWizard):
     data_path: str = field(metadata={"help": "Path to the training data."})
     split_size: float = field(default=0.9, metadata={"help": "Train/Test split ratio."})
     random_state: int = field(default=42)
@@ -33,7 +35,7 @@ class DataArguments:
 
 
 @dataclass
-class TrainingArguments:
+class TrainingArguments(JSONWizard):
     epochs: int = field(default=4)
     eval_each_epoch: bool = field(default=True)
     save_model_end: bool = field(default=True)
@@ -53,6 +55,5 @@ class TrainingArguments:
 @dataclass
 class InferenceArguments:
     infer_data: str
-    weights_path: str
-    vocab_path: str
+    folder: str
     bf16: bool = field(default=True)

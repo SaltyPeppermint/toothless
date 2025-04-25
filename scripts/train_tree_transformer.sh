@@ -7,5 +7,5 @@ uv run torchrun --nproc_per_node 1 --nnodes 1 --node_rank 0 --master_addr localh
     --sample-distance 2 \
     --epochs 25 \
     --warmup-steps 500 \
-    --data-limit 10000 \
-    --enable-dis-attn False
+    --with-pos False \
+    --data-limit 10000

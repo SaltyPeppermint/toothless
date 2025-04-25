@@ -229,11 +229,12 @@ def save(
     folder.mkdir(exist_ok=True, parents=True)
 
     with open(folder / "model_args.json", mode="w", encoding="utf-8") as f:
+        f.write(model_args.to_json())
         json.dump(dataclasses.asdict(model_args), f)
     with open(folder / "data_args.json", mode="w", encoding="utf-8") as f:
-        json.dump(dataclasses.asdict(data_args), f)
+        f.write(data_args.to_json())
     with open(folder / "train_args.json", mode="w", encoding="utf-8") as f:
-        json.dump(dataclasses.asdict(train_args), f)  # type: ignore
+        f.write(train_args.to_json())
     vocab.save(folder / "vocab.json")
     torch.save(states, f"{folder}/tree_transformer.pt")
 

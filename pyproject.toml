@@ -18,6 +18,7 @@ dependencies = [
     "standard-imghdr>=3.13.0",
     "prettytable>=3.16.0",
     "eggshell",
+    "dataclass-wizard>=0.35.0",
 ]
 
 [tool.pyright]
