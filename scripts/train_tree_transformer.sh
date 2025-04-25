@@ -3,9 +3,8 @@ uv run torchrun --nproc_per_node 1 --nnodes 1 --node_rank 0 --master_addr localh
     --output_dir "saved_models" \
     --save_model_end True \
     --logging_steps 1 \
-    --num-layers 10 \
+    --num-layers 12 \
     --sample-distance 2 \
-    --epochs 25 \
+    --epochs 4 \
     --warmup-steps 500 \
-    --with-pos False \
-    --data-limit 10000
+    --data-limit 10000000000
