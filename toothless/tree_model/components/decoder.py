@@ -88,10 +88,6 @@ class ASTDoubleDecoder(RelCoder):
         self.layers = stack_layers(decoder_layer, conf.num_layers)
         self.norm = nn.LayerNorm(conf.d_model)
 
-        self.tgt_pos_pad = None
-        self.l_mem_pos_pad = None
-        self.r_mem_pos_pad = None
-
     def forward(
         self,
         tgt: Tensor,

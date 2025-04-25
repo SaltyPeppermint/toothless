@@ -3,6 +3,7 @@ from pathlib import Path
 import polars as pl
 
 from eggshell import rise  # type: ignore
+
 # from tokenizers import Tokenizer
 # from tokenizers.models import BPE
 # from tokenizers.normalizers import BertNormalizer
@@ -11,6 +12,8 @@ from eggshell import rise  # type: ignore
 # from tokenizers.pre_tokenizers import Split
 # from tokenizers.normalizers import Strip
 # from tokenizers.normalizers import Sequence as NormalizerSequence
+# import matplotlib.pyplot as plt
+
 
 import torch
 from torch import Tensor
@@ -188,13 +191,19 @@ def pyrec_to_tensor(expr: rise.PyRecExpr, vocab: SimpleVocab, k: int) -> tuple[T
 
 def make_std_mask(tgt: Tensor, pad_id: int):
     "Create a mask to hide padding and future words."
+    # unsqueeze to (16,1,128)
     tgt_mask = (tgt == pad_id).unsqueeze(-2)
-    # plt.imsave("padding_mask.png", tgt_mask[0])
-    triangle_mask = triangle_matrix(tgt.size(-1), device=tgt.device)
-    # plt.imsave("triangle_mask.png", triangle_mask)
-    tgt_mask = tgt_mask | triangle_mask
-    # plt.imsave("combined_mask.png", tgt_mask[0])
-    return tgt_mask.unsqueeze(-3)
+    # print(f"padding mask dims {tgt_mask.size()}")
+    # plt.imsave("padding_mask.png", tgt_mask.squeeze(1))
+    # unsqueeze to (1,128,128)
+    triangle_mask = triangle_matrix(tgt.size(-1), device=tgt.device).unsqueeze(0)
+    # print(f"triangle mask dimes {triangle_mask.size()}")
+    # plt.imsave("triangle_mask.png", triangle_mask[0])
+    # unsqueeze to (16,1,128,128)
+    tgt_mask = (tgt_mask | triangle_mask).unsqueeze(1)
+    # plt.imsave("combined_mask.png", tgt_mask[0][0])
+    # print(f"tgt mask dims {tgt_mask.size()}")
+    return tgt_mask
 
 
 def triangle_matrix(sz: int, device: torch.device | None = None) -> Tensor:
@@ -216,12 +225,12 @@ class DictCollator:
         batched_data["l_ids"] = self.pad_1d([sample["l_ids"] for sample in batch], False)
         batched_data["l_anc"] = self.pad_2d([sample["l_anc"] for sample in batch], False)
         batched_data["l_sib"] = self.pad_2d([sample["l_sib"] for sample in batch], False)
-        batched_data["l_mask"] = (batched_data["l_ids"] == self.pad_id).unsqueeze(-2).unsqueeze(-2)
+        batched_data["l_mask"] = (batched_data["l_ids"] == self.pad_id).unsqueeze(1).unsqueeze(1)
 
         batched_data["r_ids"] = self.pad_1d([sample["r_ids"] for sample in batch], False)
         batched_data["r_anc"] = self.pad_2d([sample["r_anc"] for sample in batch], False)
         batched_data["r_sib"] = self.pad_2d([sample["r_sib"] for sample in batch], False)
-        batched_data["r_mask"] = (batched_data["r_ids"] == self.pad_id).unsqueeze(-2).unsqueeze(-2)
+        batched_data["r_mask"] = (batched_data["r_ids"] == self.pad_id).unsqueeze(1).unsqueeze(1)
 
         n_tokens = 0
         if all(["tgt_ids" in batch[0], "tgt_anc" in batch[0], "tgt_sib" in batch[0]]):
