@@ -10,9 +10,9 @@ from torch.nn.parameter import Buffer
 from toothless.tree_model.args import ModelArguments
 
 
-class Generator(nn.Module):
+class UnEmbedding(nn.Module):
     def __init__(self, conf: ModelArguments, tgt_vocab_size: int):
-        super(Generator, self).__init__()
+        super(UnEmbedding, self).__init__()
 
         self.token_linear = nn.Linear(conf.d_model, tgt_vocab_size)
         self.token_dropout = nn.Dropout(conf.dropout)

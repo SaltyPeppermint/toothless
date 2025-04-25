@@ -6,7 +6,7 @@ import torch
 from toothless.tree_model.args import ModelArguments
 from toothless.tree_model.components.decoder import ASTDoubleDecoder
 from toothless.tree_model.components.encoder import ASTEncoder
-from toothless.tree_model.components.utils import Embeddings, Generator
+from toothless.tree_model.components.utils import Embeddings, UnEmbedding
 from toothless.tree_model.data import make_std_mask, partial_to_matrices
 from toothless.tree_model.vocab import SimpleVocab
 
@@ -25,7 +25,7 @@ class ASTTransformer(nn.Module):
         self.r_encoder = ASTEncoder(conf, k)
         self.decoder = ASTDoubleDecoder(conf, k)
 
-        self.generator = Generator(conf, tgt_vocab_size)
+        self.generator = UnEmbedding(conf, tgt_vocab_size)
 
         if state_dict is None:
             for p in self.parameters():
@@ -69,7 +69,6 @@ class ASTTransformer(nn.Module):
             data["r_sib"],
             data["r_mask"],
         )
-        outputs = outputs.permute(1, 0, 2)
         return outputs
 
 
