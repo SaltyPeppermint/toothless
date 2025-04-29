@@ -112,7 +112,7 @@ class GreedyGenerator(nn.Module):
             batch = {k: v.to(device) for k, v in batch.items()}
             decoder_outputs = self.model.decode(batch, l_mem, r_mem)
             out = self.model.unembedding(decoder_outputs)
-            fresh_out = out[i, :, :].squeeze(0)
+            fresh_out = out[:, i, :].squeeze(1)
 
             _prob, next_token = torch.max(fresh_out, dim=-1)
             batch["tgt_ids"][:, i + 1] = next_token

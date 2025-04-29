@@ -59,7 +59,7 @@ def fsdp_main(rank: int, world_size: int, infer_args: InferenceArguments):
     for pair in pairs:
         l_ids, l_anc, l_sib = pyrec_to_tensor(rise.PyRecExpr(pair["start"]), vocab, data_args.k)
         r_ids, r_anc, r_sib = pyrec_to_tensor(rise.PyRecExpr(pair["goal"]), vocab, data_args.k)
-        guide_ids, _, _ = pyrec_to_tensor(rise.PyRecExpr(pair["goal"]), vocab, data_args.k)
+        guide_ids, _, _ = pyrec_to_tensor(rise.PyRecExpr(pair["guide"]), vocab, data_args.k)
         ground_truths.append(guide_ids)
         data.append(
             {
@@ -91,13 +91,13 @@ def fsdp_main(rank: int, world_size: int, infer_args: InferenceArguments):
     for i, (entry) in enumerate(tgt_ids):
         rank0print(rank, f"RESULT: {i}")
         start = [vocab.id2token(int(id)) for id in batch["l_ids"][i]]
-        rank0print(rank, f"START: {start}")
+        rank0print(rank, f"\nSTART: {start}")
         guide = [vocab.id2token(int(id)) for id in entry]
-        rank0print(rank, f"GENERATED GUIDE {guide}")
+        rank0print(rank, f"\nGENERATED GUIDE {guide}")
         end = [vocab.id2token(int(id)) for id in batch["r_ids"][i]]
-        rank0print(rank, f"END: {end}")
+        rank0print(rank, f"\nEND: {end}")
         ground_truth = [vocab.id2token(int(id)) for id in ground_truths[i]]
-        rank0print(rank, f"GROUND TRUTH {ground_truth}")
+        rank0print(rank, f"\nGROUND TRUTH {ground_truth}")
 
         rank0print(rank, "---")
 
