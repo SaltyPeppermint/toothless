@@ -18,12 +18,8 @@ from toothless.tree_model.args import DataArguments, InferenceArguments, ModelAr
 
 def fsdp_main(rank: int, world_size: int, infer_args: InferenceArguments):
     setup_process_group(rank, world_size)
-
     rank0print(rank, "Distributed Network ready")
-
     torch.cuda.set_device(rank)
-    print(infer_args)
-
     # Load Data
 
     vocab = SimpleVocab.load(Path(infer_args.folder) / "vocab.json")
@@ -41,7 +37,8 @@ def fsdp_main(rank: int, world_size: int, infer_args: InferenceArguments):
     generator = GreedyGenerator(model, data_args.max_len, vocab, data_args.k)
     rank0print(rank, "Base Model and Generator ready")
     table, total_params = count_parameters(model)
-    rank0print(rank, table)
+    if infer_args.verbose:
+        rank0print(rank, table)
     rank0print(rank, f"Total Parameters: {total_params}")
 
     # FSDP model and Mixed Precision Config
@@ -87,25 +84,30 @@ def fsdp_main(rank: int, world_size: int, infer_args: InferenceArguments):
 
     tgt_ids = generator(batch)
 
-    rank0print(rank, "Inference done!\n")
+    rank0print(rank, "Inference done!\n----------")
     for i, (entry) in enumerate(tgt_ids):
-        rank0print(rank, f"RESULT: {i}")
-        start = [vocab.id2token(int(id)) for id in batch["l_ids"][i]]
-        rank0print(rank, f"\nSTART: {start}")
-        rank0print(rank, f"\nSTART: {pairs[i]['start']}")
+        rank0print(rank, f"Example {i}")
+        rank0print(rank, f"\nSTART:\n{pairs[i]['start']}")
+        if infer_args.verbose:
+            start_tokens = [vocab.id2token(int(id)) for id in batch["l_ids"][i]]
+            rank0print(rank, start_tokens)
 
-        end = [vocab.id2token(int(id)) for id in batch["r_ids"][i]]
-        rank0print(rank, f"\nEND: {end}")
-        rank0print(rank, f"\nEND: {pairs[i]['goal']}")
+        rank0print(rank, f"\nGOAL:\n{pairs[i]['goal']}")
+        if infer_args.verbose:
+            goal_tokens = [vocab.id2token(int(id)) for id in batch["r_ids"][i]]
+            rank0print(rank, goal_tokens)
 
-        ground_truth = [vocab.id2token(int(id)) for id in ground_truths[i]]
-        rank0print(rank, f"\nGROUND TRUTH {ground_truth}")
-        rank0print(rank, f"\nGROUND TRUTH {pairs[i]['guide']}")
+        rank0print(rank, f"\nGROUND TRUTH:\n{pairs[i]['guide']}")
+        if infer_args.verbose:
+            ground_truth_tokens = [vocab.id2token(int(id)) for id in ground_truths[i]]
+            rank0print(rank, ground_truth_tokens)
 
-        guide = [vocab.id2token(int(id)) for id in entry]
-        rank0print(rank, f"\nGENERATED GUIDE {guide}")
+        guide_tokens = [vocab.id2token(int(id)) for id in entry]
+        rank0print(rank, f"\nGENERATED GUIDE:\n{rise.lower_meta_level(guide_tokens)}")
+        if infer_args.verbose:
+            rank0print(rank, guide_tokens)
 
-        rank0print(rank, "---")
+        rank0print(rank, "----------")
 
     cleanup_process_group()
 
@@ -115,4 +117,4 @@ if __name__ == "__main__":
     infer_args = parser.parse_args_into_dataclasses()[0]
     world_size = torch.cuda.device_count()
     mp.spawn(fsdp_main, args=(world_size, infer_args), nprocs=world_size, join=True)  # type: ignore
-    print("DONE")
+    print("\nDONE")

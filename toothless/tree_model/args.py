@@ -57,3 +57,4 @@ class InferenceArguments:
     infer_data: str
     folder: str
     bf16: bool = field(default=True)
+    verbose: bool = field(default=False)
