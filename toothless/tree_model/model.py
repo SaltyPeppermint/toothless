@@ -129,6 +129,14 @@ class GreedyGenerator(nn.Module):
             partial_tok = [self.vocab.id2token(i) for i in partial_ids]
             tgt_anc, tgt_sib = partial_to_matrices(partial_tok, self.k)
 
+            # Initialize distance matrix with all zeroes meaning no adjacency
+            # Then, for those tokens already generated, add the adjavencies to the matrix
+            # This leaves a matrix of the shape where the 4th and 5th column are zero since they're unknown
+            # 0 1 2 0 0
+            # 0 0 0 0 0
+            # 0 3 4 0 0
+            # 0 0 0 0 0
+            # 0 0 0 0 0
             padded_tgt_anc = torch.zeros((self.max_len, self.max_len), device=self.model_device(), dtype=tgt_anc.dtype)
             padded_tgt_anc[: tgt_anc.size(0), : tgt_anc.size(1)] = tgt_anc
 

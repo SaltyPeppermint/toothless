@@ -92,12 +92,18 @@ def fsdp_main(rank: int, world_size: int, infer_args: InferenceArguments):
         rank0print(rank, f"RESULT: {i}")
         start = [vocab.id2token(int(id)) for id in batch["l_ids"][i]]
         rank0print(rank, f"\nSTART: {start}")
-        guide = [vocab.id2token(int(id)) for id in entry]
-        rank0print(rank, f"\nGENERATED GUIDE {guide}")
+        rank0print(rank, f"\nSTART: {pairs[i]['start']}")
+
         end = [vocab.id2token(int(id)) for id in batch["r_ids"][i]]
         rank0print(rank, f"\nEND: {end}")
+        rank0print(rank, f"\nEND: {pairs[i]['goal']}")
+
         ground_truth = [vocab.id2token(int(id)) for id in ground_truths[i]]
         rank0print(rank, f"\nGROUND TRUTH {ground_truth}")
+        rank0print(rank, f"\nGROUND TRUTH {pairs[i]['guide']}")
+
+        guide = [vocab.id2token(int(id)) for id in entry]
+        rank0print(rank, f"\nGENERATED GUIDE {guide}")
 
         rank0print(rank, "---")
 
