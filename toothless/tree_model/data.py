@@ -60,10 +60,11 @@ class CustomDataset(data.Dataset):
         return vectorized
 
     def get_tuple_as_str(self, idx) -> dict[str, str]:
-        # FIXME THIS IS A MIXUP OF START AND GUIDE
+        # WARNING: THIS IS A MIXUP OF START AND GUIDE
+        # YOU MAY NEED TO SWAP THEM IF YOU USE AN OLD MODEL
         sample = self.samples[idx]
-        goal = sample["start"].item()
-        start = sample["goal"].item()
+        start = sample["start"].item()
+        goal = sample["goal"].item()
         guide = sample["guide"].item()
         return {"start": start, "goal": goal, "guide": guide}
 
