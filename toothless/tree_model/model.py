@@ -3,11 +3,13 @@ from torch import Tensor
 from torch import nn
 import torch
 
+from eggshell import rise  # type: ignore
+
 from toothless.tree_model.args import ModelArguments
 from toothless.tree_model.components.decoder import ASTDoubleDecoder
 from toothless.tree_model.components.encoder import ASTEncoder
 from toothless.tree_model.components.utils import Embeddings, UnEmbedding
-from toothless.tree_model.data import make_std_mask, partial_to_matrices
+from toothless.tree_model.data import make_std_mask, partial_to_matrices, split_off_special
 from toothless.tree_model.vocab import SimpleVocab
 
 
@@ -103,7 +105,7 @@ class GreedyGenerator(nn.Module):
         batch["tgt_ids"] = torch.zeros(batch_size, self.max_len, requires_grad=False, device=device, dtype=torch.long)
         batch["tgt_ids"][:, 0] = self.vocab.bos_token_id
 
-        eos_reached = torch.full((batch_size,), False).to(device)
+        finished_flags = torch.full((batch_size,), False).to(device)
 
         for i in range(self.max_len - 1):
             batch["tgt_mask"] = make_std_mask(batch["tgt_ids"], 0)
@@ -117,8 +119,8 @@ class GreedyGenerator(nn.Module):
             _prob, next_token = torch.max(fresh_out, dim=-1)
             batch["tgt_ids"][:, i + 1] = next_token
 
-            eos_reached = eos_reached | next_token == self.vocab.eos_token_id
-            if torch.all(eos_reached):
+            finished_flags = finished_flags | next_token == self.vocab.eos_token_id
+            if torch.all(finished_flags):
                 break
 
         return batch["tgt_ids"]
@@ -126,23 +128,24 @@ class GreedyGenerator(nn.Module):
     def pos_matrices(self, tgt_ids: Tensor) -> tuple[Tensor, Tensor]:
         batch_tgt_anc, batch_tgt_sib = [], []
         for partial_ids in tgt_ids.tolist():
-            partial_tok = [self.vocab.id2token(i) for i in partial_ids]
-            tgt_anc, tgt_sib = partial_to_matrices(partial_tok, self.k)
+            padded_tgt_anc = torch.zeros((self.max_len, self.max_len), device=self.model_device(), dtype=torch.long)
+            padded_tgt_sib = torch.zeros((self.max_len, self.max_len), device=self.model_device(), dtype=torch.long)
 
-            # Initialize distance matrix with all zeroes meaning no adjacency
-            # Then, for those tokens already generated, add the adjavencies to the matrix
-            # This leaves a matrix of the shape where the 4th and 5th column are zero since they're unknown
-            # 0 1 2 0 0
-            # 0 0 0 0 0
-            # 0 3 4 0 0
-            # 0 0 0 0 0
-            # 0 0 0 0 0
-            padded_tgt_anc = torch.zeros((self.max_len, self.max_len), device=self.model_device(), dtype=tgt_anc.dtype)
-            padded_tgt_anc[: tgt_anc.size(0), : tgt_anc.size(1)] = tgt_anc
+            partial_tok = split_off_special([self.vocab.id2token(i) for i in partial_ids], self.vocab)
 
-            padded_tgt_sib = torch.zeros((self.max_len, self.max_len), device=self.model_device(), dtype=tgt_sib.dtype)
-            padded_tgt_sib[: tgt_sib.size(0), : tgt_sib.size(1)] = tgt_sib
-            # Extra padding since tgt will be shifted
+            if len(partial_tok) <= rise.count_expected_tokens(partial_tok):
+                tgt_anc, tgt_sib = partial_to_matrices(partial_tok, self.k)
+                # Initialize distance matrix with all zeroes meaning no adjacency
+                # Then, for those tokens already generated, add the adjavencies to the matrix
+                # This leaves a matrix of the shape where the 4th and 5th column are zero since they're unknown
+                # 0 1 2 0 0
+                # 0 0 0 0 0
+                # 0 3 4 0 0
+                # 0 0 0 0 0
+                # 0 0 0 0 0
+                padded_tgt_anc[: tgt_anc.size(0), : tgt_anc.size(1)] = tgt_anc
+                padded_tgt_sib[: tgt_sib.size(0), : tgt_sib.size(1)] = tgt_sib
+                # Extra padding since tgt will be shifted
             batch_tgt_anc.append(padded_tgt_anc)
             batch_tgt_sib.append(padded_tgt_sib)
 

@@ -54,14 +54,18 @@ class CustomDataset(data.Dataset):
         return len(self.samples)
 
     def __getitem__(self, idx) -> dict[str, Tensor]:
-        sample = self.samples[idx]
-        right = sample["right"].item()
-        left = sample["left"].item()
-        middle = sample["middle"].item()
-        distance = sample["distance"].item()
+        sample = self.get_tuple_as_str(idx)
 
-        vectorized = self._vectorize(right, middle, left, distance)
+        vectorized = self._vectorize(sample["start"], sample["guide"], sample["goal"])
         return vectorized
+
+    def get_tuple_as_str(self, idx) -> dict[str, str]:
+        # FIXME THIS IS A MIXUP OF START AND GUIDE
+        sample = self.samples[idx]
+        goal = sample["start"].item()
+        start = sample["goal"].item()
+        guide = sample["guide"].item()
+        return {"start": start, "goal": goal, "guide": guide}
 
     def _process_raw(self, rank: int):
         if not self.force_reload and self.raw_path.is_file():
@@ -85,15 +89,15 @@ class CustomDataset(data.Dataset):
         length = sum([len(chain_pairs) for chain_pairs in picked_tripples])
         rank0print(rank, f"Total pairs: {length}")
 
-        total_samples = {"left": [], "right": [], "middle": [], "distance": []}
+        total_samples = {"start": [], "goal": [], "guide": [], "distance": []}
         for chain, tripple in zip(expl_chains, picked_tripples):
             for left, middle, right in tripple:
                 right = int(right)
                 left = int(left)
                 middle = int(middle)
-                total_samples["left"].append(str(chain[left]))
-                total_samples["right"].append(str(chain[right]))
-                total_samples["middle"].append(str(chain[middle]))
+                total_samples["start"].append(str(chain[left]))
+                total_samples["goal"].append(str(chain[right]))
+                total_samples["guide"].append(str(chain[middle]))
                 total_samples["distance"].append(middle / (right - left))
 
         df = pl.DataFrame(total_samples)
@@ -144,7 +148,7 @@ class CustomDataset(data.Dataset):
         rec(0, max_index, acc, self.sample_distance)
         return acc
 
-    def _vectorize(self, left: str, middle: str, right: str, distance: float) -> dict:
+    def _vectorize(self, left: str, middle: str, right: str) -> dict:
         l_ids, l_anc, l_sib = pyrec_to_tensor(rise.PyRecExpr(left), self.vocab, self.k)
         tgt_ids, tgt_anc, tgt_sib = pyrec_to_tensor(rise.PyRecExpr(middle), self.vocab, self.k)
         r_ids, r_anc, r_sib = pyrec_to_tensor(rise.PyRecExpr(right), self.vocab, self.k)
@@ -159,7 +163,6 @@ class CustomDataset(data.Dataset):
             "r_ids": r_ids,
             "r_anc": r_anc,
             "r_sib": r_sib,
-            "distance": torch.tensor([distance]),
         }
 
     @property
@@ -220,7 +223,7 @@ class DictCollator:
         # batch is a list of dictionaries
         batched_data = {}
 
-        batched_data["distance"] = torch.stack([sample["distance"] for sample in batch])
+        # batched_data["distance"] = torch.stack([sample["distance"] for sample in batch])
 
         batched_data["l_ids"] = self.pad_1d([sample["l_ids"] for sample in batch], False)
         batched_data["l_anc"] = self.pad_2d([sample["l_anc"] for sample in batch], False)
@@ -284,7 +287,7 @@ class DictCollator:
 
 
 def mk_loaders(
-    rank: int, world_size: int, dataset: CustomDataset, data_args: DataArguments
+    rank: int, world_size: int, dataset: CustomDataset, data_args: DataArguments, shuffle: bool = True
 ) -> tuple[DataLoader[dict[str, Tensor]], DataLoader[dict[str, Tensor]]]:
     # Create and load dataset
     train_dataset, eval_dataset = torch.utils.data.random_split(
@@ -292,7 +295,7 @@ def mk_loaders(
     )
 
     # Create samplers
-    train_sampler = DistributedSampler(train_dataset, rank=rank, num_replicas=world_size, shuffle=True)
+    train_sampler = DistributedSampler(train_dataset, rank=rank, num_replicas=world_size, shuffle=shuffle)
     eval_sampler = DistributedSampler(eval_dataset, rank=rank, num_replicas=world_size)
 
     pad_id = dataset.vocab.pad_token_id
@@ -328,3 +331,11 @@ def partial_to_matrices(partial_tok: list[str], k: int) -> tuple[Tensor, Tensor]
     anc_matrix = torch.tensor(tree_data.anc_matrix(k, double_pad=True), dtype=torch.long)
     sib_matrix = torch.tensor(tree_data.sib_matrix(k, double_pad=True), dtype=torch.long)
     return anc_matrix[:-1, :-1], sib_matrix[:-1, :-1]
+
+
+def split_off_special(partial_tok: list[str], vocab: SimpleVocab) -> list[str]:
+    partial_tok = partial_tok[1:]
+    for i, j in enumerate(partial_tok):
+        if j in vocab.special_tokens:
+            return partial_tok[:i]
+    return partial_tok

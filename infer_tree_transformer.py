@@ -2,6 +2,7 @@ import json
 from pathlib import Path
 
 import torch
+from torch import Tensor
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP, MixedPrecision, ShardingStrategy
 import torch.multiprocessing as mp
 
@@ -11,7 +12,12 @@ from eggshell import rise  # type: ignore
 
 from toothless.tree_model.vocab import SimpleVocab
 from toothless.utils.dist_helper import cleanup_process_group, rank0print, setup_process_group
-from toothless.tree_model.data import DictCollator, pyrec_to_tensor  # , CustomDataset
+from toothless.tree_model.data import (
+    CustomDataset,
+    DictCollator,
+    pyrec_to_tensor,
+    split_off_special,
+)  # , CustomDataset
 from toothless.tree_model.model import ASTTransformer, GreedyGenerator, count_parameters
 from toothless.tree_model.args import DataArguments, InferenceArguments, ModelArguments
 
@@ -48,68 +54,103 @@ def fsdp_main(rank: int, world_size: int, infer_args: InferenceArguments):
     generator = FSDP(generator, sharding_strategy=sharding_strategy, mixed_precision=mixed_precision, device_id=rank)
     rank0print(rank, "FSDP Model/Generator loaded to GPU and ready")
 
-    with open(infer_args.infer_data, encoding="utf-8") as f:
-        pairs = json.load(f)
-
-    data = []
-    ground_truths = []
-    for pair in pairs:
-        l_ids, l_anc, l_sib = pyrec_to_tensor(rise.PyRecExpr(pair["start"]), vocab, data_args.k)
-        r_ids, r_anc, r_sib = pyrec_to_tensor(rise.PyRecExpr(pair["goal"]), vocab, data_args.k)
-        guide_ids, _, _ = pyrec_to_tensor(rise.PyRecExpr(pair["guide"]), vocab, data_args.k)
-        ground_truths.append(guide_ids)
-        data.append(
-            {
-                "l_ids": l_ids,
-                "l_anc": l_anc,
-                "l_sib": l_sib,
-                "r_ids": r_ids,
-                "r_anc": r_anc,
-                "r_sib": r_sib,
-                "distance": torch.tensor(0),
-            }
-        )
-
     data_loader = DictCollator(vocab.pad_token_id, data_args.max_len)
 
-    rank0print(rank, f"Data of batch size {len(data)}")
-    batch, _n_tokens = data_loader(data)
-    # dataset = CustomDataset(data_args, rank)
-    # batch, _n_tokens= data_loader([dataset[0], dataset[1]])
+    # INFER JSON
+    rank0print(rank, "\n=======================\nRunning inference on infer_data.json ...")
+    with open(infer_args.infer_data, encoding="utf-8") as f:
+        tripples = json.load(f)
+    data, tripple_ids = pp_for_inference(vocab, data_args.k, tripples)
 
-    rank0print(rank, "Data ready!\nNow running autoregressive inference...")
+    batch, _n_tokens = data_loader(data)
 
     batch = {k: v.to(rank) for k, v in batch.items()}
     generator.eval()
+    generated_ids = generator(batch)
 
-    tgt_ids = generator(batch)
+    rank0print(rank, "Inference done!")
+    pretty_print_result(rank, vocab, tripples, tripple_ids, generated_ids, infer_args.verbose)
 
-    rank0print(rank, "Inference done!\n----------")
-    for i, (entry) in enumerate(tgt_ids):
-        rank0print(rank, f"Example {i}")
-        rank0print(rank, f"\nSTART:\n{pairs[i]['start']}")
-        if infer_args.verbose:
-            start_tokens = [vocab.id2token(int(id)) for id in batch["l_ids"][i]]
-            rank0print(rank, start_tokens)
+    # DATASET
 
-        rank0print(rank, f"\nGOAL:\n{pairs[i]['goal']}")
-        if infer_args.verbose:
-            goal_tokens = [vocab.id2token(int(id)) for id in batch["r_ids"][i]]
-            rank0print(rank, goal_tokens)
+    first_n = 4
+    rank0print(rank, f"\n=======================\nRunning inference on first {first_n} of dataset ...")
+    dataset = CustomDataset(data_args, rank)
 
-        rank0print(rank, f"\nGROUND TRUTH:\n{pairs[i]['guide']}")
-        if infer_args.verbose:
-            ground_truth_tokens = [vocab.id2token(int(id)) for id in ground_truths[i]]
-            rank0print(rank, ground_truth_tokens)
+    tripples = [dataset.get_tuple_as_str(i) for i in range(0, first_n)]
+    data, tripple_ids = pp_for_inference(vocab, data_args.k, tripples)
 
-        guide_tokens = [vocab.id2token(int(id)) for id in entry]
-        rank0print(rank, f"\nGENERATED GUIDE:\n{rise.lower_meta_level(guide_tokens)}")
-        if infer_args.verbose:
-            rank0print(rank, guide_tokens)
+    batch, _n_tokens = data_loader(data)
+    batch = {k: v.to(rank) for k, v in batch.items()}
 
-        rank0print(rank, "----------")
+    generator.eval()
+    generated_ids = generator(batch)
+
+    rank0print(rank, "Inference done!")
+    pretty_print_result(rank, vocab, tripples, tripple_ids, generated_ids, infer_args.verbose)
 
     cleanup_process_group()
+
+
+def pp_for_inference(
+    vocab: SimpleVocab, k: int, tripples: list[dict[str, str]]
+) -> tuple[list[dict[str, Tensor]], list[dict[str, Tensor]]]:
+    data = []
+    tripple_ids = []
+    for tripple in tripples:
+        start_ids, start_anc, start_sib = pyrec_to_tensor(rise.PyRecExpr(tripple["start"]), vocab, k)
+        goal_ids, goal_anc, goal_sib = pyrec_to_tensor(rise.PyRecExpr(tripple["goal"]), vocab, k)
+        guide_ids, _, _ = pyrec_to_tensor(rise.PyRecExpr(tripple["guide"]), vocab, k)
+        tripple_ids.append({"l_ids": start_ids, "tgt_ids": guide_ids, "r_ids": goal_ids})
+        data.append(
+            {
+                "l_ids": start_ids,
+                "l_anc": start_anc,
+                "l_sib": start_sib,
+                "r_ids": goal_ids,
+                "r_anc": goal_anc,
+                "r_sib": goal_sib,
+            }
+        )
+
+    return data, tripple_ids
+
+
+def pretty_print_result(
+    rank: int,
+    vocab: SimpleVocab,
+    tripples: list[dict[str, str]],
+    tripple_ids: list[dict[str, Tensor]],
+    generated_ids: list[Tensor],
+    verbose: bool,
+):
+    for i, (tripple, tripple_id, generated_id) in enumerate(zip(tripples, tripple_ids, generated_ids)):
+        rank0print(rank, f"----------\nExample {i}")
+        rank0print(rank, f"START:\n{tripple['start']}")
+        if verbose:
+            start_tokens = [vocab.id2token(int(id)) for id in tripple_id["l_ids"]]
+            rank0print(rank, start_tokens)
+
+        rank0print(rank, f"GOAL:\n{tripple['goal']}")
+        if verbose:
+            goal_tokens = [vocab.id2token(int(id)) for id in tripple_id["r_ids"]]
+            rank0print(rank, goal_tokens)
+
+        rank0print(rank, f"GROUND TRUTH:\n{tripple['guide']}")
+        if verbose:
+            ground_truth_tokens = [vocab.id2token(int(id)) for id in tripple_id["tgt_ids"]]
+            rank0print(rank, ground_truth_tokens)
+
+        raw_guide_tokens = [vocab.id2token(int(id)) for id in generated_id if id]
+        guide_tokens = split_off_special(raw_guide_tokens, vocab)
+        if len(guide_tokens) == rise.count_expected_tokens(guide_tokens):
+            guide_s_expr = rise.lower_meta_level([tok for tok in guide_tokens])
+            rank0print(rank, f"GENERATED GUIDE:\n{guide_s_expr}")
+        else:
+            rank0print(rank, f"COULD NOT PROPERLY DISPLAY GENERATED GUIDE:\n{raw_guide_tokens}")
+
+        if verbose:
+            rank0print(rank, guide_tokens)
 
 
 if __name__ == "__main__":

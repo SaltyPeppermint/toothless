@@ -57,6 +57,14 @@ class SimpleVocab:
     def eos_token_id(self) -> int:
         return self.vocab[self.eos_token]
 
+    @property
+    def special_tokens(self) -> list[str]:
+        return [self.pad_token, self.mask_token, self.unk_token, self.bos_token, self.eos_token]
+
+    @property
+    def special_token_ids(self) -> list[int]:
+        return [self.token2id(t) for t in self.special_tokens]
+
     def save(self, path: Path):
         d = {}
         d["pad_token"] = self.pad_token
