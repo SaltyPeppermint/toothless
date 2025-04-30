@@ -56,17 +56,17 @@ class CustomDataset(data.Dataset):
     def __getitem__(self, idx) -> dict[str, Tensor]:
         sample = self.get_tuple_as_str(idx)
 
-        vectorized = self._vectorize(sample["start"], sample["guide"], sample["goal"])
+        vectorized = self._vectorize(sample["left"], sample["middle"], sample["right"])
         return vectorized
 
     def get_tuple_as_str(self, idx) -> dict[str, str]:
         # WARNING: THIS IS A MIXUP OF START AND GUIDE
         # YOU MAY NEED TO SWAP THEM IF YOU USE AN OLD MODEL
         sample = self.samples[idx]
-        start = sample["start"].item()
-        goal = sample["goal"].item()
-        guide = sample["guide"].item()
-        return {"start": start, "goal": goal, "guide": guide}
+        left = sample["left"].item()
+        middle = sample["middle"].item()
+        right = sample["right"].item()
+        return {"left": left, "middle": middle, "right": right}
 
     def _process_raw(self, rank: int):
         if not self.force_reload and self.raw_path.is_file():
@@ -90,15 +90,15 @@ class CustomDataset(data.Dataset):
         length = sum([len(chain_pairs) for chain_pairs in picked_tripples])
         rank0print(rank, f"Total pairs: {length}")
 
-        total_samples = {"start": [], "goal": [], "guide": [], "distance": []}
+        total_samples = {"left": [], "middle": [], "right": [], "distance": []}
         for chain, tripple in zip(expl_chains, picked_tripples):
             for left, middle, right in tripple:
                 right = int(right)
                 left = int(left)
                 middle = int(middle)
-                total_samples["start"].append(str(chain[left]))
-                total_samples["goal"].append(str(chain[right]))
-                total_samples["guide"].append(str(chain[middle]))
+                total_samples["left"].append(str(chain[left]))
+                total_samples["middle"].append(str(chain[right]))
+                total_samples["right"].append(str(chain[middle]))
                 total_samples["distance"].append(middle / (right - left))
 
         df = pl.DataFrame(total_samples)

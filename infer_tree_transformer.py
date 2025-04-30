@@ -98,18 +98,18 @@ def pp_for_inference(
     data = []
     tripple_ids = []
     for tripple in tripples:
-        start_ids, start_anc, start_sib = pyrec_to_tensor(rise.PyRecExpr(tripple["start"]), vocab, k)
-        goal_ids, goal_anc, goal_sib = pyrec_to_tensor(rise.PyRecExpr(tripple["goal"]), vocab, k)
-        guide_ids, _, _ = pyrec_to_tensor(rise.PyRecExpr(tripple["guide"]), vocab, k)
-        tripple_ids.append({"l_ids": start_ids, "tgt_ids": guide_ids, "r_ids": goal_ids})
+        l_ids, l_anc, l_sib = pyrec_to_tensor(rise.PyRecExpr(tripple["left"]), vocab, k)
+        r_ids, r_anc, r_sib = pyrec_to_tensor(rise.PyRecExpr(tripple["middle"]), vocab, k)
+        tgt_ids, _, _ = pyrec_to_tensor(rise.PyRecExpr(tripple["right"]), vocab, k)
+        tripple_ids.append({"l_ids": l_ids, "tgt_ids": tgt_ids, "r_ids": r_ids})
         data.append(
             {
-                "l_ids": start_ids,
-                "l_anc": start_anc,
-                "l_sib": start_sib,
-                "r_ids": goal_ids,
-                "r_anc": goal_anc,
-                "r_sib": goal_sib,
+                "l_ids": l_ids,
+                "l_anc": l_anc,
+                "l_sib": l_sib,
+                "r_ids": r_ids,
+                "r_anc": r_anc,
+                "r_sib": r_sib,
             }
         )
 
@@ -126,17 +126,17 @@ def pretty_print_result(
 ):
     for i, (tripple, tripple_id, generated_id) in enumerate(zip(tripples, tripple_ids, generated_ids)):
         rank0print(rank, f"----------\nExample {i}")
-        rank0print(rank, f"START:\n{tripple['start']}")
+        rank0print(rank, f"START:\n{tripple['left']}")
         if verbose:
-            start_tokens = [vocab.id2token(int(id)) for id in tripple_id["l_ids"]]
-            rank0print(rank, start_tokens)
+            l_tokens = [vocab.id2token(int(id)) for id in tripple_id["l_ids"]]
+            rank0print(rank, l_tokens)
 
-        rank0print(rank, f"GOAL:\n{tripple['goal']}")
+        rank0print(rank, f"GOAL:\n{tripple['middle']}")
         if verbose:
-            goal_tokens = [vocab.id2token(int(id)) for id in tripple_id["r_ids"]]
-            rank0print(rank, goal_tokens)
+            r_tokens = [vocab.id2token(int(id)) for id in tripple_id["r_ids"]]
+            rank0print(rank, r_tokens)
 
-        rank0print(rank, f"GROUND TRUTH:\n{tripple['guide']}")
+        rank0print(rank, f"GROUND TRUTH:\n{tripple['right']}")
         if verbose:
             ground_truth_tokens = [vocab.id2token(int(id)) for id in tripple_id["tgt_ids"]]
             rank0print(rank, ground_truth_tokens)
