@@ -65,9 +65,6 @@ def fsdp_main(
     rank0print(rank, table)
     rank0print(rank, f"Total Parameters: {total_params}")
 
-    first_thingy = next(iter(copy.deepcopy(train_dataloader)))
-    print(first_thingy)
-
     # FSDP model and Mixed Precision Config
     mixed_precision = MixedPrecision(param_dtype=torch.bfloat16, cast_forward_inputs=True) if train_args.bf16 else None
     sharding_strategy = ShardingStrategy.FULL_SHARD if world_size > 1 else ShardingStrategy.NO_SHARD

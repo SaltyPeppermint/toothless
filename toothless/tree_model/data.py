@@ -82,8 +82,8 @@ class CustomDataset(data.Dataset):
 
         if sum(1 for x in self.tripple_folder.glob("*") if x.is_file()) == length and not self.force_reload:
             if self.len_limit:
-                return len(index_tripples[: self.len_limit])
-            return len(index_tripples)
+                return min(length, self.len_limit)
+            return length
 
         idx = 0
 
@@ -252,7 +252,6 @@ class DictCollator:
 
             n_tokens = int((full_tgt_ids != self.pad_id).data.sum())
 
-        print(f"batched one thingy {batched_data}")
         return batched_data, n_tokens
 
     def pad_1d(self, samples: list[Tensor], extra_pad: bool) -> Tensor:
