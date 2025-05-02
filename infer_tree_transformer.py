@@ -76,7 +76,7 @@ def fsdp_main(rank: int, world_size: int, infer_args: InferenceArguments):
     first_n = 4
     rank0print(rank, f"\n=======================\nRunning inference on first {first_n} of dataset ...")
 
-    tripples = [dataset.df.row(i, named=True) for i in range(0, first_n)]
+    tripples = [dataset.get_sample_json(i) for i in range(0, first_n)]
     data, tripple_ids = pp_for_inference(vocab, data_args.k, tripples)
 
     batch, _n_tokens = data_loader(data)
