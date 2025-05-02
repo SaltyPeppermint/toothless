@@ -2,9 +2,8 @@ import json
 from pathlib import Path
 
 import polars as pl
-from eggshell import rise
+from eggshell import rise  # type: ignore
 
-from toothless.utils.dist_helper import rank0print  # type: ignore
 
 DATASETS = {
     "start": "data/start_goal_with_expl/start_and_goal-2025-01-29-b33b4ba4-ee88-48b5-981b-c2b809d6504f/0",
@@ -12,29 +11,29 @@ DATASETS = {
 }
 
 
-def update_cache(rank: int):
-    rank0print(rank, "Updating Cache...")
+def update_cache():
+    print("Updating Cache...")
     for name, path in DATASETS.items():
-        data = load_df(Path(path), rank)
+        data = load_df(Path(path))
         data.write_parquet(f"cache/{name}.parquet")
 
-    rank0print(rank, "Cache updated!")
+    print("Cache updated!")
 
 
-def load_df(data_path: Path, rank: int) -> pl.DataFrame:
+def load_df(data_path: Path) -> pl.DataFrame:
     all_dfs = []
     for data_file in sorted(Path(data_path).glob("*.json")):
-        df = _load_fragment(data_file, rank)
+        df = _load_fragment(data_file)
         all_dfs.append(df)
 
-    rank0print(rank, "All data fragments loading, now concating...")
+    print("All data fragments loading, now concating...")
     all_data = pl.concat(all_dfs, parallel=True)
-    rank0print(rank, "Data concatenated")
-    rank0print(rank, f"Estimated size: {all_data.estimated_size(unit='gb')} GB")
+    print("Data concatenated")
+    print(f"Estimated size: {all_data.estimated_size(unit='gb')} GB")
     return all_data
 
 
-def _load_fragment(data_file: Path, rank: int) -> pl.DataFrame:
+def _load_fragment(data_file: Path) -> pl.DataFrame:
     with open(data_file) as f:
         json_content = json.load(f)
 
@@ -58,5 +57,5 @@ def _load_fragment(data_file: Path, rank: int) -> pl.DataFrame:
     )
     df = df.with_columns(pl.lit(str(start_term)).alias("start_expr"))
 
-    rank0print(rank, f"Loaded data fragment {data_file}")
+    print(f"Loaded data fragment {data_file}")
     return df

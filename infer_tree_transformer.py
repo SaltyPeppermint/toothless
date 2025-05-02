@@ -75,9 +75,8 @@ def fsdp_main(rank: int, world_size: int, infer_args: InferenceArguments):
 
     first_n = 4
     rank0print(rank, f"\n=======================\nRunning inference on first {first_n} of dataset ...")
-    dataset = CustomDataset(data_args, rank)
 
-    tripples = [dataset.get_tuple_as_str(i) for i in range(0, first_n)]
+    tripples = [dataset.df.row(i, named=True) for i in range(0, first_n)]
     data, tripple_ids = pp_for_inference(vocab, data_args.k, tripples)
 
     batch, _n_tokens = data_loader(data)
@@ -157,5 +156,10 @@ if __name__ == "__main__":
     parser = transformers.HfArgumentParser(InferenceArguments)  # type: ignore
     infer_args = parser.parse_args_into_dataclasses()[0]
     world_size = torch.cuda.device_count()
-    mp.spawn(fsdp_main, args=(world_size, infer_args), nprocs=world_size, join=True)  # type: ignore
+    with open(Path(infer_args.folder) / "data_args.json") as f:
+        data_args = DataArguments.from_json(f.read())
+        assert type(data_args) is DataArguments
+    dataset = CustomDataset(data_args)
+
+    mp.spawn(fsdp_main, args=(world_size, infer_args, dataset), nprocs=world_size, join=True)  # type: ignore
     print("\nDONE")

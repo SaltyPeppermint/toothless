@@ -1,4 +1,6 @@
+import json
 from pathlib import Path
+from multiprocessing import Pool
 
 import polars as pl
 
@@ -32,7 +34,7 @@ CHUNK_SIZE = 128
 
 
 class CustomDataset(data.Dataset):
-    def __init__(self, conf: DataArguments, rank: int):
+    def __init__(self, conf: DataArguments):
         """
         :param k represents the max relative distance
         """
@@ -46,41 +48,34 @@ class CustomDataset(data.Dataset):
         self.cache_dir = Path("cache") / Path(*self.json_root.parts[2:])
         self.cache_dir.mkdir(parents=True, exist_ok=True)
 
-        self._process_raw(rank)
-        self.vocab = self._build_vocab(rank)
-        self.samples = self._process(rank)
+        self._process_raw()
+        self.vocab = self._build_vocab()
+        self.df = self._process()
 
     def __len__(self) -> int:
-        return len(self.samples)
+        return len(self.df)
 
     def __getitem__(self, idx) -> dict[str, Tensor]:
-        sample = self.get_tuple_as_str(idx)
+        return torch.load(self.sample_pt(idx))
 
-        vectorized = self._vectorize(sample["left"], sample["middle"], sample["right"])
-        return vectorized
+    def get_sample_json(self, idx) -> dict[str, str]:
+        with open(self.sample_json(idx), encoding="utf-8") as f:
+            d = json.load(f)
+        return d
 
-    def get_tuple_as_str(self, idx) -> dict[str, str]:
-        # WARNING: THIS IS A MIXUP OF START AND GUIDE
-        # YOU MAY NEED TO SWAP THEM IF YOU USE AN OLD MODEL
-        sample = self.samples[idx]
-        left = sample["left"].item()
-        middle = sample["middle"].item()
-        right = sample["right"].item()
-        return {"left": left, "middle": middle, "right": right}
-
-    def _process_raw(self, rank: int):
+    def _process_raw(self):
         if not self.force_reload and self.raw_path.is_file():
             return
 
-        df = loading.load_df(self.json_root, rank)
+        df = loading.load_df(self.json_root)
         df.write_parquet(self.raw_path)
 
-    def _process(self, rank: int) -> pl.DataFrame:
-        if not self.force_reload and self.processed_path.is_file():
-            df = pl.read_parquet(self.processed_path)
-            if self.len_limit:
-                return df.limit(self.len_limit)
-            return df
+    def _process(self) -> pl.DataFrame:
+        # if not self.force_reload and self.processed_path.is_file() and not needs_caching:
+        #     df = pl.read_parquet(self.processed_path)
+        #     if self.len_limit:
+        #         return df.limit(self.len_limit)
+        #     return df
 
         raw_data = pl.read_parquet(self.raw_path)
         expl_chains = raw_data.get_column("explanation_chain")
@@ -88,32 +83,55 @@ class CustomDataset(data.Dataset):
         # picked_tripples = [self._pick_recursive_indices(len(chain) - 1) for chain in expl_chains]
         picked_tripples = [self._pick_fixed_distance_indices(len(chain) - 1) for chain in expl_chains]
         length = sum([len(chain_pairs) for chain_pairs in picked_tripples])
-        rank0print(rank, f"Total pairs: {length}")
+        print(f"Total pairs: {length}")
 
-        total_samples = {"left": [], "middle": [], "right": [], "distance": []}
+        total_samples = []
+        idx = 0
+
+        self.samples_folder.mkdir(exist_ok=True, parents=True)
         for chain, tripple in zip(expl_chains, picked_tripples):
             for left, middle, right in tripple:
                 right = int(right)
                 left = int(left)
                 middle = int(middle)
-                total_samples["left"].append(str(chain[left]))
-                total_samples["middle"].append(str(chain[right]))
-                total_samples["right"].append(str(chain[middle]))
-                total_samples["distance"].append(middle / (right - left))
+                left_str = str(chain[left])
+                middle_str = str(chain[middle])
+                right_str = str(chain[right])
 
-        df = pl.DataFrame(total_samples)
+                total_samples.append(
+                    {"left": left_str, "right": right_str, "middle": middle_str, "distance": middle / (right - left)}
+                )
+                idx += 1
+                # total_samples[idx]["left"].append(left_str)
+                # total_samples[idx]["right"].append(middle_str)
+                # total_samples[idx]["middle"].append(right_str)
+                # total_samples[idx]["distance"].append(middle / (right - left))
+
+        print("all pairs generated")
+
+        if sum(1 for x in self.samples_folder.glob("*") if x.is_file()) != len(total_samples):
+            with Pool(processes=8) as pool:
+                pool.starmap(self._cache_sample, enumerate(total_samples))
+
+        df = pl.from_dicts(total_samples)
         df.write_parquet(self.processed_path)
-        rank0print(rank, f"Total samples: {len(df)}")
+        print(f"Total samples: {len(df)}")
 
         if self.len_limit:
             df = df.limit(self.len_limit)
 
-        rank0print(rank, f"Using {len(df)} samples!")
+        print(f"Using {len(df)} samples!")
+        print("Data processed!")
 
-        rank0print(rank, "Data processed!")
         return df
 
-    def _build_vocab(self, _rank: int) -> SimpleVocab:
+    def _cache_sample(self, idx, row):
+        with open(self.sample_json(idx), mode="w", encoding="utf-8") as f:
+            json.dump(row, f)
+        vec_dict = self._vectorize(row["left"], row["middle"], row["right"])
+        torch.save(vec_dict, self.sample_pt(idx))
+
+    def _build_vocab(self) -> SimpleVocab:
         normal_tokens = rise.operators() + ["[constant]", "[variable]"]
         vocab = SimpleVocab(PAD_TOKEN, UNK_TOKEN, MASK_TOKEN, BOS_TOKEN, EOS_TOKEN, normal_tokens)
         vocab.save(self.vocab_path)
@@ -178,6 +196,16 @@ class CustomDataset(data.Dataset):
     def processed_path(self) -> Path:
         return self.cache_dir / Path("processed.parquet")
 
+    @property
+    def samples_folder(self) -> Path:
+        return self.cache_dir / Path("samples")
+
+    def sample_json(self, idx: int) -> Path:
+        return self.samples_folder / f"{idx}.json"
+
+    def sample_pt(self, idx: int) -> Path:
+        return self.samples_folder / f"{idx}.pt"
+
 
 def pyrec_to_tensor(expr: rise.PyRecExpr, vocab: SimpleVocab, k: int) -> tuple[Tensor, Tensor, Tensor]:
     tree_data = expr.to_data()
@@ -221,6 +249,7 @@ class DictCollator:
         self.max_len = max_len
 
     def __call__(self, batch: list[dict[str, Tensor]]) -> tuple[dict[str, Tensor], int]:
+        print("starting to batch thingy")
         # batch is a list of dictionaries
         batched_data = {}
 
@@ -254,6 +283,8 @@ class DictCollator:
             batched_data["tgt_sib_y"] = full_tgt_sib[:, 1:, 1:]
 
             n_tokens = int((full_tgt_ids != self.pad_id).data.sum())
+
+        print(f"batched one thingy {batched_data}")
         return batched_data, n_tokens
 
     def pad_1d(self, samples: list[Tensor], extra_pad: bool) -> Tensor:
@@ -323,7 +354,6 @@ def mk_loaders(
         shuffle=False,
         collate_fn=collator,
     )
-
     return train_dataloader, eval_dataloader
 
 

@@ -34,7 +34,12 @@ from toothless.tree_model.args import DataArguments, TrainingArguments, ModelArg
 
 
 def fsdp_main(
-    rank: int, world_size: int, model_args: ModelArguments, data_args: DataArguments, train_args: TrainingArguments
+    rank: int,
+    world_size: int,
+    model_args: ModelArguments,
+    data_args: DataArguments,
+    train_args: TrainingArguments,
+    dataset: CustomDataset,
 ):
     start_time = datetime.now()
     setup_process_group(rank, world_size)
@@ -44,7 +49,6 @@ def fsdp_main(
     torch.cuda.set_device(rank)
 
     # Load Data
-    dataset = CustomDataset(data_args, rank)
     vocab_size = len(dataset.vocab)
     train_dataloader, eval_dataloader = mk_loaders(rank, world_size, dataset, data_args)
     rank0print(rank, "DataLoaders ready")
@@ -62,6 +66,9 @@ def fsdp_main(
     table, total_params = count_parameters(model)
     rank0print(rank, table)
     rank0print(rank, f"Total Parameters: {total_params}")
+
+    first_thingy = next(iter(copy.deepcopy(train_dataloader)))
+    print(first_thingy)
 
     # FSDP model and Mixed Precision Config
     mixed_precision = MixedPrecision(param_dtype=torch.bfloat16, cast_forward_inputs=True) if train_args.bf16 else None
@@ -230,7 +237,6 @@ def save(
 
     with open(folder / "model_args.json", mode="w", encoding="utf-8") as f:
         f.write(model_args.to_json())
-        json.dump(dataclasses.asdict(model_args), f)
     with open(folder / "data_args.json", mode="w", encoding="utf-8") as f:
         f.write(data_args.to_json())
     with open(folder / "train_args.json", mode="w", encoding="utf-8") as f:
@@ -248,5 +254,7 @@ if __name__ == "__main__":
     ) = parser.parse_args_into_dataclasses()
 
     world_size = torch.cuda.device_count()
-    mp.spawn(fsdp_main, args=(world_size, model_args, data_args, train_args), nprocs=world_size, join=True)  # type: ignore
+    dataset = CustomDataset(data_args)
+
+    mp.spawn(fsdp_main, args=(world_size, model_args, data_args, train_args, dataset), nprocs=world_size, join=True)  # type: ignore
     print("DONE")
