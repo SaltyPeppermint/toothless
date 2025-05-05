@@ -1,7 +1,6 @@
 import copy
 from pathlib import Path
 from datetime import datetime
-from typing import Any
 
 import torch
 from torch import Tensor
@@ -24,7 +23,6 @@ from torch.utils.tensorboard.writer import SummaryWriter
 from tqdm.auto import tqdm
 import transformers
 
-from toothless.tree_model.vocab import SimpleVocab
 from toothless.utils.dist_helper import cleanup_process_group, rank0print, setup_process_group
 from toothless.tree_model.data import CustomDataset, mk_loaders
 from toothless.tree_model.model import ASTTransformer, count_parameters
@@ -38,13 +36,12 @@ def fsdp_main(
     data_args: DataArguments,
     train_args: TrainingArguments,
     dataset: CustomDataset,
+    save_folder: Path,
 ):
-    start_time = datetime.now()
     setup_process_group(rank, world_size)
+    torch.cuda.set_device(rank)
 
     writer = SummaryWriter() if rank == 0 else None
-
-    torch.cuda.set_device(rank)
 
     # Load Data
     vocab_size = len(dataset.vocab)
@@ -110,9 +107,12 @@ def fsdp_main(
             writer,
         )
 
+        # use a barrier to make sure training is done on all ranks
+        save_model(model, save_folder, str(epoch), rank)
+
         # Optionally, evaluate the model on the validation set after each epoch
         if train_args.eval_each_epoch:
-            eval(rank, model, copy.deepcopy(eval_dataloader), criterion, epoch, train_args.epochs, writer)
+            evalulate(rank, model, copy.deepcopy(eval_dataloader), criterion, epoch, train_args.epochs, writer)
 
         cosine_scheduler.step()
 
@@ -123,14 +123,7 @@ def fsdp_main(
         init_end_event.synchronize()
     rank0print(rank, f"CUDA event elapsed time: {init_start_event.elapsed_time(init_end_event) / 1000} sec")
 
-    if train_args.save_model_end:
-        # use a barrier to make sure training is done on all ranks
-        dist.barrier()
-        save_policy = FullStateDictConfig(offload_to_cpu=True, rank0_only=True)
-        with FSDP.state_dict_type(model, StateDictType.FULL_STATE_DICT, save_policy):
-            states = model.state_dict()
-            if rank == 0:
-                save(model_args, data_args, train_args, dataset.vocab, states, start_time)
+    save_model(model, save_folder, "final", rank)
 
     cleanup_process_group()
 
@@ -191,7 +184,7 @@ def train(
     rank0print(rank, f"Epoch: {epoch + 1}/{train_args.epochs} \tTrain Loss: {train_loss:.6f}")
 
 
-def eval(
+def evalulate(
     rank: int,
     model: nn.Module,
     dataloader: DataLoader[dict[str, Tensor]],
@@ -219,25 +212,13 @@ def eval(
     rank0print(rank, f"Epoch: {epoch + 1}/{max_epochs} \tValidation loss: {eval_loss:.4f}")
 
 
-def save(
-    model_args: ModelArguments,
-    data_args: DataArguments,
-    train_args: TrainingArguments,
-    vocab: SimpleVocab,
-    states: dict[str, Any],
-    start_time: datetime,
-):
-    folder = Path(model_args.output_dir) / start_time.strftime("%d-%m-%y-%Y_%H:%M:%S")
-    folder.mkdir(exist_ok=True, parents=True)
-
-    with open(folder / "model_args.json", mode="w", encoding="utf-8") as f:
-        f.write(model_args.to_json())
-    with open(folder / "data_args.json", mode="w", encoding="utf-8") as f:
-        f.write(data_args.to_json())
-    with open(folder / "train_args.json", mode="w", encoding="utf-8") as f:
-        f.write(train_args.to_json())
-    vocab.save(folder / "vocab.json")
-    torch.save(states, f"{folder}/tree_transformer.pt")
+def save_model(model: FSDP, save_folder: Path, suffix: str, rank: int):
+    dist.barrier()
+    save_policy = FullStateDictConfig(offload_to_cpu=True, rank0_only=True)
+    with FSDP.state_dict_type(model, StateDictType.FULL_STATE_DICT, save_policy):
+        states = model.state_dict()
+        if rank == 0:
+            torch.save(states, f"{save_folder}/tree_transformer_{suffix}.pt")
 
 
 if __name__ == "__main__":
@@ -248,8 +229,25 @@ if __name__ == "__main__":
         train_args,
     ) = parser.parse_args_into_dataclasses()
 
-    world_size = torch.cuda.device_count()
     dataset = CustomDataset(data_args)
 
-    mp.spawn(fsdp_main, args=(world_size, model_args, data_args, train_args, dataset), nprocs=world_size, join=True)  # type: ignore
+    start_time = datetime.now()
+    save_folder = Path(model_args.output_dir) / start_time.strftime("%d-%m-%y-%Y_%H:%M:%S")
+    save_folder.mkdir(exist_ok=True, parents=True)
+    with open(save_folder / "model_args.json", mode="w", encoding="utf-8") as f:
+        f.write(model_args.to_json())
+    with open(save_folder / "data_args.json", mode="w", encoding="utf-8") as f:
+        f.write(data_args.to_json())
+    with open(save_folder / "train_args.json", mode="w", encoding="utf-8") as f:
+        f.write(train_args.to_json())
+    dataset.vocab.save(save_folder / "vocab.json")
+
+    world_size = torch.cuda.device_count()
+
+    mp.spawn(
+        fsdp_main,
+        args=(world_size, model_args, data_args, train_args, dataset, save_folder),
+        nprocs=world_size,
+        join=True,
+    )  # type: ignore
     print("DONE")
