@@ -5,6 +5,6 @@ uv run torchrun --nproc_per_node 1 --nnodes 1 --node_rank 0 --master_addr localh
     --logging_steps 1 \
     --num-layers 12 \
     --sample-distance 2 \
-    --epochs 4 \
+    --epochs 1 \
     --warmup-steps 500 \
-    --data-limit 250000
+    --data-limit 1000000
