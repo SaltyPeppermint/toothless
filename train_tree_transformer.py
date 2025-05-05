@@ -244,10 +244,10 @@ if __name__ == "__main__":
 
     world_size = torch.cuda.device_count()
 
-    mp.spawn(
+    mp.spawn(  # type: ignore
         fsdp_main,
         args=(world_size, model_args, data_args, train_args, dataset, save_folder),
         nprocs=world_size,
         join=True,
-    )  # type: ignore
+    )
     print("DONE")

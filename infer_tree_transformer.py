@@ -12,12 +12,7 @@ from eggshell import rise  # type: ignore
 
 from toothless.tree_model.vocab import SimpleVocab
 from toothless.utils.dist_helper import cleanup_process_group, rank0print, setup_process_group
-from toothless.tree_model.data import (
-    CustomDataset,
-    DictCollator,
-    pyrec_to_tensor,
-    split_off_special,
-)  # , CustomDataset
+from toothless.tree_model.data import CustomDataset, DictCollator, pyrec_to_tensor, split_off_special
 from toothless.tree_model.model import ASTTransformer, GreedyGenerator, count_parameters
 from toothless.tree_model.args import DataArguments, InferenceArguments, ModelArguments
 
@@ -26,8 +21,8 @@ def fsdp_main(rank: int, world_size: int, infer_args: InferenceArguments):
     setup_process_group(rank, world_size)
     rank0print(rank, "Distributed Network ready")
     torch.cuda.set_device(rank)
-    # Load Data
 
+    # Load Data
     vocab = SimpleVocab.load(Path(infer_args.folder) / "vocab.json")
     with open(Path(infer_args.folder) / "data_args.json") as f:
         data_args = DataArguments.from_json(f.read())
