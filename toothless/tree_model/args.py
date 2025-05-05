@@ -56,5 +56,6 @@ class TrainingArguments(JSONWizard):
 class InferenceArguments:
     infer_data: str
     folder: str
+    model_suffix: str
     bf16: bool = field(default=True)
     verbose: bool = field(default=False)

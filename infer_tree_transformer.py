@@ -37,7 +37,7 @@ def fsdp_main(rank: int, world_size: int, infer_args: InferenceArguments):
         assert type(model_args) is ModelArguments
 
     # Construct Base Model
-    weights = torch.load(infer_args.folder + "/" + "tree_transformer.pt")
+    weights = torch.load(infer_args.folder + f"/tree_transformer_{infer_args.model_suffix}.pt")
     model = ASTTransformer(model_args, len(vocab), len(vocab), data_args.k, state_dict=weights)
     model.eval()
     generator = GreedyGenerator(model, data_args.max_len, vocab, data_args.k)
@@ -71,8 +71,7 @@ def fsdp_main(rank: int, world_size: int, infer_args: InferenceArguments):
     rank0print(rank, "Inference done!")
     pretty_print_result(rank, vocab, tripples, tripple_ids, generated_ids, infer_args.verbose)
 
-    # DATASET
-
+    # INFER DATASET
     first_n = 4
     rank0print(rank, f"\n=======================\nRunning inference on first {first_n} of dataset ...")
 
