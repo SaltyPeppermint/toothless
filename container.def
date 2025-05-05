@@ -10,3 +10,4 @@ From: python:3.13
     pip install --root-user-action=ignore -r cache/requirements.txt
     # Already installed via the requirements.txt
     # pip install --root-user-action=ignore cache/eggshell-0.0.1-cp313-cp313-manylinux_2_34_x86_64.whl
+    mkdir /beegfs
