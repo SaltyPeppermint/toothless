@@ -22,6 +22,7 @@ class ModelArguments(JSONWizard):
 @dataclass
 class DataArguments(JSONWizard):
     data_path: str = field(metadata={"help": "Path to the training data."})
+    cache_dir: str = field(default="cache")
     split_size: float = field(default=0.9, metadata={"help": "Train/Test split ratio."})
     random_state: int = field(default=42)
     sample_distance: int = field(
