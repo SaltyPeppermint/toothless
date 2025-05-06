@@ -2,14 +2,13 @@ Bootstrap: docker
 From: nvcr.io/nvidia/cuda-dl-base:25.04-cuda12.9-devel-ubuntu24.04
 
 %files
-    cache/requirements.txt cache/requirements.txt
-    cache/eggshell-0.0.1-cp313-cp313-manylinux_2_34_x86_64.whl cache/
+    cache/requirements.txt cache/
+    cache/eggshell-0.0.1-cp312-abi3-manylinux_2_34_x86_64.whl cache/
 
 %post
     # chmod 1777 /tmp  # necessary in case one wants to use apt on our cluster (this can also be done outside the .def file)
-    apt update
-    apt install -y python3-13
-    pip install --root-user-action=ignore -r cache/requirements.txt
-    # Already installed via the requirements.txt
-    # pip install --root-user-action=ignore cache/eggshell-0.0.1-cp313-cp313-manylinux_2_34_x86_64.whl
-    mkdir /beegfs
+    apt-get update
+    apt-get dist-upgrade -y
+    apt-get install -y python3 python3.12-venv
+    python3 -m venv venv
+    venv/bin/pip install -r cache/requirements.txt

@@ -13,15 +13,16 @@ remove-eggshell:
     uv remove eggshell
 
 install-eggshell:
-    cp ../eggshell/target/wheels/eggshell-0.0.1-cp313-cp313-manylinux_2_34_x86_64.whl cache/
-    uv add cache/eggshell-0.0.1-cp313-cp313-manylinux_2_34_x86_64.whl
+    cp ../eggshell/target/wheels/eggshell-0.0.1-cp312-abi3-manylinux_2_34_x86_64.whl cache/
+    uv add cache/eggshell-0.0.1-cp312-abi3-manylinux_2_34_x86_64.whl
 
 install-eggshell-macos:
-    cp ../eggshell/target/wheels/eggshell-0.0.1-cp313-cp313-macosx_11_0_arm64.whl cache/
-    uv add cache/eggshell-0.0.1-cp313-cp313-macosx_11_0_arm64.whl
+    cp ../eggshell/target/wheels/eggshell-0.0.1-cp312-abi3-macosx_11_0_arm64.whl cache/
+    uv add cache/eggshell-0.0.1-cp312-abi3-macosx_11_0_arm64.whl
 
 singularity:
-    sudo singularity build cache/container.sif container.def
+    uv pip compile pyproject.toml -o cache/requirements.txt
+    sudo singularity build --force cache/container.sif container.def
 
 alias ri := reinstall-run
 

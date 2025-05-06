@@ -20,14 +20,17 @@
 
 # load singularity module
 module load singularity/4.0.2
+module load nvidia/cuda/12.2
 
+git clone https://github.com/SaltyPeppermint/toothless /tmp
 ##scp -r /scratch/heinimann/data /tmp
+rsync -av /beegfs/scratch/heinimann/cache /tmp/cache
 
-singularity exec --bind /beegfs:/mnt /scratch/heinimann/container.sif \
-    torchrun --nproc_per_node 1 --nnodes 1 --node_rank 0 --master_addr localhost --master_port 6601 train_tree_transformer.py \
+singularity exec --nv --nvccli --bind /beegfs:/mnt /scratch/heinimann/container.sif \
+    /venv/bin/torchrun --nproc_per_node 1 --nnodes 1 --node_rank 0 --master_addr localhost --master_port 6601 /tmp/toothless/train_tree_transformer.py \
     --data-path "/mnt/scratch/heinimann/data/start_goal_with_expl/start_and_goal-2025-01-29-b33b4ba4-ee88-48b5-981b-c2b809d6504f/0" \
     --cache-dir "/tmp/cache" \
-    --output-dir "~/saved_models" \
+    --output-dir "/mnt/home/users/h/heinimann/saved_models" \
     --save_model_end True \
     --logging_steps 1 \
     --num-layers 12 \
@@ -35,3 +38,6 @@ singularity exec --bind /beegfs:/mnt /scratch/heinimann/container.sif \
     --epochs 1 \
     --warmup-steps 500 \
     --data-limit 1000000
+
+rsync -av /tmp/cache /beegfs/scratch/heinimann/
+rsync -av ~/runs /beegfs/home/users/h/heinimann/scratch/heinimann/
