@@ -95,7 +95,7 @@ class CustomDataset(data.Dataset):
                     )
                     pbar.update()
 
-        df = pl.DataFrame(tripples)
+        df = pl.from_dicts(tripples)
         del tripples
 
         df.write_parquet(self.tripples_path)
@@ -149,10 +149,6 @@ class CustomDataset(data.Dataset):
     @property
     def vocab_path(self) -> Path:
         return self.cache_dir / Path("vocab.json")
-
-    @property
-    def tripple_folder(self) -> Path:
-        return self.cache_dir / Path("tripples")
 
     @property
     def tripples_path(self) -> Path:
