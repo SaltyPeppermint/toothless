@@ -24,9 +24,9 @@ from tqdm.auto import tqdm
 import transformers
 
 from toothless.utils.dist_helper import cleanup_process_group, rank0print, setup_process_group
-from toothless.tree_model.data import CustomDataset, mk_loaders
-from toothless.tree_model.model import ASTTransformer, count_parameters
-from toothless.tree_model.args import DataArguments, TrainingArguments, ModelArguments
+from toothless.data import CustomDataset, mk_loaders
+from toothless.model import ASTTransformer, count_parameters
+from toothless.args import DataArguments, TrainingArguments, ModelArguments
 
 
 def fsdp_main(

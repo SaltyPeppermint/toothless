@@ -7,7 +7,7 @@ import torch.nn.functional as F
 from torch import Tensor
 from torch.nn.parameter import Buffer
 
-from toothless.tree_model.args import ModelArguments
+from toothless.args import ModelArguments
 
 
 class UnEmbedding(nn.Module):

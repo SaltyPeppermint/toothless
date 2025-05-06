@@ -5,12 +5,12 @@ import torch
 
 from eggshell import rise  # type: ignore
 
-from toothless.tree_model.args import ModelArguments
-from toothless.tree_model.components.decoder import ASTDoubleDecoder
-from toothless.tree_model.components.encoder import ASTEncoder
-from toothless.tree_model.components.utils import Embeddings, UnEmbedding
-from toothless.tree_model.data import make_std_mask, partial_to_matrices, split_off_special
-from toothless.tree_model.vocab import SimpleVocab
+from toothless.args import ModelArguments
+from toothless.components.decoder import ASTDoubleDecoder
+from toothless.components.encoder import ASTEncoder
+from toothless.components.utils import Embeddings, UnEmbedding
+from toothless.data import make_std_mask, partial_to_matrices, split_off_special
+from toothless.vocab import SimpleVocab
 
 
 class ASTTransformer(nn.Module):

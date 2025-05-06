@@ -2,8 +2,8 @@ import torch
 import torch.nn as nn
 from torch import Tensor
 
-from toothless.tree_model.args import ModelArguments
-from toothless.tree_model.components.utils import concat_vec
+from toothless.args import ModelArguments
+from toothless.components.utils import concat_vec
 
 
 class RelCoder(nn.Module):

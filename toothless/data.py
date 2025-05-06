@@ -25,8 +25,8 @@ from torch.utils.data import DataLoader
 from tqdm.auto import tqdm
 
 
-from toothless.tree_model.args import DataArguments
-from toothless.tree_model.vocab import BOS_TOKEN, EOS_TOKEN, MASK_TOKEN, PAD_TOKEN, UNK_TOKEN, SimpleVocab
+from toothless.args import DataArguments
+from toothless.vocab import BOS_TOKEN, EOS_TOKEN, MASK_TOKEN, PAD_TOKEN, UNK_TOKEN, SimpleVocab
 from toothless.utils import loading
 
 CHUNK_SIZE = 128
