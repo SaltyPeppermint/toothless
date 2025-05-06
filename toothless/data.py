@@ -96,7 +96,7 @@ class CustomDataset(data.Dataset):
                     pbar.update()
 
         df = pl.from_dicts(tripples)
-        del tripples
+        print("Succesfully turned into dataframe")
 
         df.write_parquet(self.tripples_path)
         print(f"Total samples: {len(df)} saved to disk")
