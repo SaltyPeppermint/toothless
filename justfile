@@ -22,7 +22,7 @@ install-eggshell-macos:
 
 singularity:
     uv pip compile pyproject.toml -o cache/requirements.txt
-    sudo singularity build --force cache/container.sif container.def
+    sudo singularity build --force container.sif container.def
 
 alias ri := reinstall-run
 
