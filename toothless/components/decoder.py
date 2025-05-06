@@ -2,10 +2,10 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch import Tensor
 
-from toothless.args import ModelArguments
-from toothless.components.mha import MHTreeAttention
-from toothless.components.rel_pos import RelCoder
-from toothless.components.utils import FeedForward, stack_layers
+from ..args import ModelArguments
+from .mha import MHTreeAttention
+from .rel_pos import RelCoder
+from .utils import FeedForward, stack_layers
 
 
 class ASTDoubleDecoderLayer(nn.Module):

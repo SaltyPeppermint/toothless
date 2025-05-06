@@ -24,9 +24,9 @@ import torch.nn.functional as F
 from torch.utils.data import DataLoader
 from tqdm.auto import tqdm
 
-from toothless.args import DataArguments
-from toothless.vocab import BOS_TOKEN, EOS_TOKEN, MASK_TOKEN, PAD_TOKEN, UNK_TOKEN, SimpleVocab
-from toothless.utils import loading
+from .args import DataArguments
+from .vocab import BOS_TOKEN, EOS_TOKEN, MASK_TOKEN, PAD_TOKEN, UNK_TOKEN, SimpleVocab
+from .utils import loading
 
 CHUNK_SIZE = 128
 
