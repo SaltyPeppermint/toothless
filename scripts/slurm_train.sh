@@ -18,14 +18,15 @@
 #SBATCH --mail-type=ALL
 #SBATCH --mail-user=heinimann@tu-berlin.de
 
-# load singularity module
+# load singularity (and cuda) on the host module
 # module load singularity/4.0.2
 # module load nvidia/cuda/12.2
 
-rm -rf /tmp/toothless
-git clone https://github.com/SaltyPeppermint/toothless /tmp/toothless
-rm -rf /tmp/runs
-mkdir /tmp/runs
+mkdir -p /tmp/runs && rm -rf /tmp/runs && mkdir -p /tmp/runs
+mkdir -p /tmp/toothless && rm -rf /tmp/toothless
+
+singularity exec --nv --bind /beegfs:/mnt /scratch/heinimann/container.sif \
+    git clone https://github.com/SaltyPeppermint/toothless /tmp/toothless
 
 singularity exec --nv --bind /beegfs:/mnt /scratch/heinimann/container.sif \
     /venv/bin/python3 /tmp/toothless/train_tree_transformer.py \
@@ -40,6 +41,7 @@ singularity exec --nv --bind /beegfs:/mnt /scratch/heinimann/container.sif \
     --sample-distance 2 \
     --epochs 1 \
     --warmup-steps 500 \
-    --data-limit 1000000 # /venv/bin/torchrun --nproc_per_node 1 --nnodes 1 --node_rank 0 --master_addr localhost --master_port 6601 \
+    --data-limit 1000000
 
-cp -r /tmp/runs/* /beegfs/home/users/h/heinimann/runs
+cp -r /tmp/runs/* /mt/home/users/h/heinimann/runs
+# /venv/bin/torchrun --nproc_per_node 1 --nnodes 1 --node_rank 0 --master_addr localhost --master_port 6601 \ &
