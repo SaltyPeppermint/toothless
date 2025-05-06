@@ -20,6 +20,9 @@ install-eggshell-macos:
     cp ../eggshell/target/wheels/eggshell-0.0.1-cp313-cp313-macosx_11_0_arm64.whl cache/
     uv add cache/eggshell-0.0.1-cp313-cp313-macosx_11_0_arm64.whl
 
+singularity:
+    sudo singularity build cache/container.sif container.def
+
 alias ri := reinstall-run
 
 reinstall-run: reinstall run
