@@ -41,7 +41,7 @@ def fsdp_main(
     setup_process_group(rank, world_size)
     torch.cuda.set_device(rank)
 
-    writer = SummaryWriter(log_dir=train_args.run_dir) if rank == 0 else None
+    writer = SummaryWriter(log_dir=train_args.run_log_dir) if rank == 0 else None
 
     # Load Data
     vocab_size = len(dataset.vocab)
