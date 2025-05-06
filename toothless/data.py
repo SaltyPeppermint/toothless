@@ -43,7 +43,7 @@ class CustomDataset(data.Dataset):
         self.len_limit = conf.data_limit
         torch.manual_seed(conf.rng_seed)
 
-        self.cache_dir = Path(conf.cache_dir) / Path(*self.json_root.parts[2:])
+        self.cache_dir = Path(conf.cache_dir) / Path(*self.json_root.parts[-2:])
         self.cache_dir.mkdir(parents=True, exist_ok=True)
 
         self._process_raw()

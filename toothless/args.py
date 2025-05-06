@@ -51,6 +51,7 @@ class TrainingArguments(JSONWizard):
     warmup_ratio: Optional[float] = field(default=0.01)
     bf16: bool = field(default=True)
     trace: bool = field(default=False)
+    run_dir: str | None = field(default=None)
 
 
 @dataclass
