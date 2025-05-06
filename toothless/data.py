@@ -1,5 +1,5 @@
-import json
 from pathlib import Path
+from typing import Sequence
 
 import polars as pl
 
@@ -24,7 +24,6 @@ import torch.nn.functional as F
 from torch.utils.data import DataLoader
 from tqdm.auto import tqdm
 
-
 from toothless.args import DataArguments
 from toothless.vocab import BOS_TOKEN, EOS_TOKEN, MASK_TOKEN, PAD_TOKEN, UNK_TOKEN, SimpleVocab
 from toothless.utils import loading
@@ -42,25 +41,20 @@ class CustomDataset(data.Dataset):
         self.k = conf.k
         self.force_reload = conf.force_reload
         self.len_limit = conf.data_limit
-        torch.manual_seed(conf.random_state)
+        torch.manual_seed(conf.rng_seed)
 
         self.cache_dir = Path(conf.cache_dir) / Path(*self.json_root.parts[2:])
         self.cache_dir.mkdir(parents=True, exist_ok=True)
 
         self._process_raw()
         self.vocab = self._build_vocab()
-        self.length = self._process()
+        self.tripples = self._process()
 
     def __len__(self) -> int:
-        return self.length
+        return len(self.tripples)
 
-    def __getitem__(self, idx: int) -> dict[str, Tensor]:
-        sample = self.get_sample_json(idx)
-        return self._vectorize(sample["left"], sample["middle"], sample["right"])
-
-    def get_sample_json(self, idx: int) -> dict[str, str]:
-        with open(self.tripple_folder / f"{idx}.json", encoding="utf-8") as f:
-            return json.load(f)
+    def __getitem__(self, idx: int) -> dict[str, str]:
+        return self.tripples.row(idx, named=True)
 
     def _process_raw(self):
         if not self.force_reload and self.raw_path.is_file():
@@ -69,52 +63,54 @@ class CustomDataset(data.Dataset):
         df = loading.load_df(self.json_root)
         df.write_parquet(self.raw_path)
 
-    def _process(self) -> int:
+    def _process(self) -> pl.DataFrame:
+        if not self.force_reload and self.tripples_path.is_file():
+            tripples = pl.read_parquet(self.tripples_path)
+            if self.len_limit:
+                tripples = tripples.limit(self.len_limit)
+            return tripples
+
         raw_data = pl.read_parquet(self.raw_path)
         expl_chains = raw_data.get_column("explanation_chain")
 
-        # picked_tripples = [self._pick_recursive_indices(len(chain) - 1) for chain in expl_chains]
         index_tripples = [self._pick_fixed_distance_indices(len(chain) - 1) for chain in expl_chains]
         length = sum([len(chain_pairs) for chain_pairs in index_tripples])
         print(f"Total tripples: {length}")
 
-        self.tripple_folder.mkdir(exist_ok=True, parents=True)
-
-        if sum(1 for x in self.tripple_folder.glob("*") if x.is_file()) == length and not self.force_reload:
-            if self.len_limit:
-                return min(length, self.len_limit)
-            return length
-
-        idx = 0
-
-        with tqdm(total=length, desc="Caching tripples to disk...") as pbar:
+        tripples = []
+        with tqdm(total=length, desc="Creating tripples...") as pbar:
             for chain, index_tripple in zip(expl_chains, index_tripples):
                 for left_idx, middle_idx, right_idx in index_tripple:
                     right_idx = int(right_idx)
                     left_idx = int(left_idx)
                     middle_idx = int(middle_idx)
 
-                    tripple = {
-                        "left": str(chain[left_idx]),
-                        "middle": str(chain[middle_idx]),
-                        "right": str(chain[right_idx]),
-                        "distance": middle_idx / (right_idx - left_idx),
-                    }
-                    with open(self.tripple_folder / f"{idx}.json", encoding="utf-8", mode="w") as f:
-                        json.dump(tripple, f)
-
-                    idx += 1
+                    tripples.append(
+                        {
+                            "left": str(chain[left_idx]),
+                            "middle": str(chain[middle_idx]),
+                            "right": str(chain[right_idx]),
+                            "distance": middle_idx / (right_idx - left_idx),
+                        }
+                    )
                     pbar.update()
 
-        print(f"Total samples: {idx + 1}")
+        df = pl.DataFrame(tripples)
+        del tripples
+
+        df.write_parquet(self.tripples_path)
+        print(f"Total samples: {len(df)} saved to disk")
+
+        # with open(self.tripples_path, encoding="utf-8", mode="w") as f:
+        #     json.dump(tripples, f)
 
         if self.len_limit:
-            idx = min(idx, self.len_limit)
+            df = df.limit(self.len_limit)
 
-        print(f"Using {idx} samples!")
+        print(f"Using {len(df)} samples!")
         print("Data processed!")
 
-        return idx
+        return df
 
     def _build_vocab(self) -> SimpleVocab:
         normal_tokens = rise.operators() + ["[constant]", "[variable]"]
@@ -146,23 +142,6 @@ class CustomDataset(data.Dataset):
         rec(0, max_index, acc, self.sample_distance)
         return acc
 
-    def _vectorize(self, left: str, middle: str, right: str) -> dict:
-        l_ids, l_anc, l_sib = pyrec_to_tensor(rise.PyRecExpr(left), self.vocab, self.k)
-        tgt_ids, tgt_anc, tgt_sib = pyrec_to_tensor(rise.PyRecExpr(middle), self.vocab, self.k)
-        r_ids, r_anc, r_sib = pyrec_to_tensor(rise.PyRecExpr(right), self.vocab, self.k)
-
-        return {
-            "l_ids": l_ids,
-            "l_anc": l_anc,
-            "l_sib": l_sib,
-            "tgt_ids": tgt_ids,
-            "tgt_anc": tgt_anc,
-            "tgt_sib": tgt_sib,
-            "r_ids": r_ids,
-            "r_anc": r_anc,
-            "r_sib": r_sib,
-        }
-
     @property
     def raw_path(self) -> Path:
         return self.cache_dir / Path("df_raw.parquet")
@@ -175,19 +154,9 @@ class CustomDataset(data.Dataset):
     def tripple_folder(self) -> Path:
         return self.cache_dir / Path("tripples")
 
-
-def pyrec_to_tensor(expr: rise.PyRecExpr, vocab: SimpleVocab, k: int) -> tuple[Tensor, Tensor, Tensor]:
-    tree_data = expr.to_data()
-
-    ids = torch.tensor(
-        [vocab.bos_token_id] + [vocab.token2id(node.name) for node in tree_data.nodes()] + [vocab.eos_token_id],
-        dtype=torch.long,
-    )
-
-    anc_matrix = torch.tensor(tree_data.anc_matrix(k, double_pad=True), dtype=torch.long)
-    sib_matrix = torch.tensor(tree_data.sib_matrix(k, double_pad=True), dtype=torch.long)
-
-    return ids, anc_matrix, sib_matrix
+    @property
+    def tripples_path(self) -> Path:
+        return self.cache_dir / Path("tripples.parquet")
 
 
 def make_std_mask(tgt: Tensor, pad_id: int):
@@ -213,48 +182,82 @@ def triangle_matrix(sz: int, device: torch.device | None = None) -> Tensor:
 
 
 class DictCollator:
-    def __init__(self, pad_id: int, max_len: int):
+    def __init__(self, pad_id: int, max_len: int, k: int, vocab: SimpleVocab):
         self.pad_id = pad_id
         self.max_len = max_len
+        self.k = k
+        self.vocab = vocab
 
-    def __call__(self, batch: list[dict[str, Tensor]]) -> tuple[dict[str, Tensor], int]:
+    def __call__(self, tripples: Sequence[dict[str, str]]) -> tuple[dict[str, Tensor], int]:
+        unpadded = [self._vectorize(sample["left"], sample["middle"], sample["right"]) for sample in tripples]
         # batch is a list of dictionaries
-        batched_data = {}
+        batch = {}
 
         # batched_data["distance"] = torch.stack([sample["distance"] for sample in batch])
 
-        batched_data["l_ids"] = self.pad_1d([sample["l_ids"] for sample in batch], False)
-        batched_data["l_anc"] = self.pad_2d([sample["l_anc"] for sample in batch], False)
-        batched_data["l_sib"] = self.pad_2d([sample["l_sib"] for sample in batch], False)
-        batched_data["l_mask"] = (batched_data["l_ids"] == self.pad_id).unsqueeze(1).unsqueeze(1)
+        batch["l_ids"] = self._pad_1d([sample["l_ids"] for sample in unpadded], False)
+        batch["l_anc"] = self._pad_2d([sample["l_anc"] for sample in unpadded], False)
+        batch["l_sib"] = self._pad_2d([sample["l_sib"] for sample in unpadded], False)
+        batch["l_mask"] = (batch["l_ids"] == self.pad_id).unsqueeze(1).unsqueeze(1)
 
-        batched_data["r_ids"] = self.pad_1d([sample["r_ids"] for sample in batch], False)
-        batched_data["r_anc"] = self.pad_2d([sample["r_anc"] for sample in batch], False)
-        batched_data["r_sib"] = self.pad_2d([sample["r_sib"] for sample in batch], False)
-        batched_data["r_mask"] = (batched_data["r_ids"] == self.pad_id).unsqueeze(1).unsqueeze(1)
+        batch["r_ids"] = self._pad_1d([sample["r_ids"] for sample in unpadded], False)
+        batch["r_anc"] = self._pad_2d([sample["r_anc"] for sample in unpadded], False)
+        batch["r_sib"] = self._pad_2d([sample["r_sib"] for sample in unpadded], False)
+        batch["r_mask"] = (batch["r_ids"] == self.pad_id).unsqueeze(1).unsqueeze(1)
 
         n_tokens = 0
-        if all(["tgt_ids" in batch[0], "tgt_anc" in batch[0], "tgt_sib" in batch[0]]):
-            # The _y versions are always shifted right.
-            # For matrices this means right and down.
-            full_tgt_ids = self.pad_1d([sample["tgt_ids"] for sample in batch], True)
-            batched_data["tgt_ids"] = full_tgt_ids[:, :-1]
-            batched_data["tgt_ids_y"] = full_tgt_ids[:, 1:]
-            batched_data["tgt_mask"] = make_std_mask(batched_data["tgt_ids"], self.pad_id)
+        # The _y versions are always shifted right.
+        # For matrices this means right and down.
+        full_tgt_ids = self._pad_1d([sample["tgt_ids"] for sample in unpadded], True)
+        batch["tgt_ids"] = full_tgt_ids[:, :-1]
+        batch["tgt_ids_y"] = full_tgt_ids[:, 1:]
+        batch["tgt_mask"] = make_std_mask(batch["tgt_ids"], self.pad_id)
 
-            full_tgt_anc = self.pad_2d([sample["tgt_anc"] for sample in batch], True)
-            batched_data["tgt_anc"] = full_tgt_anc[:, :-1, :-1]
-            batched_data["tgt_anc_y"] = full_tgt_anc[:, 1:, 1:]
+        full_tgt_anc = self._pad_2d([sample["tgt_anc"] for sample in unpadded], True)
+        batch["tgt_anc"] = full_tgt_anc[:, :-1, :-1]
+        batch["tgt_anc_y"] = full_tgt_anc[:, 1:, 1:]
 
-            full_tgt_sib = self.pad_2d([sample["tgt_sib"] for sample in batch], True)
-            batched_data["tgt_sib"] = full_tgt_sib[:, :-1, :-1]
-            batched_data["tgt_sib_y"] = full_tgt_sib[:, 1:, 1:]
+        full_tgt_sib = self._pad_2d([sample["tgt_sib"] for sample in unpadded], True)
+        batch["tgt_sib"] = full_tgt_sib[:, :-1, :-1]
+        batch["tgt_sib_y"] = full_tgt_sib[:, 1:, 1:]
 
-            n_tokens = int((full_tgt_ids != self.pad_id).data.sum())
+        n_tokens = int((full_tgt_ids != self.pad_id).data.sum())
 
-        return batched_data, n_tokens
+        return batch, n_tokens
 
-    def pad_1d(self, samples: list[Tensor], extra_pad: bool) -> Tensor:
+    def _vectorize(self, left: str, middle: str, right: str) -> dict:
+        l_ids, l_anc, l_sib = self._pyrec_to_tensor(rise.PyRecExpr(left))
+        tgt_ids, tgt_anc, tgt_sib = self._pyrec_to_tensor(rise.PyRecExpr(middle))
+        r_ids, r_anc, r_sib = self._pyrec_to_tensor(rise.PyRecExpr(right))
+
+        return {
+            "l_ids": l_ids,
+            "l_anc": l_anc,
+            "l_sib": l_sib,
+            "tgt_ids": tgt_ids,
+            "tgt_anc": tgt_anc,
+            "tgt_sib": tgt_sib,
+            "r_ids": r_ids,
+            "r_anc": r_anc,
+            "r_sib": r_sib,
+        }
+
+    def _pyrec_to_tensor(self, expr: rise.PyRecExpr) -> tuple[Tensor, Tensor, Tensor]:
+        tree_data = expr.to_data()
+
+        ids = torch.tensor(
+            [self.vocab.bos_token_id]
+            + [self.vocab.token2id(node.name) for node in tree_data.nodes()]
+            + [self.vocab.eos_token_id],
+            dtype=torch.long,
+        )
+
+        anc_matrix = torch.tensor(tree_data.anc_matrix(self.k, double_pad=True), dtype=torch.long)
+        sib_matrix = torch.tensor(tree_data.sib_matrix(self.k, double_pad=True), dtype=torch.long)
+
+        return ids, anc_matrix, sib_matrix
+
+    def _pad_1d(self, samples: list[Tensor], extra_pad: bool) -> Tensor:
         """
         Pad sequences to the same length along one simple dimension
         Generate padding directions depending on max_len
@@ -269,7 +272,7 @@ class DictCollator:
         padded_elements = [F.pad(s, p, "constant", self.pad_id) for s, p in zip(samples, paddings)]
         return torch.stack(padded_elements)
 
-    def pad_2d(self, samples: list[Tensor], extra_pad: bool) -> Tensor:
+    def _pad_2d(self, samples: list[Tensor], extra_pad: bool) -> Tensor:
         """
         Find largest dimensions of the square 2-dimensional matrices (they are always square)
         Generate padding directions depending on largest element in batch
@@ -289,8 +292,10 @@ def mk_loaders(
     rank: int, world_size: int, dataset: CustomDataset, data_args: DataArguments, shuffle: bool = True
 ) -> tuple[DataLoader[dict[str, Tensor]], DataLoader[dict[str, Tensor]]]:
     # Create and load dataset
+    rng = torch.Generator().manual_seed(data_args.rng_seed)
+
     train_dataset, eval_dataset = torch.utils.data.random_split(
-        dataset, [data_args.split_size, 1 - data_args.split_size]
+        dataset, [data_args.split_size, 1 - data_args.split_size], rng
     )
 
     # Create samplers
@@ -300,7 +305,7 @@ def mk_loaders(
     pad_id = dataset.vocab.pad_token_id
     assert pad_id == 0
 
-    collator = DictCollator(pad_id, data_args.max_len)
+    collator = DictCollator(pad_id, data_args.max_len, data_args.k, dataset.vocab)
 
     # Create the dataloaders
     train_dataloader = DataLoader(

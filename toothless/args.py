@@ -24,7 +24,7 @@ class DataArguments(JSONWizard):
     data_path: str = field(metadata={"help": "Path to the training data."})
     cache_dir: str = field(default="cache")
     split_size: float = field(default=0.9, metadata={"help": "Train/Test split ratio."})
-    random_state: int = field(default=42)
+    rng_seed: int = field(default=42)
     sample_distance: int = field(
         default=8, metadata={"help": "Minimum distance when splitting the explanation chains recursively."}
     )
@@ -57,6 +57,8 @@ class TrainingArguments(JSONWizard):
 class InferenceArguments:
     infer_data: str
     folder: str
+    n_train_data: int
+    n_eval_data: int
     model_suffix: str
     bf16: bool = field(default=True)
     verbose: bool = field(default=False)

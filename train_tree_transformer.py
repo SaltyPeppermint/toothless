@@ -33,8 +33,8 @@ def fsdp_main(
     rank: int,
     world_size: int,
     model_args: ModelArguments,
-    data_args: DataArguments,
     train_args: TrainingArguments,
+    data_args: DataArguments,
     dataset: CustomDataset,
     save_folder: Path,
 ):
@@ -244,10 +244,13 @@ if __name__ == "__main__":
 
     world_size = torch.cuda.device_count()
 
-    mp.spawn(  # type: ignore
-        fsdp_main,
-        args=(world_size, model_args, data_args, train_args, dataset, save_folder),
-        nprocs=world_size,
-        join=True,
-    )
+    if world_size <= 1:
+        fsdp_main(0, world_size, model_args, train_args, data_args, dataset, save_folder)
+    else:
+        mp.spawn(  # type: ignore
+            fsdp_main,
+            args=(world_size, model_args, train_args, data_args, dataset, save_folder),
+            nprocs=world_size,
+            join=True,
+        )
     print("DONE")
