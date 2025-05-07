@@ -8,7 +8,7 @@
 #SBATCH --mem=128G                      # 128 GB
 
 #Max Walltime:
-#SBATCH --time=8:00:00 # Expected runtime
+#SBATCH --time=4-00:00:00 # Expected runtime
 
 #Run on GPU-Node:
 #SBATCH --partition=scioi_gpu
@@ -39,7 +39,7 @@ singularity exec --nv --bind /beegfs:/mnt /scratch/heinimann/container.sif \
     --num-layers 12 \
     --sample-distance 2 \
     --epochs 1 \
-    --warmup-steps 500 \
-    --data-limit 1000000
+    --warmup-steps 500
+# --data-limit 1000000
 
 # /venv/bin/torchrun --nproc_per_node 1 --nnodes 1 --node_rank 0 --master_addr localhost --master_port 6601 \ &
