@@ -43,6 +43,7 @@ def fsdp_main(
     writer = SummaryWriter(log_dir=train_args.run_log_dir) if rank == 0 else None
 
     dataset = CustomDataset(data_args)
+    rank0print(rank, "Dataset ready")
 
     # Load Data
     vocab_size = len(dataset.vocab)
