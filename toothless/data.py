@@ -75,11 +75,11 @@ class CustomDataset(data.Dataset):
             and self.rights_path.is_file()
         ):
             with open(self.lefts_path, "rb") as f:
-                lefts = np.load(f)
+                lefts = np.load(f, allow_pickle=True)
             with open(self.middles_path, "rb") as f:
-                middles = np.load(f)
+                middles = np.load(f, allow_pickle=True)
             with open(self.rights_path, "rb") as f:
-                rights = np.load(f)
+                rights = np.load(f, allow_pickle=True)
             if self.len_limit:
                 lefts = lefts[: self.len_limit]
                 middles = middles[: self.len_limit]
