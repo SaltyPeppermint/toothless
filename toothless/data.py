@@ -3,6 +3,10 @@ from typing import Sequence
 
 import polars as pl
 
+import numpy as np
+from numpy.dtypes import StringDType
+
+
 from eggshell import rise  # type: ignore
 
 # from tokenizers import Tokenizer
@@ -48,13 +52,13 @@ class CustomDataset(data.Dataset):
 
         self._process_raw()
         self.vocab = self._build_vocab()
-        self.tripples = self._process()
+        self.lefts, self.middles, self.rights = self._process()
 
     def __len__(self) -> int:
-        return len(self.tripples)
+        return len(self.lefts)
 
     def __getitem__(self, idx: int) -> dict[str, str]:
-        return self.tripples.row(idx, named=True)
+        return {"left": self.lefts[idx], "middle": self.middles[idx], "right": self.rights[idx]}
 
     def _process_raw(self):
         if not self.force_reload and self.raw_path.is_file():
@@ -63,12 +67,24 @@ class CustomDataset(data.Dataset):
         df = loading.load_df(self.json_root)
         df.write_parquet(self.raw_path)
 
-    def _process(self) -> pl.DataFrame:
-        if not self.force_reload and self.tripples_path.is_file():
-            tripples = pl.read_parquet(self.tripples_path)
+    def _process(self) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+        if (
+            not self.force_reload
+            and self.lefts_path.is_file()
+            and self.middles_path.is_file()
+            and self.rights_path.is_file()
+        ):
+            with open(self.lefts_path, "rb") as f:
+                lefts = np.load(f)
+            with open(self.middles_path, "rb") as f:
+                middles = np.load(f)
+            with open(self.rights_path, "rb") as f:
+                rights = np.load(f)
             if self.len_limit:
-                tripples = tripples.limit(self.len_limit)
-            return tripples
+                lefts = lefts[: self.len_limit]
+                middles = middles[: self.len_limit]
+                rights = rights[: self.len_limit]
+            return lefts, middles, rights
 
         raw_data = pl.read_parquet(self.raw_path)
         expl_chains = raw_data.get_column("explanation_chain")
@@ -77,7 +93,11 @@ class CustomDataset(data.Dataset):
         length = sum([len(chain_pairs) for chain_pairs in index_tripples])
         print(f"Total tripples: {length}")
 
-        tripples = []
+        lefts = np.zeros(length, dtype=StringDType())
+        middles = np.zeros(length, dtype=StringDType())
+        rights = np.zeros(length, dtype=StringDType())
+
+        i = 0
         with tqdm(total=length, desc="Creating tripples...") as pbar:
             for chain, index_tripple in zip(expl_chains, index_tripples):
                 for left_idx, middle_idx, right_idx in index_tripple:
@@ -85,32 +105,31 @@ class CustomDataset(data.Dataset):
                     left_idx = int(left_idx)
                     middle_idx = int(middle_idx)
 
-                    tripples.append(
-                        {
-                            "left": str(chain[left_idx]),
-                            "middle": str(chain[middle_idx]),
-                            "right": str(chain[right_idx]),
-                            "distance": middle_idx / (right_idx - left_idx),
-                        }
-                    )
+                    lefts[i] = str(chain[left_idx])
+                    middles[i] = str(chain[middle_idx])
+                    rights[i] = str(chain[right_idx])
+
+                    i += 1
                     pbar.update()
 
-        df = pl.from_dicts(tripples)
-        print("Succesfully turned into dataframe")
+        print(f"Total samples: {len(lefts)} saved to disk")
 
-        df.write_parquet(self.tripples_path)
-        print(f"Total samples: {len(df)} saved to disk")
-
-        # with open(self.tripples_path, encoding="utf-8", mode="w") as f:
-        #     json.dump(tripples, f)
+        with open(self.lefts_path, "wb") as f:
+            np.save(f, lefts)
+        with open(self.middles_path, "wb") as f:
+            np.save(f, middles)
+        with open(self.rights_path, "wb") as f:
+            np.save(f, rights)
 
         if self.len_limit:
-            df = df.limit(self.len_limit)
+            lefts = lefts[: self.len_limit]
+            middles = middles[: self.len_limit]
+            rights = rights[: self.len_limit]
 
-        print(f"Using {len(df)} samples!")
+        # print(f"Using {len(df)} samples!")
         print("Data processed!")
 
-        return df
+        return lefts, middles, rights
 
     def _build_vocab(self) -> SimpleVocab:
         normal_tokens = rise.operators() + ["[constant]", "[variable]"]
@@ -151,8 +170,16 @@ class CustomDataset(data.Dataset):
         return self.cache_dir / Path("vocab.json")
 
     @property
-    def tripples_path(self) -> Path:
-        return self.cache_dir / Path("tripples.parquet")
+    def lefts_path(self) -> Path:
+        return self.cache_dir / Path("lefts.npy")
+
+    @property
+    def middles_path(self) -> Path:
+        return self.cache_dir / Path("middles.npy")
+
+    @property
+    def rights_path(self) -> Path:
+        return self.cache_dir / Path("rights.npy")
 
 
 def make_std_mask(tgt: Tensor, pad_id: int):
