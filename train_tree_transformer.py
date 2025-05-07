@@ -35,13 +35,14 @@ def fsdp_main(
     model_args: ModelArguments,
     train_args: TrainingArguments,
     data_args: DataArguments,
-    dataset: CustomDataset,
     save_folder: Path,
 ):
     setup_process_group(rank, world_size)
     torch.cuda.set_device(rank)
 
     writer = SummaryWriter(log_dir=train_args.run_log_dir) if rank == 0 else None
+
+    dataset = CustomDataset(data_args)
 
     # Load Data
     vocab_size = len(dataset.vocab)
@@ -230,7 +231,6 @@ if __name__ == "__main__":
     ) = parser.parse_args_into_dataclasses()
 
     dataset = CustomDataset(data_args)
-
     start_time = datetime.now()
     save_folder = Path(model_args.output_dir) / start_time.strftime("%d-%m-%y-%Y_%H:%M:%S")
     save_folder.mkdir(exist_ok=True, parents=True)
@@ -245,12 +245,9 @@ if __name__ == "__main__":
     world_size = torch.cuda.device_count()
 
     if world_size <= 1:
-        fsdp_main(0, world_size, model_args, train_args, data_args, dataset, save_folder)
+        fsdp_main(0, world_size, model_args, train_args, data_args, save_folder)
     else:
         mp.spawn(  # type: ignore
-            fsdp_main,
-            args=(world_size, model_args, train_args, data_args, dataset, save_folder),
-            nprocs=world_size,
-            join=True,
+            fsdp_main, args=(world_size, model_args, train_args, data_args, save_folder), nprocs=world_size, join=True
         )
     print("DONE")
