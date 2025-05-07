@@ -22,7 +22,6 @@
 # module load singularity/4.0.2
 # module load nvidia/cuda/12.2
 
-mkdir -p /tmp/runs && rm -rf /tmp/runs && mkdir -p /tmp/runs
 mkdir -p /tmp/toothless && rm -rf /tmp/toothless
 
 singularity exec --nv --bind /beegfs:/mnt /scratch/heinimann/container.sif \
@@ -33,7 +32,7 @@ singularity exec --nv --bind /beegfs:/mnt /scratch/heinimann/container.sif \
     --data-path "/mnt/scratch/heinimann/data/start_goal_with_expl/start_and_goal-2025-01-29-b33b4ba4-ee88-48b5-981b-c2b809d6504f/0" \
     --cache-dir "/mnt/scratch/heinimann/cache" \
     --output-dir "/mnt/home/users/h/heinimann/saved_models" \
-    --run-log-dir "/tmp/runs" \
+    --run-log-dir "/mnt/home/users/h/heinimann/runs" \
     --save_model_end True \
     --batch-size 64 \
     --logging_steps 1 \
@@ -43,5 +42,4 @@ singularity exec --nv --bind /beegfs:/mnt /scratch/heinimann/container.sif \
     --warmup-steps 500 \
     --data-limit 1000000
 
-cp -r /tmp/runs/* /mt/home/users/h/heinimann/runs
 # /venv/bin/torchrun --nproc_per_node 1 --nnodes 1 --node_rank 0 --master_addr localhost --master_port 6601 \ &
