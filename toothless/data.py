@@ -249,9 +249,9 @@ class DictCollator:
         return batch, n_tokens
 
     def _vectorize(self, left: str, middle: str, right: str) -> dict:
-        l_ids, l_anc, l_sib = self._pyrec_to_tensor(rise.PyRecExpr(left))
-        tgt_ids, tgt_anc, tgt_sib = self._pyrec_to_tensor(rise.PyRecExpr(middle))
-        r_ids, r_anc, r_sib = self._pyrec_to_tensor(rise.PyRecExpr(right))
+        l_ids, l_anc, l_sib = self._pyrec_to_tensor(rise.RecExpr(left))
+        tgt_ids, tgt_anc, tgt_sib = self._pyrec_to_tensor(rise.RecExpr(middle))
+        r_ids, r_anc, r_sib = self._pyrec_to_tensor(rise.RecExpr(right))
 
         return {
             "l_ids": l_ids,
@@ -265,7 +265,7 @@ class DictCollator:
             "r_sib": r_sib,
         }
 
-    def _pyrec_to_tensor(self, expr: rise.PyRecExpr) -> tuple[Tensor, Tensor, Tensor]:
+    def _pyrec_to_tensor(self, expr: rise.RecExpr) -> tuple[Tensor, Tensor, Tensor]:
         tree_data = expr.to_data()
 
         ids = torch.tensor(
@@ -353,7 +353,7 @@ def mk_loaders(
 
 
 def partial_to_matrices(partial_tok: list[str], k: int) -> tuple[Tensor, Tensor]:
-    tree_data = rise.partial_parse(partial_tok)
+    tree_data = rise.PartialRecExpr(partial_tok).to_data()
     anc_matrix = torch.tensor(tree_data.anc_matrix(k, double_pad=True), dtype=torch.long)
     sib_matrix = torch.tensor(tree_data.sib_matrix(k, double_pad=True), dtype=torch.long)
     return anc_matrix[:-1, :-1], sib_matrix[:-1, :-1]

@@ -2,13 +2,15 @@ import os
 import sys
 import torch.distributed as dist
 
+from termcolor import cprint
 
-def rank0print(rank, message):
+
+def rank0print(rank: int, message, color: str | tuple[int, int, int] | None = None):
     if rank == 0:
-        print(message)
+        cprint(message, color)
 
 
-def rank0eprint(rank, message):
+def rank0eprint(rank: int, message):
     if rank == 0:
         print(message, file=sys.stderr)
 

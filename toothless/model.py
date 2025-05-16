@@ -131,7 +131,7 @@ class GreedyGenerator(nn.Module):
 
             partial_tok = split_off_special([self.vocab.id2token(i) for i in partial_ids], self.vocab)
 
-            if len(partial_tok) <= rise.count_expected_tokens(partial_tok):
+            if len(partial_tok) <= rise.PartialRecExpr.count_expected_tokens(partial_tok):
                 tgt_anc, tgt_sib = partial_to_matrices(partial_tok, self.k)
                 # Initialize distance matrix with all zeroes meaning no adjacency
                 # Then, for those tokens already generated, add the adjavencies to the matrix

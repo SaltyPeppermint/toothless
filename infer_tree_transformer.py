@@ -100,18 +100,25 @@ def fsdp_main(rank: int, world_size: int, infer_args: InferenceArguments, datase
 
 def pretty_print_result(rank: int, vocab: SimpleVocab, tripples: list[dict[str, str]], generated_ids: list[Tensor]):
     for i, (tripple, generated_id) in enumerate(zip(tripples, generated_ids)):
-        rank0print(rank, f"----------\nExample {i}")
-        rank0print(rank, f"START:\n{tripple['left']}")
-        rank0print(rank, f"GOAL:\n{tripple['middle']}")
-        rank0print(rank, f"GROUND TRUTH:\n{tripple['right']}")
+        rank0print(rank, "----------")
+        rank0print(rank, f"Example {i}", "blue")
+        rank0print(rank, "START:", "green")
+        rank0print(rank, tripple["left"])
+        rank0print(rank, "GOAL:", "green")
+        rank0print(rank, tripple["middle"])
+        rank0print(rank, "GROUND TRUTH:", "green")
+        rank0print(rank, tripple["right"])
 
         raw_guide_tokens = [vocab.id2token(int(id)) for id in generated_id if id]
         guide_tokens = split_off_special(raw_guide_tokens, vocab)
-        if len(guide_tokens) == rise.count_expected_tokens(guide_tokens):
-            guide_s_expr = rise.lower_meta_level([tok for tok in guide_tokens])
-            rank0print(rank, f"GENERATED GUIDE:\n{guide_s_expr}")
+        guide = rise.PartialRecExpr(guide_tokens)
+        if len(guide_tokens) == guide.used_tokens:
+            rank0print(rank, "GENERATED GUIDE:", "green")
+            rank0print(rank, guide.lower_meta_level())
         else:
-            rank0print(rank, f"COULD NOT PROPERLY PARSE GENERATED GUIDE:\n{guide_tokens}")
+            rank0print(rank, "COULD NOT PROPERLY PARSE GENERATED GUIDE. BEST ATTEMPT:", "yellow")
+            rank0print(rank, guide)
+            rank0print(rank, f"Used {guide.used_tokens} out of {len(guide_tokens)}", "yellow")
 
 
 if __name__ == "__main__":

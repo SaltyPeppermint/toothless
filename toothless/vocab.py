@@ -47,7 +47,7 @@ class SimpleVocab:
 
     @property
     def unk_token_id(self) -> int:
-        return self.vocab[self.unk_token_id]
+        return self.vocab[self.unk_token]
 
     @property
     def bos_token_id(self) -> int:

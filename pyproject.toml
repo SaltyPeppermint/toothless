@@ -19,6 +19,7 @@ dependencies = [
     "prettytable>=3.16.0",
     "dataclass-wizard>=0.35.0",
     "eggshell",
+    "termcolor>=3.1.0",
 ]
 
 [tool.pyright]
