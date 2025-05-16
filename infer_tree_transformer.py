@@ -52,7 +52,7 @@ def fsdp_main(rank: int, world_size: int, infer_args: InferenceArguments, datase
 
     data_loader = DictCollator(vocab.pad_token_id, data_args.max_len, data_args.k, vocab)
 
-    # INFER JSON
+    # infer.json
     rank0print(rank, "\n=================\nRunning inference on infer_data.json ...")
     with open(infer_args.infer_data, encoding="utf-8") as f:
         tripples = json.load(f)
@@ -64,10 +64,11 @@ def fsdp_main(rank: int, world_size: int, infer_args: InferenceArguments, datase
     generated_ids = generator(batch)
 
     rank0print(rank, "Inference done!")
-    pretty_print_result(rank, vocab, tripples, generated_ids)
+    p = Path("cache/svgs/infer_data")
+    p.mkdir(parents=True, exist_ok=True)
+    pretty_print_result(rank, vocab, tripples, generated_ids, p)
 
-    # INFER DATASET
-
+    # Running inference on dataset samples
     rng = torch.Generator().manual_seed(data_args.rng_seed)
     train_dataset, eval_dataset = torch.utils.data.random_split(
         dataset, [data_args.split_size, 1 - data_args.split_size], rng
@@ -82,7 +83,9 @@ def fsdp_main(rank: int, world_size: int, infer_args: InferenceArguments, datase
     generated_ids = generator(batch)
 
     rank0print(rank, "Inference done!")
-    pretty_print_result(rank, vocab, tripples, generated_ids)  # type: ignore
+    p = Path("cache/svgs/train_dataset")
+    p.mkdir(parents=True, exist_ok=True)
+    pretty_print_result(rank, vocab, tripples, generated_ids, p)  # type: ignore
 
     rank0print(rank, f"\n=================\nRunning inference on first {infer_args.n_eval_data} of train dataset ...")
     tripples = [eval_dataset[i] for i in range(0, infer_args.n_train_data)]
@@ -93,21 +96,28 @@ def fsdp_main(rank: int, world_size: int, infer_args: InferenceArguments, datase
     generated_ids = generator(batch)
 
     rank0print(rank, "Inference done!")
-    pretty_print_result(rank, vocab, tripples, generated_ids)  # type: ignore
+    p = Path("cache/svgs/eval_dataset")
+    p.mkdir(parents=True, exist_ok=True)
+    pretty_print_result(rank, vocab, tripples, generated_ids, p)  # type: ignore
 
     cleanup_process_group()
 
 
-def pretty_print_result(rank: int, vocab: SimpleVocab, tripples: list[dict[str, str]], generated_ids: list[Tensor]):
+def pretty_print_result(
+    rank: int, vocab: SimpleVocab, tripples: list[dict[str, str]], generated_ids: list[Tensor], svg_path: Path
+):
     for i, (tripple, generated_id) in enumerate(zip(tripples, generated_ids)):
         rank0print(rank, "----------")
         rank0print(rank, f"Example {i}", "blue")
         rank0print(rank, "START:", "green")
         rank0print(rank, tripple["left"])
+        rise.RecExpr(tripple["left"]).to_dot(tripple["left"], str(svg_path / f"{i}_left.svg"))
         rank0print(rank, "GOAL:", "green")
         rank0print(rank, tripple["middle"])
+        rise.RecExpr(tripple["middle"]).to_dot(tripple["middle"], str(svg_path / f"{i}_middle.svg"))
         rank0print(rank, "GROUND TRUTH:", "green")
         rank0print(rank, tripple["right"])
+        rise.RecExpr(tripple["right"]).to_dot(tripple["right"], str(svg_path / f"{i}_right.svg"))
 
         raw_guide_tokens = [vocab.id2token(int(id)) for id in generated_id if id]
         guide_tokens = split_off_special(raw_guide_tokens, vocab)
@@ -119,6 +129,7 @@ def pretty_print_result(rank: int, vocab: SimpleVocab, tripples: list[dict[str, 
             rank0print(rank, "COULD NOT PROPERLY PARSE GENERATED GUIDE. BEST ATTEMPT:", "yellow")
             rank0print(rank, guide)
             rank0print(rank, f"Used {guide.used_tokens} out of {len(guide_tokens)}", "yellow")
+        guide.to_dot(str(guide), str(svg_path / f"{i}_generated.svg"))
 
 
 if __name__ == "__main__":
