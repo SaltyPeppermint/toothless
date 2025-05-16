@@ -5,7 +5,7 @@
 #SBATCH --cpus-per-task=10	            # Give me 10 Cores per process plox
 #SBATCH --gres=gpu:v100s:2	            # Give me 2 V100 plox
 # #SBATCH --gres=gpu:a100:1	            ## Give me 1 A100 plox
-#SBATCH --mem=128G                      # 128 GB
+#SBATCH --mem=250G                      # 250 GB
 
 #Max Walltime:
 #SBATCH --time=4-00:00:00 # Expected runtime
