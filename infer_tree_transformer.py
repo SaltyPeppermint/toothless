@@ -64,7 +64,7 @@ def fsdp_main(rank: int, world_size: int, infer_args: InferenceArguments, datase
     generated_ids = generator(batch)
 
     rank0print(rank, "Inference done!")
-    p = Path("cache/svgs/infer_data")
+    p = Path("viz/asts/infer_data")
     p.mkdir(parents=True, exist_ok=True)
     pretty_print_result(rank, vocab, tripples, generated_ids, p)
 
@@ -83,7 +83,7 @@ def fsdp_main(rank: int, world_size: int, infer_args: InferenceArguments, datase
     generated_ids = generator(batch)
 
     rank0print(rank, "Inference done!")
-    p = Path("cache/svgs/train_dataset")
+    p = Path("viz/asts/train_dataset")
     p.mkdir(parents=True, exist_ok=True)
     pretty_print_result(rank, vocab, tripples, generated_ids, p)  # type: ignore
 
@@ -96,7 +96,7 @@ def fsdp_main(rank: int, world_size: int, infer_args: InferenceArguments, datase
     generated_ids = generator(batch)
 
     rank0print(rank, "Inference done!")
-    p = Path("cache/svgs/eval_dataset")
+    p = Path("viz/asts/eval_dataset")
     p.mkdir(parents=True, exist_ok=True)
     pretty_print_result(rank, vocab, tripples, generated_ids, p)  # type: ignore
 
@@ -111,13 +111,14 @@ def pretty_print_result(
         rank0print(rank, f"Example {i}", "blue")
         rank0print(rank, "START:", "green")
         rank0print(rank, tripple["left"])
-        rise.RecExpr(tripple["left"]).to_dot(tripple["left"], str(svg_path / f"{i}_left.svg"))
+        rise.RecExpr(tripple["left"]).to_dot(tripple["left"], str(svg_path / f"{i}_left.svg"))  # type: ignore
         rank0print(rank, "GOAL:", "green")
         rank0print(rank, tripple["middle"])
-        rise.RecExpr(tripple["middle"]).to_dot(tripple["middle"], str(svg_path / f"{i}_middle.svg"))
+        rise.RecExpr(tripple["middle"]).to_dot(tripple["middle"], str(svg_path / f"{i}_middle.svg"))  # type: ignore
+        rise.RecExpr(tripple["middle"]).to_dot(tripple["middle"], str(svg_path / f"{i}_middle_t.svg"), transparent=True)
         rank0print(rank, "GROUND TRUTH:", "green")
         rank0print(rank, tripple["right"])
-        rise.RecExpr(tripple["right"]).to_dot(tripple["right"], str(svg_path / f"{i}_right.svg"))
+        rise.RecExpr(tripple["right"]).to_dot(tripple["right"], str(svg_path / f"{i}_right.svg"))  # type: ignore
 
         raw_guide_tokens = [vocab.id2token(int(id)) for id in generated_id if id]
         guide_tokens = split_off_special(raw_guide_tokens, vocab)
@@ -129,7 +130,8 @@ def pretty_print_result(
             rank0print(rank, "COULD NOT PROPERLY PARSE GENERATED GUIDE. BEST ATTEMPT:", "yellow")
             rank0print(rank, guide)
             rank0print(rank, f"Used {guide.used_tokens} out of {len(guide_tokens)}", "yellow")
-        guide.to_dot(str(guide), str(svg_path / f"{i}_generated.svg"))
+        guide.to_dot(str(guide), str(svg_path / f"{i}_generated.svg"))  # type: ignore
+        guide.to_dot(str(guide), str(svg_path / f"{i}_generated_t.svg"), transparent=True)
 
 
 if __name__ == "__main__":

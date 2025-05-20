@@ -105,7 +105,7 @@ name = "eggshell"
 version = "0.0.1"
 source = { path = "cache/eggshell-0.0.1-cp312-abi3-manylinux_2_39_x86_64.whl" }
 wheels = [
-    { filename = "eggshell-0.0.1-cp312-abi3-manylinux_2_39_x86_64.whl", hash = "sha256:24f4f94b937563d92db5010a6be6837201b4da3bc6fd82babc26bb7b7186b1e5" },
+    { filename = "eggshell-0.0.1-cp312-abi3-manylinux_2_39_x86_64.whl", hash = "sha256:97a629bc727bb233af2bb45ab50cd37aa84c5187a725f1df4dd9047cbddc5acb" },
 ]
 
 [[package]]
