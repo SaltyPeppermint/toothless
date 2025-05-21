@@ -7,5 +7,5 @@ uv run train_tree_transformer.py \
     --sample-distance 2 \
     --epochs 1 \
     --warmup-steps 500 \
-    --data-limit 1000000
+    --sample-limit 1000000
 #torchrun --nproc_per_node 1 --nnodes 1 --node_rank 0 --master_addr localhost --master_port 6601

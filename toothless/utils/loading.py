@@ -37,10 +37,10 @@ def _load_fragment(data_file: Path) -> pl.DataFrame:
     with open(data_file) as f:
         json_content = json.load(f)
 
-    exprs = rise.PyRecExpr.batch_new([x["sample"] for x in json_content["sample_data"]])
+    exprs = [rise.RecExpr(x["sample"]) for x in json_content["sample_data"]]
     # features = rise.PyRecExpr.batch_simple_features(exprs, var_names, ignore_unknown)
     # schema = rise.PyRecExpr.simple_feature_names(var_names, ignore_unknown)
-    start_term = rise.PyRecExpr(json_content["start_expr"])
+    start_term = rise.RecExpr(json_content["start_expr"])
 
     # df = pl.DataFrame(features, schema=schema, orient="row")
     df = pl.DataFrame()

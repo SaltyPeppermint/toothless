@@ -1,15 +1,9 @@
 from pathlib import Path
 from typing import Sequence
-
-from torch import nn
+import json
+from zipfile import ZipFile
 
 import polars as pl
-import numpy as np
-from numpy.dtypes import StringDType
-
-
-from eggshell import rise  # type: ignore
-
 # from tokenizers import Tokenizer
 # from tokenizers.models import BPE
 # from tokenizers.normalizers import BertNormalizer
@@ -20,9 +14,11 @@ from eggshell import rise  # type: ignore
 # from tokenizers.normalizers import Sequence as NormalizerSequence
 # import matplotlib.pyplot as plt
 
+from eggshell import rise  # type: ignore
 
 import torch
 from torch import Tensor
+from torch import nn
 from torch.utils import data
 from torch.utils.data.distributed import DistributedSampler
 import torch.nn.functional as F
@@ -32,8 +28,6 @@ from tqdm.auto import tqdm
 from .args import DataArguments
 from .vocab import BOS_TOKEN, EOS_TOKEN, MASK_TOKEN, PAD_TOKEN, UNK_TOKEN, SimpleVocab
 from .utils import loading
-
-CHUNK_SIZE = 128
 
 
 class CustomDataset(data.Dataset):
@@ -45,21 +39,37 @@ class CustomDataset(data.Dataset):
         self.sample_distance = conf.sample_distance
         self.k = conf.k
         self.force_reload = conf.force_reload
-        self.len_limit = conf.data_limit
+        self.sample_limit = conf.sample_limit
         torch.manual_seed(conf.rng_seed)
 
-        self.cache_dir = Path(conf.cache_dir) / Path(*self.json_root.parts[-2:])
-        self.cache_dir.mkdir(parents=True, exist_ok=True)
+        self.cache = Path(conf.cache_dir) / Path(*self.json_root.parts[-2:])
+        self.cache.mkdir(parents=True, exist_ok=True)
+
+        self.raw_path = self.cache / "df_raw.parquet"
+        self.vocab_path = self.cache / "vocab.json"
+        self.metadata_path = self.cache / "metadata.json"
+        self.zipped_samples = self.cache / "samples.zip"
+
+        if conf.sample_cache_dir is None:
+            self.sample_cache = self.cache / "samples"
+        else:
+            self.sample_cache = Path(conf.sample_cache_dir)
+        self.sample_cache.mkdir(parents=True, exist_ok=True)
 
         self._process_raw()
         self.vocab = self._build_vocab()
-        self.lefts, self.middles, self.rights = self._process()
+        self.len = self._process()
 
     def __len__(self) -> int:
-        return len(self.lefts)
+        return self.len
 
     def __getitem__(self, idx: int) -> dict[str, str]:
-        return {"left": self.lefts[idx], "middle": self.middles[idx], "right": self.rights[idx]}
+        # with ZipFile(self.zipped_samples) as zip_file:
+        #     b = zip_file.read(f"{idx}.json")
+        #     s = json.loads(b)
+        with open(self.sample_cache / f"{idx}.json") as f:
+            s = json.load(f)
+        return s
 
     def _process_raw(self):
         if not self.force_reload and self.raw_path.is_file():
@@ -68,24 +78,25 @@ class CustomDataset(data.Dataset):
         df = loading.load_df(self.json_root)
         df.write_parquet(self.raw_path)
 
-    def _process(self) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-        if (
-            not self.force_reload
-            and self.lefts_path.is_file()
-            and self.middles_path.is_file()
-            and self.rights_path.is_file()
-        ):
-            with open(self.lefts_path, "rb") as f:
-                lefts = np.load(f, allow_pickle=True)
-            with open(self.middles_path, "rb") as f:
-                middles = np.load(f, allow_pickle=True)
-            with open(self.rights_path, "rb") as f:
-                rights = np.load(f, allow_pickle=True)
-            if self.len_limit:
-                lefts = lefts[: self.len_limit]
-                middles = middles[: self.len_limit]
-                rights = rights[: self.len_limit]
-            return lefts, middles, rights
+    def _process(self) -> int:
+        if not self.force_reload and self.metadata_path.is_file() and self.zipped_samples.is_file():
+            with open(self.metadata_path) as p:
+                metadata = json.load(p)
+
+            k = len(list(self.sample_cache.glob("*.json")))
+            if k == metadata["n_samples"]:
+                print("JSON Cache clean!")
+                if self.sample_limit:
+                    return min(k, self.sample_limit)
+                return k
+
+            print("Extracting from Zip Cache...")
+            with ZipFile(self.zipped_samples) as zip_file:
+                k = len(zip_file.filelist)
+                zip_file.extractall(self.sample_cache)
+            if self.sample_limit:
+                return min(k, self.sample_limit)
+            return k
 
         raw_data = pl.read_parquet(self.raw_path)
         expl_chains = raw_data.get_column("explanation_chain")
@@ -94,43 +105,35 @@ class CustomDataset(data.Dataset):
         length = sum([len(chain_pairs) for chain_pairs in index_tripples])
         print(f"Total tripples: {length}")
 
-        lefts = np.zeros(length, dtype=StringDType())
-        middles = np.zeros(length, dtype=StringDType())
-        rights = np.zeros(length, dtype=StringDType())
-
-        i = 0
+        samples = []
         with tqdm(total=length, desc="Creating tripples...") as pbar:
             for chain, index_tripple in zip(expl_chains, index_tripples):
                 for left_idx, middle_idx, right_idx in index_tripple:
-                    right_idx = int(right_idx)
-                    left_idx = int(left_idx)
-                    middle_idx = int(middle_idx)
+                    sample = {
+                        "left": str(chain[left_idx]),
+                        "middle": str(chain[middle_idx]),
+                        "right": str(chain[right_idx]),
+                    }
 
-                    lefts[i] = str(chain[left_idx])
-                    middles[i] = str(chain[middle_idx])
-                    rights[i] = str(chain[right_idx])
-
-                    i += 1
+                    samples.append(sample)
                     pbar.update()
 
-        print(f"Total samples: {len(lefts)} saved to disk")
+        print(f"Total samples: {len(samples)} saved to disk")
+        with open(self.metadata_path, mode="w", encoding="utf-8") as p:
+            json.dump({"n_samples": len(samples)}, p)
 
-        with open(self.lefts_path, "wb") as f:
-            np.save(f, lefts)
-        with open(self.middles_path, "wb") as f:
-            np.save(f, middles)
-        with open(self.rights_path, "wb") as f:
-            np.save(f, rights)
+        with ZipFile(self.zipped_samples, mode="w") as zip_file:
+            for i, sample in enumerate(tqdm(samples, desc="Saving to zip and cache file...")):
+                with open(self.sample_cache / f"{len(samples)}.json", mode="w", encoding="utf-8") as p:
+                    json.dump(sample, p)
 
-        if self.len_limit:
-            lefts = lefts[: self.len_limit]
-            middles = middles[: self.len_limit]
-            rights = rights[: self.len_limit]
+                zip_file.writestr(f"{i}.json", json.dumps(sample))
 
-        # print(f"Using {len(df)} samples!")
         print("Data processed!")
 
-        return lefts, middles, rights
+        if self.sample_limit:
+            return min(self.sample_limit, len(samples))
+        return len(samples)
 
     def _build_vocab(self) -> SimpleVocab:
         normal_tokens = rise.operators() + ["[constant]", "[variable]"]
@@ -161,26 +164,6 @@ class CustomDataset(data.Dataset):
         acc = set()
         rec(0, max_index, acc, self.sample_distance)
         return acc
-
-    @property
-    def raw_path(self) -> Path:
-        return self.cache_dir / Path("df_raw.parquet")
-
-    @property
-    def vocab_path(self) -> Path:
-        return self.cache_dir / Path("vocab.json")
-
-    @property
-    def lefts_path(self) -> Path:
-        return self.cache_dir / Path("lefts.npy")
-
-    @property
-    def middles_path(self) -> Path:
-        return self.cache_dir / Path("middles.npy")
-
-    @property
-    def rights_path(self) -> Path:
-        return self.cache_dir / Path("rights.npy")
 
 
 def make_std_mask(tgt: Tensor, pad_id: int):

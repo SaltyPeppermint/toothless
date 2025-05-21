@@ -1,4 +1,5 @@
 from dataclasses import dataclass, field
+from email.policy import default
 from typing import Optional
 
 from dataclass_wizard import JSONWizard
@@ -32,7 +33,8 @@ class DataArguments(JSONWizard):
     k: int = field(default=15, metadata={"help": "Max relative positional distance."})
     max_len: int = field(default=128)
     force_reload: bool = field(default=False)
-    data_limit: int | None = field(default=None)
+    sample_limit: int | None = field(default=None)
+    sample_cache_dir: str | None = field(default=None)
 
 
 @dataclass
