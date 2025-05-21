@@ -1,8 +1,9 @@
 from pathlib import Path
 from typing import Sequence
 
-import polars as pl
+from torch import nn
 
+import polars as pl
 import numpy as np
 from numpy.dtypes import StringDType
 
@@ -274,9 +275,9 @@ class DictCollator:
             + [self.vocab.eos_token_id],
             dtype=torch.long,
         )
-
-        anc_matrix = torch.tensor(tree_data.anc_matrix(self.k, double_pad=True), dtype=torch.long)
-        sib_matrix = torch.tensor(tree_data.sib_matrix(self.k, double_pad=True), dtype=torch.long)
+        padder = nn.ConstantPad2d(1, 0)
+        anc_matrix = padder(torch.tensor(tree_data.anc_matrix(self.k), dtype=torch.long))
+        sib_matrix = padder(torch.tensor(tree_data.sib_matrix(self.k), dtype=torch.long))
 
         return ids, anc_matrix, sib_matrix
 
@@ -354,9 +355,11 @@ def mk_loaders(
 
 def partial_to_matrices(partial_tok: list[str], k: int) -> tuple[Tensor, Tensor]:
     tree_data = rise.PartialRecExpr(partial_tok).to_data()
-    anc_matrix = torch.tensor(tree_data.anc_matrix(k, double_pad=True), dtype=torch.long)
-    sib_matrix = torch.tensor(tree_data.sib_matrix(k, double_pad=True), dtype=torch.long)
-    return anc_matrix[:-1, :-1], sib_matrix[:-1, :-1]
+
+    padder = nn.ConstantPad2d((1, 0, 1, 0), 0)
+    anc_matrix = padder(torch.tensor(tree_data.anc_matrix(k), dtype=torch.long))
+    sib_matrix = padder(torch.tensor(tree_data.sib_matrix(k), dtype=torch.long))
+    return anc_matrix, sib_matrix
 
 
 def split_off_special(partial_tok: list[str], vocab: SimpleVocab) -> list[str]:
