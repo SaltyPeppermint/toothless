@@ -169,7 +169,7 @@ def train(
             cosine_scheduler.step()  # Cosine decay
             last_lr = cosine_scheduler.get_last_lr()
 
-        if writer:
+        if writer is not None:
             writer.add_scalar("Train Loss/batch", loss, batch_idx + epoch * len(dataloader))
             writer.add_scalar("Train LR/batch", last_lr[-1], batch_idx + epoch * len(dataloader))
             writer.add_scalar("Toks/in-batch", num_tokens, batch_idx + epoch * len(dataloader))
@@ -180,7 +180,7 @@ def train(
 
     dist.all_reduce(ddp_loss, op=dist.ReduceOp.SUM)
     train_loss = ddp_loss[0] / ddp_loss[1]
-    if writer:
+    if writer is not None:
         writer.add_scalar("Train Loss/epoch", train_loss, epoch + 1)
 
     rank0print(rank, f"Epoch: {epoch + 1}/{train_args.epochs} \tTrain Loss: {train_loss:.6f}")
@@ -208,7 +208,7 @@ def evalulate(
 
     dist.all_reduce(ddp_loss, op=dist.ReduceOp.SUM)
     eval_loss = ddp_loss[0] / ddp_loss[1]
-    if writer:
+    if writer is not None:
         writer.add_scalar("Eval loss/epoch", eval_loss, epoch + 1)
 
     rank0print(rank, f"Epoch: {epoch + 1}/{max_epochs} \tValidation loss: {eval_loss:.4f}")

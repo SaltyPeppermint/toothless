@@ -48,13 +48,13 @@ class CustomDataset(data.Dataset):
         self.raw_path = self.cache / "df_raw.parquet"
         self.vocab_path = self.cache / "vocab.json"
         self.metadata_path = self.cache / "metadata.json"
-        self.zipped_samples = self.cache / "samples.zip"
 
         if conf.sample_cache_dir is None:
             self.sample_cache = self.cache / "samples"
         else:
             self.sample_cache = Path(conf.sample_cache_dir)
         self.sample_cache.mkdir(parents=True, exist_ok=True)
+        self.zipped_samples = self.sample_cache / "samples.zip"
 
         self._process_raw()
         self.vocab = self._build_vocab()
@@ -86,7 +86,7 @@ class CustomDataset(data.Dataset):
             k = len(list(self.sample_cache.glob("*.json")))
             if k == metadata["n_samples"]:
                 print("JSON Cache clean!")
-                if self.sample_limit:
+                if self.sample_limit is not None:
                     return min(k, self.sample_limit)
                 return k
 
@@ -126,12 +126,11 @@ class CustomDataset(data.Dataset):
             for i, sample in enumerate(tqdm(samples, desc="Saving to zip and cache file...")):
                 with open(self.sample_cache / f"{len(samples)}.json", mode="w", encoding="utf-8") as p:
                     json.dump(sample, p)
-
                 zip_file.writestr(f"{i}.json", json.dumps(sample))
 
         print("Data processed!")
 
-        if self.sample_limit:
+        if self.sample_limit is not None:
             return min(self.sample_limit, len(samples))
         return len(samples)
 
