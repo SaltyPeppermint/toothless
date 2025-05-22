@@ -24,10 +24,10 @@ def fsdp_main(rank: int, world_size: int, infer_args: InferenceArguments, datase
 
     # Load Data
     vocab = SimpleVocab.load(Path(infer_args.folder) / "vocab.json")
-    with open(Path(infer_args.folder) / "data_args.json") as f:
+    with open(Path(infer_args.folder) / "data_args.json", encoding="utf-8") as f:
         data_args = DataArguments.from_json(f.read())
         assert type(data_args) is DataArguments
-    with open(Path(infer_args.folder) / "model_args.json") as f:
+    with open(Path(infer_args.folder) / "model_args.json", encoding="utf-8") as f:
         model_args = ModelArguments.from_json(f.read())
         assert type(model_args) is ModelArguments
 
@@ -138,7 +138,7 @@ if __name__ == "__main__":
     parser = transformers.HfArgumentParser(InferenceArguments)  # type: ignore
     infer_args = parser.parse_args_into_dataclasses()[0]
     world_size = torch.cuda.device_count()
-    with open(Path(infer_args.folder) / "data_args.json") as f:
+    with open(Path(infer_args.folder) / "data_args.json", encoding="utf-8") as f:
         data_args = DataArguments.from_json(f.read())
         assert type(data_args) is DataArguments
     dataset = CustomDataset(data_args)

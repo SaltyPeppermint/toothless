@@ -67,7 +67,7 @@ class CustomDataset(data.Dataset):
         # with ZipFile(self.zipped_samples) as zip_file:
         #     b = zip_file.read(f"{idx}.json")
         #     s = json.loads(b)
-        with open(self.sample_cache / f"{idx}.json") as f:
+        with open(self.sample_cache / f"{idx}.json", encoding="utf-8") as f:
             s = json.load(f)
         return s
 
@@ -80,7 +80,7 @@ class CustomDataset(data.Dataset):
 
     def _process(self) -> int:
         if not self.force_reload and self.metadata_path.is_file() and self.zipped_samples.is_file():
-            with open(self.metadata_path) as p:
+            with open(self.metadata_path, encoding="utf-8") as p:
                 metadata = json.load(p)
 
             k = len(list(self.sample_cache.glob("*.json")))

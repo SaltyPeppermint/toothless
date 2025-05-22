@@ -34,7 +34,7 @@ def load_df(data_path: Path) -> pl.DataFrame:
 
 
 def _load_fragment(data_file: Path) -> pl.DataFrame:
-    with open(data_file) as f:
+    with open(data_file, encoding="utf-8") as f:
         json_content = json.load(f)
 
     exprs = [rise.RecExpr(x["sample"]) for x in json_content["sample_data"]]
