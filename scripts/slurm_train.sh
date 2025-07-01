@@ -24,6 +24,10 @@
 
 mkdir -p /tmp/toothless && rm -rf /tmp/toothless
 
+mkdir -p /tmp/sample_cache
+
+cp /mnt/scratch/heinimann/cache/samples/samples.zip /tmp/sample_cache/
+
 singularity exec --nv --bind /beegfs:/mnt /scratch/heinimann/container.sif \
     git clone https://github.com/SaltyPeppermint/toothless /tmp/toothless
 
