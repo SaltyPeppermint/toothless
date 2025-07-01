@@ -54,7 +54,7 @@ class CustomDataset(data.Dataset):
         else:
             self.sample_cache = Path(conf.sample_cache_dir)
         self.sample_cache.mkdir(parents=True, exist_ok=True)
-        self.zipped_samples = self.sample_cache / "samples.zip"
+        self.zipped_samples = self.cache / "samples.zip"
 
         self._process_raw()
         self.vocab = self._build_vocab()
@@ -79,24 +79,24 @@ class CustomDataset(data.Dataset):
         df.write_parquet(self.raw_path)
 
     def _process(self) -> int:
-        if not self.force_reload and self.metadata_path.is_file() and self.zipped_samples.is_file():
+        if not self.force_reload and self.metadata_path.is_file():  # and self.zipped_samples.is_file():
             with open(self.metadata_path, encoding="utf-8") as p:
                 metadata = json.load(p)
 
             k = len(list(self.sample_cache.glob("*.json")))
             if k == metadata["n_samples"]:
-                print("JSON Cache clean!")
+                print("JSON Cache Usable!")
                 if self.sample_limit is not None:
                     return min(k, self.sample_limit)
                 return k
 
-            print("Extracting from Zip Cache...")
-            with ZipFile(self.zipped_samples) as zip_file:
-                k = len(zip_file.filelist)
-                zip_file.extractall(self.sample_cache)
-            if self.sample_limit:
-                return min(k, self.sample_limit)
-            return k
+            # print("Extracting from Zip Cache...")
+            # with ZipFile(self.zipped_samples) as zip_file:
+            #     k = len(zip_file.filelist)
+            #     zip_file.extractall(self.sample_cache)
+            # if self.sample_limit:
+            #     return min(k, self.sample_limit)
+            # return k
 
         raw_data = pl.read_parquet(self.raw_path)
         expl_chains = raw_data.get_column("explanation_chain")
@@ -124,7 +124,7 @@ class CustomDataset(data.Dataset):
 
         with ZipFile(self.zipped_samples, mode="w") as zip_file:
             for i, sample in enumerate(tqdm(samples, desc="Saving to zip and cache file...")):
-                with open(self.sample_cache / f"{len(samples)}.json", mode="w", encoding="utf-8") as p:
+                with open(self.sample_cache / f"{i}.json", mode="w", encoding="utf-8") as p:
                     json.dump(sample, p)
                 zip_file.writestr(f"{i}.json", json.dumps(sample))
 
