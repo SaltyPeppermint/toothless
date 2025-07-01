@@ -230,6 +230,9 @@ if __name__ == "__main__":
         data_args,
         train_args,
     ) = parser.parse_args_into_dataclasses()
+    assert isinstance(model_args, ModelArguments)
+    assert isinstance(data_args, DataArguments)
+    assert isinstance(train_args, TrainingArguments)
 
     dataset = CustomDataset(data_args)
     start_time = datetime.now()
