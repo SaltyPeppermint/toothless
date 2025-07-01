@@ -92,6 +92,7 @@ class GreedyGenerator(nn.Module):
     def model_device(self) -> torch.device:
         return next(self.parameters()).device
 
+    @torch.no_grad()
     def forward(self, batch: dict[str, Tensor]):
         l_mem = self.model.l_encode(batch)
         r_mem = self.model.r_encode(batch)
@@ -100,9 +101,9 @@ class GreedyGenerator(nn.Module):
         device = self.model_device()
 
         assert self.vocab.pad_token_id == 0
-        batch["tgt_ids"] = torch.zeros(batch_size, self.max_len, requires_grad=False, device=device, dtype=torch.long)
+        batch["tgt_ids"] = torch.zeros(batch_size, self.max_len, device=device, dtype=torch.long)
         batch["tgt_ids"][:, 0] = self.vocab.bos_token_id
-
+        batch["tgt_probs"] = torch.zeros(batch_size, self.max_len, device=device, dtype=torch.float)
         finished_flags = torch.full((batch_size,), False).to(device)
 
         for i in range(self.max_len - 1):
@@ -114,14 +115,17 @@ class GreedyGenerator(nn.Module):
             out = self.model.unembedding(decoder_outputs)
             fresh_out = out[:, i, :].squeeze(1)
 
-            _prob, next_token = torch.max(fresh_out, dim=-1)
+            prob, next_token = torch.max(fresh_out, dim=-1)
+            print(next_token)
+            print(prob)
             batch["tgt_ids"][:, i + 1] = next_token
+            batch["tgt_probs"][:, i + 1] = torch.exp(prob)
 
             finished_flags = finished_flags | next_token == self.vocab.eos_token_id
             if torch.all(finished_flags):
                 break
 
-        return batch["tgt_ids"]
+        return batch["tgt_ids"], batch["tgt_probs"]
 
     def pos_matrices(self, tgt_ids: Tensor) -> tuple[Tensor, Tensor]:
         batch_tgt_anc, batch_tgt_sib = [], []
