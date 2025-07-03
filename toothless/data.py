@@ -336,7 +336,7 @@ def mk_loaders(
 
 
 def partial_to_matrices(partial_tok: list[str], k: int) -> tuple[Tensor, Tensor]:
-    tree_data = rise.PartialRecExpr(partial_tok).to_data()
+    tree_data = rise.GeneratedRecExpr(partial_tok).to_data()
 
     padder = nn.ConstantPad2d((1, 0, 1, 0), 0)
     anc_matrix = padder(torch.tensor(tree_data.anc_matrix(k), dtype=torch.long))

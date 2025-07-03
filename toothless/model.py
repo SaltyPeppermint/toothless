@@ -116,8 +116,7 @@ class GreedyGenerator(nn.Module):
             fresh_out = out[:, i, :].squeeze(1)
 
             prob, next_token = torch.max(fresh_out, dim=-1)
-            print(next_token)
-            print(prob)
+
             batch["tgt_ids"][:, i + 1] = next_token
             batch["tgt_probs"][:, i + 1] = torch.exp(prob)
 
@@ -136,7 +135,7 @@ class GreedyGenerator(nn.Module):
             partial_tok = split_off_special([self.vocab.id2token(i) for i in partial_ids], self.vocab)
 
             # If nothing generated we cant pad anything
-            if 0 < len(partial_tok) <= rise.PartialRecExpr.count_expected_tokens(partial_tok):
+            if 0 < len(partial_tok) <= rise.GeneratedRecExpr.count_expected_tokens(partial_tok):
                 tgt_anc, tgt_sib = partial_to_matrices(partial_tok, self.k)
                 # Initialize distance matrix with all zeroes meaning no adjacency
                 # Then, for those tokens already generated, add the adjavencies to the matrix
