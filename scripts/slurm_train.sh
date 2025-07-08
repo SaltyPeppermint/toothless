@@ -8,7 +8,7 @@
 #SBATCH --mem=250G                      # 250 GB
 
 #Max Walltime:
-#SBATCH --time=4-00:00:00 # Expected runtime
+#SBATCH --time=7-00:00:00 # Expected runtime
 
 #Run on GPU-Node:
 #SBATCH --partition=scioi_gpu
@@ -24,9 +24,7 @@
 
 mkdir -p /tmp/toothless && rm -rf /tmp/toothless
 
-mkdir -p /tmp/sample_cache
-
-cp /mnt/scratch/heinimann/cache/samples/samples.zip /tmp/sample_cache/
+mkdir -p /tmp/sample_cache && rm -rf /tmp/sample_cache
 
 singularity exec --nv --bind /beegfs:/mnt /scratch/heinimann/container.sif \
     git clone https://github.com/SaltyPeppermint/toothless /tmp/toothless
@@ -42,7 +40,7 @@ singularity exec --nv --bind /beegfs:/mnt /scratch/heinimann/container.sif \
     --batch-size 64 \
     --logging_steps 1 \
     --num-layers 12 \
-    --sample-distance 2 \
+    --sample-distance 8 \
     --epochs 1 \
     --warmup-steps 500
 # --data-limit 1000000

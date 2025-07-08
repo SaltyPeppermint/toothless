@@ -59,8 +59,9 @@ class TrainingArguments(JSONWizard):
 class InferenceArguments:
     infer_data: str
     folder: str
-    n_train_data: int
-    n_eval_data: int
+    n_train_data: int | None
+    n_eval_data: int | None
+    batch_size: int
     model_suffix: str
     bf16: bool = field(default=True)
     verbose: bool = field(default=False)
