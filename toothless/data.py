@@ -1,7 +1,6 @@
 from pathlib import Path
 from typing import Sequence
 import json
-from zipfile import ZipFile
 
 import polars as pl
 # from tokenizers import Tokenizer
@@ -54,7 +53,6 @@ class CustomDataset(data.Dataset):
         else:
             self.sample_cache = Path(conf.sample_cache_dir)
         self.sample_cache.mkdir(parents=True, exist_ok=True)
-        self.zipped_samples = self.cache / "samples.zip"
 
         self._process_raw()
         self.vocab = self._build_vocab()
@@ -116,11 +114,9 @@ class CustomDataset(data.Dataset):
         with open(self.metadata_path, mode="w", encoding="utf-8") as p:
             json.dump({"n_samples": len(samples), "sample_distance": self.sample_distance}, p)
 
-        with ZipFile(self.zipped_samples, mode="w") as zip_file:
-            for i, sample in enumerate(tqdm(samples, desc="Saving to zip and cache file...")):
-                with open(self.sample_cache / f"{i}.json", mode="w", encoding="utf-8") as p:
-                    json.dump(sample, p)
-                zip_file.writestr(f"{i}.json", json.dumps(sample))
+        for i, sample in enumerate(tqdm(samples, desc="Saving to cache...")):
+            with open(self.sample_cache / f"{i}.json", mode="w", encoding="utf-8") as p:
+                json.dump(sample, p)
 
         print("Data processed!")
 
