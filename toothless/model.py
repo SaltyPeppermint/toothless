@@ -3,7 +3,8 @@ from torch import Tensor
 from torch import nn
 import torch
 
-from eggshell import rise  # type: ignore
+from eggshell import rise  # type: ignore # noqa: F401
+
 
 from .args import ModelArguments
 from .components import ASTDoubleDecoder, ASTEncoder, Embeddings, UnEmbedding

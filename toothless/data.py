@@ -83,20 +83,14 @@ class CustomDataset(data.Dataset):
             with open(self.metadata_path, encoding="utf-8") as p:
                 metadata = json.load(p)
 
-            k = len(list(self.sample_cache.glob("*.json")))
-            if k == metadata["n_samples"]:
+            json_files = list(self.sample_cache.glob("*.json"))
+            if len(json_files) == metadata["n_samples"] and self.sample_distance == metadata["sample_distance"]:
                 print("JSON Cache Usable!")
-                if self.sample_limit is not None:
-                    return min(k, self.sample_limit)
-                return k
+                return _min_none(self.sample_limit, len(json_files))
 
-            # print("Extracting from Zip Cache...")
-            # with ZipFile(self.zipped_samples) as zip_file:
-            #     k = len(zip_file.filelist)
-            #     zip_file.extractall(self.sample_cache)
-            # if self.sample_limit:
-            #     return min(k, self.sample_limit)
-            # return k
+        print("JSON Cache *not* usable!")
+        self.sample_cache.rmdir()
+        self.sample_cache.mkdir()
 
         raw_data = pl.read_parquet(self.raw_path)
         expl_chains = raw_data.get_column("explanation_chain")
@@ -120,7 +114,7 @@ class CustomDataset(data.Dataset):
 
         print(f"Total samples: {len(samples)} saved to disk")
         with open(self.metadata_path, mode="w", encoding="utf-8") as p:
-            json.dump({"n_samples": len(samples)}, p)
+            json.dump({"n_samples": len(samples), "sample_distance": self.sample_distance}, p)
 
         with ZipFile(self.zipped_samples, mode="w") as zip_file:
             for i, sample in enumerate(tqdm(samples, desc="Saving to zip and cache file...")):
@@ -130,9 +124,7 @@ class CustomDataset(data.Dataset):
 
         print("Data processed!")
 
-        if self.sample_limit is not None:
-            return min(self.sample_limit, len(samples))
-        return len(samples)
+        return _min_none(self.sample_limit, len(samples))
 
     def _build_vocab(self) -> SimpleVocab:
         normal_tokens = rise.operators() + ["[constant]", "[variable]"]
@@ -142,11 +134,10 @@ class CustomDataset(data.Dataset):
 
     def _pick_fixed_distance_indices(self, max_index: int) -> set[tuple[int, int, int]]:
         s = set()
-        starts = range(0, max_index - self.sample_distance)
-        ends = range(self.sample_distance, max_index)
-        for start, end in zip(starts, ends):
-            midpoint = start + (self.sample_distance // 2)
-            s.add((start, midpoint, end))
+        for start in range(0, max_index - self.sample_distance):
+            end = start + self.sample_distance
+            mid = start + (self.sample_distance // 2)
+            s.add((start, mid, end))
         return s
 
     def _pick_recursive_indices(self, max_index: int) -> set[tuple[int, int, int]]:
@@ -172,7 +163,7 @@ def make_std_mask(tgt: Tensor, pad_id: int):
     # print(f"padding mask dims {tgt_mask.size()}")
     # plt.imsave("padding_mask.png", tgt_mask.squeeze(1))
     # unsqueeze to (1,128,128)
-    triangle_mask = triangle_matrix(tgt.size(-1), device=tgt.device).unsqueeze(0)
+    triangle_mask = _triangle_matrix(tgt.size(-1), device=tgt.device).unsqueeze(0)
     # print(f"triangle mask dimes {triangle_mask.size()}")
     # plt.imsave("triangle_mask.png", triangle_mask[0])
     # unsqueeze to (16,1,128,128)
@@ -182,7 +173,7 @@ def make_std_mask(tgt: Tensor, pad_id: int):
     return tgt_mask
 
 
-def triangle_matrix(sz: int, device: torch.device | None = None) -> Tensor:
+def _triangle_matrix(sz: int, device: torch.device | None = None) -> Tensor:
     m = torch.full((sz, sz), True, device=device, dtype=torch.bool)
     return torch.triu(m, diagonal=1)
 
@@ -350,3 +341,13 @@ def split_off_special(partial_tok: list[str], vocab: SimpleVocab) -> list[str]:
         if j in vocab.special_tokens:
             return partial_tok[:i]
     return partial_tok
+
+
+def _min_none(a: None | int, b: None | int) -> int:
+    match (a, b):
+        case (None, None):
+            raise ValueError((a, b))
+        case (None, x) | (x, None):
+            return x
+        case (x, y):
+            return min(x, y)
