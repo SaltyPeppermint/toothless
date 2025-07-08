@@ -5,12 +5,13 @@ import torch
 from torch import Tensor
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP, MixedPrecision, ShardingStrategy
 import torch.multiprocessing as mp
+from torch.utils.data import Dataset
 
 import transformers
+from tqdm.auto import tqdm
 
-from eggshell import FirstErrorDistance
+from eggshell import FirstErrorDistance, EggshellException
 from eggshell import rise  # type: ignore
-
 
 from toothless.vocab import SimpleVocab
 from toothless.utils.dist_helper import cleanup_process_group, rank0print, setup_process_group
@@ -67,7 +68,7 @@ def fsdp_main(rank: int, world_size: int, infer_args: InferenceArguments, datase
 
     p = Path("viz/asts/infer_data")
     p.mkdir(parents=True, exist_ok=True)
-    batch_process_result(rank, vocab, tripples, batch_ids, batch_probs, p, 0)
+    batch_process_result(rank, vocab, tripples, batch_ids, batch_probs, p, 0, infer_args.verbose)
     del batch_ids, batch_probs, batch
 
     # Running inference on dataset samples
@@ -76,18 +77,36 @@ def fsdp_main(rank: int, world_size: int, infer_args: InferenceArguments, datase
     )
 
     n = infer_args.n_train_data if infer_args.n_train_data else len(train_dataset)
-    batch_infer(rank, n, infer_args.batch_size, vocab, generator, data_loader, train_dataset, "train")
+    train_distances = batch_infer(
+        rank, n, infer_args.batch_size, vocab, generator, data_loader, train_dataset, "train", infer_args.verbose
+    )
 
     n = infer_args.n_eval_data if infer_args.n_eval_data else len(eval_dataset)
-    batch_infer(rank, n, infer_args.batch_size, vocab, generator, data_loader, eval_dataset, "eval")
+    eval_distances = batch_infer(
+        rank, n, infer_args.batch_size, vocab, generator, data_loader, eval_dataset, "eval", infer_args.verbose
+    )
+
+    _print_distance(rank, train_distances, "TRAIN")
+    _print_distance(rank, eval_distances, "TRAIN")
 
     cleanup_process_group()
 
 
-def batch_infer(rank, n, batch_size, vocab, generator, data_loader, dataset, ds_name):
+def batch_infer(
+    rank: int,
+    n: int,
+    batch_size: int,
+    vocab: SimpleVocab,
+    generator: FSDP,
+    data_loader: DictCollator,
+    dataset: Dataset,
+    ds_name: str,
+    verbose: bool,
+) -> list[FirstErrorDistance]:
     rank0print(rank, f"\n=================\nRunning inference on {n} samples of {ds_name} dataset ...")
-    avg_distance = FirstErrorDistance()
-    for i in range(0, n, batch_size):
+    distances = []
+
+    for i in tqdm(range(0, n, batch_size), desc=f"Inference Batch (Batch Size {batch_size})"):
         tripples = [dataset[i] for i in range(i, i + batch_size)]
         batch, _n_tokens = data_loader(tripples)
         batch = {k: v.to(rank) for k, v in batch.items()}
@@ -95,29 +114,36 @@ def batch_infer(rank, n, batch_size, vocab, generator, data_loader, dataset, ds_
 
         p = Path(f"viz/asts/{ds_name}_dataset")
         p.mkdir(parents=True, exist_ok=True)
-        batch_distance = batch_process_result(rank, vocab, tripples, batch_ids, batch_probs, p, i)
-        avg_distance.combine(batch_distance)
+        batch_distance = batch_process_result(rank, vocab, tripples, batch_ids, batch_probs, p, i, verbose)
+        distances.extend(batch_distance)
         del batch_ids, batch_probs, batch
 
-    rank0print(rank, "\n### AVERAGE DISTANCE IN DATASET ###", "yellow")
-    rank0print(rank, f"Hits: {len(avg_distance.hits)}", "yellow")
-    rank0print(rank, f"Misses: {len(avg_distance.misses)}", "yellow")
-    avg_hit_prob = _avg_prob(avg_distance.hit_probabilities)
-    rank0print(rank, f"Average Hit Probability: {avg_hit_prob}", "yellow")
-    avg_miss_prob = _avg_prob(avg_distance.miss_probabilities)
-    rank0print(rank, f"Average Miss Probability: {avg_miss_prob}", "yellow")
-    rank0print(rank, "\n")
+    return distances
 
 
-def _avg_prob(probs: list[float | None]):
+def _avg_prob(probs: list[list[float | None]]):
     avg_prob = 0
     not_none = 0
     for i in probs:
-        if i is not None:
-            avg_prob += i
-            not_none += 1
+        for j in i:
+            if j is not None:
+                avg_prob += j
+                not_none += 1
     avg_prob = avg_prob / not_none
     return avg_prob
+
+
+def _print_distance(rank: int, distances: list[FirstErrorDistance], ds_name: str):
+    rank0print(rank, f"\n### AVERAGE DISTANCE IN {ds_name} DATASET ###", "yellow")
+    n_hits = sum([d.n_hits for d in distances])
+    rank0print(rank, f"Hits: {n_hits}", "yellow")
+    n_misses = sum([d.n_misses for d in distances])
+    rank0print(rank, f"Misses: {n_misses}", "yellow")
+    avg_hit_prob = _avg_prob([d.hit_probabilities() for d in distances if d])
+    rank0print(rank, f"Average Hit Probability: {avg_hit_prob}", "yellow")
+    avg_miss_prob = _avg_prob([d.miss_probabilities() for d in distances if d])
+    rank0print(rank, f"Average Miss Probability: {avg_miss_prob}", "yellow")
+    rank0print(rank, "\n")
 
 
 def batch_process_result(
@@ -128,44 +154,52 @@ def batch_process_result(
     batch_probs: list[Tensor],
     path: Path,
     id_offset: int,
-) -> FirstErrorDistance:
-    batch_distance = FirstErrorDistance()
+    verbose: bool,
+) -> list[FirstErrorDistance]:
+    batch_distance = []
     for i, (tripple, ids, token_probs) in enumerate(zip(tripples, batch_ids, batch_probs)):
         id = i + id_offset
-        rank0print(rank, "----------")
-        rank0print(rank, f"Sample {id}", "blue")
-        rank0print(rank, "LEFT:", "green")
-        rank0print(rank, tripple["left"])
+
         rise.RecExpr(tripple["left"]).to_dot(f"{id} left", str(path / f"{id}_left"))
-        rank0print(rank, "MIDDLE:", "green")
-        rank0print(rank, tripple["middle"])
         middle = rise.RecExpr(tripple["middle"])
         middle.to_dot(f"{id} middle", str(path / f"{id}_middle"))
         middle.to_dot(f"{id} middle", str(path / f"{id}_middle_t"), transparent=True)
-        rank0print(rank, "RIGHT:", "green")
-        rank0print(rank, tripple["right"])
         rise.RecExpr(tripple["right"]).to_dot(f"{i} right", str(path / f"{i}_right"))
+
+        if verbose:
+            rank0print(rank, "----------")
+            rank0print(rank, f"Sample {id}", "blue")
+            rank0print(rank, "LEFT:", "green")
+            rank0print(rank, tripple["left"])
+            rank0print(rank, "MIDDLE:", "green")
+            rank0print(rank, tripple["middle"])
+            rank0print(rank, "RIGHT:", "green")
+            rank0print(rank, tripple["right"])
 
         raw_generated_tokens = [vocab.id2token(int(id)) for id in ids if id]
         generated_tokens = split_off_special(raw_generated_tokens, vocab)
         generated = rise.GeneratedRecExpr(generated_tokens, token_probs=token_probs.tolist())
-        if len(generated_tokens) == generated.used_tokens:
-            rank0print(rank, "GENERATED:", "green")
+        try:
             lowered = generated.lower()
             distance = rise.first_miss_distance(middle, generated)
-            batch_distance.combine(distance)
-            rank0print(rank, lowered)
-            lowered.to_dot(f"{i} generated", str(path / f"{i}_generated"), marked_ids=distance.misses)
+            batch_distance.append(distance)
+            lowered.to_dot(f"{i} generated", str(path / f"{i}_generated"), marked_ids=distance.miss_ids())
             lowered.to_dot(
-                f"{i} generated", str(path / f"{i}_generated_t"), marked_ids=distance.misses, transparent=True
+                f"{i} generated", str(path / f"{i}_generated_t"), marked_ids=distance.miss_ids(), transparent=True
             )
+            if verbose:
+                rank0print(rank, "GENERATED:", "green")
+                rank0print(rank, lowered)
 
-        else:
-            rank0print(rank, "COULD NOT PROPERLY PARSE GENERATED GUIDE. BEST ATTEMPT:", "red")
-            rank0print(rank, generated)
-            rank0print(rank, f"Used {generated.used_tokens} out of {len(generated_tokens)}", "red")
-            generated.to_dot(f"{i} generated", str(path / f"{i}_generated"))  # type: ignore
-            generated.to_dot(f"{i} generated", str(path / f"{i}_generated_t"), transparent=True)
+        except EggshellException as e:
+            generated.to_dot(f"{i} generated (damaged)", str(path / f"{i}_generated"))  # type: ignore
+            generated.to_dot(f"{i} generated (damaged)", str(path / f"{i}_generated_t"), transparent=True)
+            rank0print(rank, "COULD NOT PROPERLY PARSE GENERATED GUIDE.", "red")
+            rank0print(rank, e, "red")
+            if verbose:
+                rank0print(rank, "BEST ATTEMPT:", "red")
+                rank0print(rank, generated)
+                rank0print(rank, f"Used {generated.used_tokens} out of {len(generated_tokens)}", "red")
 
     return batch_distance
 
