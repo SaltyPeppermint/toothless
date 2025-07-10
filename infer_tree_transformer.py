@@ -78,12 +78,30 @@ def fsdp_main(rank: int, world_size: int, infer_args: InferenceArguments, datase
 
     n = infer_args.n_train_data if infer_args.n_train_data else len(train_dataset)
     train_distances = batch_infer(
-        rank, n, infer_args.batch_size, vocab, generator, data_loader, train_dataset, "train", infer_args.verbose
+        rank,
+        n,
+        data_args.sample_distance,
+        infer_args.batch_size,
+        vocab,
+        generator,
+        data_loader,
+        train_dataset,
+        "train",
+        infer_args.verbose,
     )
 
     n = infer_args.n_eval_data if infer_args.n_eval_data else len(eval_dataset)
     eval_distances = batch_infer(
-        rank, n, infer_args.batch_size, vocab, generator, data_loader, eval_dataset, "eval", infer_args.verbose
+        rank,
+        n,
+        data_args.sample_distance,
+        infer_args.batch_size,
+        vocab,
+        generator,
+        data_loader,
+        eval_dataset,
+        "eval",
+        infer_args.verbose,
     )
 
     _print_distance(rank, train_distances, "TRAIN")
@@ -95,6 +113,7 @@ def fsdp_main(rank: int, world_size: int, infer_args: InferenceArguments, datase
 def batch_infer(
     rank: int,
     n: int,
+    sample_distance: int,
     batch_size: int,
     vocab: SimpleVocab,
     generator: FSDP,
@@ -112,7 +131,7 @@ def batch_infer(
         batch = {k: v.to(rank) for k, v in batch.items()}
         batch_ids, batch_probs = generator(batch)
 
-        p = Path(f"viz/asts/{ds_name}_dataset")
+        p = Path(f"viz/asts/d{sample_distance}/{ds_name}_dataset")
         p.mkdir(parents=True, exist_ok=True)
         batch_distance = batch_process_result(rank, vocab, tripples, batch_ids, batch_probs, p, i, verbose)
         distances.extend(batch_distance)

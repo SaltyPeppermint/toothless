@@ -46,12 +46,15 @@ class CustomDataset(data.Dataset):
 
         self.raw_path = self.cache / "df_raw.parquet"
         self.vocab_path = self.cache / "vocab.json"
-        self.metadata_path = self.cache / "metadata.json"
 
         if conf.sample_cache_dir is None:
-            self.sample_cache = self.cache / "samples"
+            self.sample_cache = self.cache / "samples" / f"d{conf.sample_distance}"
+            self.sample_cache_metadata_path = self.cache / "samples" / f"d{conf.sample_distance}_cache_metadata.json"
         else:
-            self.sample_cache = Path(conf.sample_cache_dir)
+            self.sample_cache = Path(conf.sample_cache_dir) / f"d{conf.sample_distance}"
+            self.sample_cache_metadata_path = (
+                Path(conf.sample_cache_dir) / f"d{conf.sample_distance}_cache_metadata.json"
+            )
         self.sample_cache.mkdir(parents=True, exist_ok=True)
 
         self._process_raw()
@@ -77,8 +80,8 @@ class CustomDataset(data.Dataset):
         df.write_parquet(self.raw_path)
 
     def _process(self) -> int:
-        if not self.force_reload and self.metadata_path.is_file():  # and self.zipped_samples.is_file():
-            with open(self.metadata_path, encoding="utf-8") as p:
+        if not self.force_reload and self.sample_cache_metadata_path.is_file():  # and self.zipped_samples.is_file():
+            with open(self.sample_cache_metadata_path, encoding="utf-8") as p:
                 metadata = json.load(p)
 
             json_files = list(self.sample_cache.glob("*.json"))
@@ -111,7 +114,7 @@ class CustomDataset(data.Dataset):
                     pbar.update()
 
         print(f"Total samples: {len(samples)} saved to disk")
-        with open(self.metadata_path, mode="w", encoding="utf-8") as p:
+        with open(self.sample_cache_metadata_path, mode="w", encoding="utf-8") as p:
             json.dump({"n_samples": len(samples), "sample_distance": self.sample_distance}, p)
 
         for i, sample in enumerate(tqdm(samples, desc="Saving to cache...")):
