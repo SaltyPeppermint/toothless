@@ -177,17 +177,17 @@ def batch_process_result(
 ) -> list[FirstErrorDistance]:
     batch_distance = []
     for i, (tripple, ids, token_probs) in enumerate(zip(tripples, batch_ids, batch_probs)):
-        id = i + id_offset
+        sample_id = i + id_offset
 
-        rise.RecExpr(tripple["left"]).to_dot(f"{id} left", str(path / f"{id}_left"))
+        rise.RecExpr(tripple["left"]).to_dot(f"{sample_id} left", str(path / f"{sample_id}_left"))
         middle = rise.RecExpr(tripple["middle"])
-        middle.to_dot(f"{id} middle", str(path / f"{id}_middle"))
-        middle.to_dot(f"{id} middle", str(path / f"{id}_middle_t"), transparent=True)
-        rise.RecExpr(tripple["right"]).to_dot(f"{i} right", str(path / f"{i}_right"))
+        middle.to_dot(f"{sample_id} middle", str(path / f"{sample_id}_middle"))
+        middle.to_dot(f"{sample_id} middle", str(path / f"{sample_id}_middle_t"), transparent=True)
+        rise.RecExpr(tripple["right"]).to_dot(f"{sample_id} right", str(path / f"{sample_id}_right"))
 
         if verbose:
             rank0print(rank, "----------")
-            rank0print(rank, f"Sample {id}", "blue")
+            rank0print(rank, f"Sample {sample_id}", "blue")
             rank0print(rank, "LEFT:", "green")
             rank0print(rank, tripple["left"])
             rank0print(rank, "MIDDLE:", "green")
@@ -195,24 +195,31 @@ def batch_process_result(
             rank0print(rank, "RIGHT:", "green")
             rank0print(rank, tripple["right"])
 
-        raw_generated_tokens = [vocab.id2token(int(id)) for id in ids if id]
+        raw_generated_tokens = [vocab.id2token(int(i)) for i in ids if i]
         generated_tokens = split_off_special(raw_generated_tokens, vocab)
         generated = rise.GeneratedRecExpr(generated_tokens, token_probs=token_probs.tolist())
         try:
             lowered = generated.lower()
             distance = rise.first_miss_distance(middle, generated)
             batch_distance.append(distance)
-            lowered.to_dot(f"{i} generated", str(path / f"{i}_generated"), marked_ids=distance.miss_ids())
             lowered.to_dot(
-                f"{i} generated", str(path / f"{i}_generated_t"), marked_ids=distance.miss_ids(), transparent=True
+                f"{sample_id} generated", str(path / f"{sample_id}_generated"), marked_ids=distance.miss_ids()
+            )
+            lowered.to_dot(
+                f"{sample_id} generated",
+                str(path / f"{sample_id}_generated_t"),
+                marked_ids=distance.miss_ids(),
+                transparent=True,
             )
             if verbose:
                 rank0print(rank, "GENERATED:", "green")
                 rank0print(rank, lowered)
 
         except EggshellException as e:
-            generated.to_dot(f"{i} generated (damaged)", str(path / f"{i}_generated"))  # type: ignore
-            generated.to_dot(f"{i} generated (damaged)", str(path / f"{i}_generated_t"), transparent=True)
+            generated.to_dot(f"{sample_id} generated (damaged)", str(path / f"{sample_id}_generated"))  # type: ignore
+            generated.to_dot(
+                f"{sample_id} generated (damaged)", str(path / f"{sample_id}_generated_t"), transparent=True
+            )
             rank0print(rank, "COULD NOT PROPERLY PARSE GENERATED GUIDE.", "red")
             rank0print(rank, e, "red")
             if verbose:

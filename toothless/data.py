@@ -1,4 +1,5 @@
 from pathlib import Path
+import shutil
 from typing import Sequence
 import json
 
@@ -90,7 +91,7 @@ class CustomDataset(data.Dataset):
                 return _min_none(self.sample_limit, len(json_files))
 
         print("JSON Cache *not* usable!")
-        self.sample_cache.rmdir()
+        shutil.rmtree(self.sample_cache)
         self.sample_cache.mkdir()
 
         raw_data = pl.read_parquet(self.raw_path)
