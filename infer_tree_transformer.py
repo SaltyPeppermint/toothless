@@ -105,7 +105,7 @@ def fsdp_main(rank: int, world_size: int, infer_args: InferenceArguments, datase
     )
 
     _print_distance(rank, train_distances, "TRAIN")
-    _print_distance(rank, eval_distances, "TRAIN")
+    _print_distance(rank, eval_distances, "EVAL")
 
     cleanup_process_group()
 
@@ -158,6 +158,9 @@ def _print_distance(rank: int, distances: list[FirstErrorDistance], ds_name: str
     rank0print(rank, f"Hits: {n_hits}", "yellow")
     n_misses = sum([d.n_misses for d in distances])
     rank0print(rank, f"Misses: {n_misses}", "yellow")
+    perfect_matches = sum([1 for d in distances if d.n_misses == 0])
+    rank0print(rank, f"Perfect matches: {perfect_matches}", "yellow")
+
     avg_hit_prob = _avg_prob([d.hit_probabilities() for d in distances if d])
     rank0print(rank, f"Average Hit Probability: {avg_hit_prob}", "yellow")
     avg_miss_prob = _avg_prob([d.miss_probabilities() for d in distances if d])
