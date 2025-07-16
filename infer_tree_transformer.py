@@ -1,5 +1,6 @@
 import json
 from pathlib import Path
+
 import tyro
 
 import torch
@@ -68,7 +69,7 @@ def fsdp_main(rank: int, world_size: int, infer_args: InferenceArguments, datase
 
     p = Path("viz/asts/infer_data")
     p.mkdir(parents=True, exist_ok=True)
-    batch_process_result(rank, vocab, tripples, batch_ids, batch_probs, p, 0, infer_args.verbose)
+    _batch_process_result(rank, vocab, tripples, batch_ids, batch_probs, p, 0, infer_args.verbose)
     del batch_ids, batch_probs, batch
 
     # Running inference on dataset samples
@@ -77,7 +78,7 @@ def fsdp_main(rank: int, world_size: int, infer_args: InferenceArguments, datase
     )
 
     n = infer_args.n_train_data if infer_args.n_train_data else len(train_dataset)
-    train_distances = batch_infer(
+    train_distances, train_gen_tripples = _batch_infer(
         rank,
         n,
         data_args.sample_distance,
@@ -89,9 +90,13 @@ def fsdp_main(rank: int, world_size: int, infer_args: InferenceArguments, datase
         "train",
         infer_args.verbose,
     )
+    with open("train_gen_tripples", mode="w", encoding="utf-8") as f:
+        json.dump(train_gen_tripples, f)
+    del train_gen_tripples
+    _print_distance(rank, train_distances, "TRAIN")
 
     n = infer_args.n_eval_data if infer_args.n_eval_data else len(eval_dataset)
-    eval_distances = batch_infer(
+    eval_distances, eval_gen_tripples = _batch_infer(
         rank,
         n,
         data_args.sample_distance,
@@ -104,13 +109,16 @@ def fsdp_main(rank: int, world_size: int, infer_args: InferenceArguments, datase
         infer_args.verbose,
     )
 
-    _print_distance(rank, train_distances, "TRAIN")
+    with open("eval_gen_tripples", mode="w", encoding="utf-8") as f:
+        json.dump(eval_gen_tripples, f)
+    del eval_gen_tripples
+
     _print_distance(rank, eval_distances, "EVAL")
 
     cleanup_process_group()
 
 
-def batch_infer(
+def _batch_infer(
     rank: int,
     n: int,
     sample_distance: int,
@@ -121,9 +129,10 @@ def batch_infer(
     dataset: Dataset,
     ds_name: str,
     verbose: bool,
-) -> list[FirstErrorDistance]:
+) -> tuple[list[FirstErrorDistance], list[dict[str, str]]]:
     rank0print(rank, f"\n=================\nRunning inference on {n} samples of {ds_name} dataset ...")
     distances = []
+    gen_tripples = []
 
     for i in tqdm(range(0, n, batch_size), desc=f"Inference Batch (Batch Size {batch_size})"):
         tripples = [dataset[i] for i in range(i, i + batch_size)]
@@ -133,11 +142,14 @@ def batch_infer(
 
         p = Path(f"viz/asts/d{sample_distance}/{ds_name}_dataset")
         p.mkdir(parents=True, exist_ok=True)
-        batch_distance = batch_process_result(rank, vocab, tripples, batch_ids, batch_probs, p, i, verbose)
+        batch_distance, batch_gen_tripples = _batch_process_result(
+            rank, vocab, tripples, batch_ids, batch_probs, p, i, verbose
+        )
         distances.extend(batch_distance)
+        gen_tripples.extend(batch_gen_tripples)
         del batch_ids, batch_probs, batch
 
-    return distances
+    return distances, gen_tripples
 
 
 def _avg_prob(probs: list[list[float | None]]):
@@ -168,7 +180,7 @@ def _print_distance(rank: int, distances: list[FirstErrorDistance], ds_name: str
     rank0print(rank, "\n")
 
 
-def batch_process_result(
+def _batch_process_result(
     rank: int,
     vocab: SimpleVocab,
     tripples: list[dict[str, str]],
@@ -177,8 +189,9 @@ def batch_process_result(
     path: Path,
     id_offset: int,
     verbose: bool,
-) -> list[FirstErrorDistance]:
-    batch_distance = []
+) -> tuple[list[FirstErrorDistance], list[dict[str, str]]]:
+    batch_distances = []
+    batch_gen_tripples = []
     for i, (tripple, ids, token_probs) in enumerate(zip(tripples, batch_ids, batch_probs)):
         sample_id = i + id_offset
 
@@ -204,7 +217,7 @@ def batch_process_result(
         try:
             lowered = generated.lower()
             distance = rise.first_miss_distance(middle, generated)
-            batch_distance.append(distance)
+            batch_distances.append(distance)
             lowered.to_dot(
                 f"{sample_id} generated", str(path / f"{sample_id}_generated"), marked_ids=distance.miss_ids()
             )
@@ -214,6 +227,9 @@ def batch_process_result(
                 marked_ids=distance.miss_ids(),
                 transparent=True,
             )
+            tripple["generated"] = str(lowered)
+            batch_gen_tripples.append(tripple)
+
             if verbose:
                 rank0print(rank, "GENERATED:", "green")
                 rank0print(rank, lowered)
@@ -230,7 +246,7 @@ def batch_process_result(
                 rank0print(rank, generated)
                 rank0print(rank, f"Used {generated.used_tokens} out of {len(generated_tokens)}", "red")
 
-    return batch_distance
+    return batch_distances, batch_gen_tripples
 
 
 if __name__ == "__main__":
