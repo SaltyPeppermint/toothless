@@ -11,20 +11,20 @@ dependencies = [
     "tqdm>=4",
     "scikit-learn>=1.5.2",
     "polars>=1.21.0",
-    "transformers>=4.48.2",
     "python-dotenv>=1.0.1",
-    "tokenizers>=0.21.0",
     "torch-tb-profiler>=0.4.3",
     "standard-imghdr>=3.13.0",
     "prettytable>=3.16.0",
     "dataclass-wizard>=0.35.0",
     "termcolor>=3.1.0",
     "eggshell",
+    "tyro>=0.9.26",
 ]
+# "transformers>=4.48.2",
+# "tokenizers>=0.21.0",
 
 [tool.pyright]
-venvPath = "."
-venv = ".venv"
+exclude = ["data", "cache", "logs"]
 
 [tool.ruff]
 # Allow lines to be as long as 120.

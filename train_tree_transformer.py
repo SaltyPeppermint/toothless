@@ -21,7 +21,7 @@ import torch.multiprocessing as mp
 from torch.utils.tensorboard.writer import SummaryWriter
 
 from tqdm.auto import tqdm
-import transformers
+import tyro
 
 from toothless.utils.dist_helper import cleanup_process_group, rank0print, setup_process_group
 from toothless.data import CustomDataset, mk_loaders
@@ -224,15 +224,9 @@ def save_model(model: FSDP, save_folder: Path, suffix: str, rank: int):
 
 
 if __name__ == "__main__":
-    parser = transformers.HfArgumentParser((ModelArguments, DataArguments, TrainingArguments))  # type: ignore
-    (
-        model_args,
-        data_args,
-        train_args,
-    ) = parser.parse_args_into_dataclasses()
-    assert isinstance(model_args, ModelArguments)
-    assert isinstance(data_args, DataArguments)
-    assert isinstance(train_args, TrainingArguments)
+    model_args = tyro.cli(ModelArguments)
+    data_args = tyro.cli(DataArguments)
+    train_args = tyro.cli(TrainingArguments)
 
     dataset = CustomDataset(data_args)
     start_time = datetime.now()

@@ -56,7 +56,7 @@ class TrainingArguments(JSONWizard):
 
 
 @dataclass
-class InferenceArguments:
+class InferenceArguments(JSONWizard):
     infer_data: str
     folder: str
     n_train_data: int | None

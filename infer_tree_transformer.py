@@ -1,5 +1,6 @@
 import json
 from pathlib import Path
+import tyro
 
 import torch
 from torch import Tensor
@@ -7,7 +8,6 @@ from torch.distributed.fsdp import FullyShardedDataParallel as FSDP, MixedPrecis
 import torch.multiprocessing as mp
 from torch.utils.data import Dataset
 
-import transformers
 from tqdm.auto import tqdm
 
 from eggshell import FirstErrorDistance, EggshellException
@@ -234,9 +234,8 @@ def batch_process_result(
 
 
 if __name__ == "__main__":
-    parser = transformers.HfArgumentParser(InferenceArguments)  # type: ignore
-    infer_args = parser.parse_args_into_dataclasses()[0]
-    assert isinstance(infer_args, InferenceArguments)
+    infer_args = tyro.cli(InferenceArguments)
+    print(vars(infer_args))
     with open(Path(infer_args.folder) / "data_args.json", encoding="utf-8") as f:
         data_args = DataArguments.from_json(f.read())
     assert isinstance(data_args, DataArguments)
