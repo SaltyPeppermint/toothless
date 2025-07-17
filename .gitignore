@@ -5,6 +5,8 @@ viz/
 csv/
 cache/
 *.sif
+# No one wants to track json files right?
+*.json
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
