@@ -90,7 +90,7 @@ def fsdp_main(rank: int, world_size: int, infer_args: InferenceArguments, datase
         "train",
         infer_args.verbose,
     )
-    with open("train_gen_tripples", mode="w", encoding="utf-8") as f:
+    with open("train_gen_tripples.json", mode="w", encoding="utf-8") as f:
         json.dump(train_gen_tripples, f)
     del train_gen_tripples
     _print_distance(rank, train_distances, "TRAIN")
@@ -109,7 +109,7 @@ def fsdp_main(rank: int, world_size: int, infer_args: InferenceArguments, datase
         infer_args.verbose,
     )
 
-    with open("eval_gen_tripples", mode="w", encoding="utf-8") as f:
+    with open("eval_gen_tripples.json", mode="w", encoding="utf-8") as f:
         json.dump(eval_gen_tripples, f)
     del eval_gen_tripples
 
