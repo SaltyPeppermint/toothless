@@ -5,7 +5,8 @@ from torch import Tensor
 from ....args import ModelArguments
 from .mha import MHTreeAttention
 from .rel_pos import RelCoder
-from ..utils import FeedForward, stack_layers
+from .ff import FeedForward
+from ..utils import stack_layers
 
 
 class ASTDoubleDecoderLayer(nn.Module):

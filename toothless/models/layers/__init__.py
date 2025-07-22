@@ -1,1 +1,1 @@
-from .utils import Embeddings, UnEmbedding  # noqa: F401
+from .utils import Embedding  # noqa: F401

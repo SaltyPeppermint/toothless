@@ -4,7 +4,7 @@ import torch
 
 from toothless.models.utils import create_causal_mask, create_padding_mask  # type: ignore # noqa: F401
 
-from .layers import Embeddings
+from .layers import Embedding
 from ..args import ModelArguments
 from ..vocab import SimpleVocab
 
@@ -17,9 +17,9 @@ class VanillaDualTreeTransformer(nn.Module):
 
         self.conf = conf
 
-        self.l_embedding = Embeddings(conf.d_model, src_vocab_size, dropout=conf.dropout, with_pos=True)
-        self.r_embedding = Embeddings(conf.d_model, src_vocab_size, dropout=conf.dropout, with_pos=True)
-        self.tgt_embedding = Embeddings(conf.d_model, tgt_vocab_size, dropout=conf.dropout, with_pos=True)
+        self.l_embedding = Embedding(conf.d_model, src_vocab_size, dropout=conf.dropout, with_pos=True)
+        self.r_embedding = Embedding(conf.d_model, src_vocab_size, dropout=conf.dropout, with_pos=True)
+        self.tgt_embedding = Embedding(conf.d_model, tgt_vocab_size, dropout=conf.dropout, with_pos=True)
 
         # Left Encoder
         l_encoder_layer = nn.TransformerEncoderLayer(

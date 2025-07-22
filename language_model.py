@@ -23,9 +23,9 @@ import sklearn.model_selection
 from tqdm.auto import tqdm
 
 
-import toothless.utils.loading as loading
+import toothless.loading as loading
 from toothless.language_model.args import ModelArguments, DataArguments, TrainingArguments
-from toothless.utils.dist_helper import cleanup_process_group, rank0print, setup_process_group
+from toothless.dist_helper import cleanup_process_group, rank0print, setup_process_group
 
 
 IGNORE_TOKEN_ID = LabelSmoother.ignore_index

@@ -23,7 +23,7 @@ from tqdm.auto import tqdm
 import tyro
 
 from toothless.collators import DisentangledDictCollator, mk_loaders
-from toothless.utils.dist_helper import cleanup_process_group, rank0print, setup_process_group
+from toothless.utils import cleanup_process_group, rank0print, setup_process_group
 from toothless.data import CustomDataset
 from toothless.models.disentangled import DisentangledDualTreeTransformer
 from toothless.models.utils import count_parameters

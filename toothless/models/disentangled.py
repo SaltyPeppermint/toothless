@@ -6,7 +6,7 @@ import torch.nn.functional as F
 from eggshell import rise  # type: ignore
 
 
-from .layers.utils import Embeddings
+from .layers.utils import Embedding
 from .layers.disentangled.decoder import DisASTDoubleDecoder
 from .layers.disentangled.encoder import DisASTEncoder
 from .utils import make_tgt_mask
@@ -21,9 +21,9 @@ class DisentangledDualTreeTransformer(nn.Module):
 
         assert conf.n_heads == conf.anc_heads + conf.sib_heads
 
-        self.l_embedding = Embeddings(conf.d_model, src_vocab_size, dropout=conf.dropout, with_pos=conf.with_pos)
-        self.r_embedding = Embeddings(conf.d_model, src_vocab_size, dropout=conf.dropout, with_pos=conf.with_pos)
-        self.tgt_embedding = Embeddings(conf.d_model, tgt_vocab_size, dropout=conf.dropout, with_pos=conf.with_pos)
+        self.l_embedding = Embedding(conf.d_model, src_vocab_size, dropout=conf.dropout, with_pos=conf.with_pos)
+        self.r_embedding = Embedding(conf.d_model, src_vocab_size, dropout=conf.dropout, with_pos=conf.with_pos)
+        self.tgt_embedding = Embedding(conf.d_model, tgt_vocab_size, dropout=conf.dropout, with_pos=conf.with_pos)
 
         self.l_encoder = DisASTEncoder(conf, k)
         self.r_encoder = DisASTEncoder(conf, k)

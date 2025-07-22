@@ -24,7 +24,7 @@ from tqdm.auto import tqdm
 
 from .args import DataArguments
 from .vocab import BOS_TOKEN, EOS_TOKEN, MASK_TOKEN, PAD_TOKEN, UNK_TOKEN, SimpleVocab
-from .utils import loading
+from . import loading
 
 
 class CustomDataset(data.Dataset):

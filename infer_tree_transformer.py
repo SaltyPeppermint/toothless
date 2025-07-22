@@ -14,7 +14,7 @@ from eggshell import FirstErrorDistance, EggshellException
 from eggshell import rise  # type: ignore
 
 from toothless.vocab import SimpleVocab
-from toothless.utils.dist_helper import cleanup_process_group, rank0print, setup_process_group
+from toothless.utils import cleanup_process_group, rank0print, setup_process_group
 from toothless.collators import DisentangledDictCollator
 from toothless.data import CustomDataset, split_off_special
 from toothless.models.disentangled import DisentangledDualTreeTransformer, DisentangledGreedyGenerator
