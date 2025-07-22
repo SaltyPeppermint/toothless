@@ -2,10 +2,10 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch import Tensor
 
-from ..args import ModelArguments
+from ....args import ModelArguments
 from .mha import MHTreeAttention
 from .rel_pos import RelCoder
-from .utils import FeedForward, stack_layers
+from ..utils import FeedForward, stack_layers
 
 
 class ASTDoubleDecoderLayer(nn.Module):
@@ -76,9 +76,9 @@ class ASTDoubleDecoderLayer(nn.Module):
         return tgt + self.ff_dropout(self.feed_forward(self.ff_norm(tgt)))
 
 
-class ASTDoubleDecoder(RelCoder):
+class DisASTDoubleDecoder(RelCoder):
     def __init__(self, conf: ModelArguments, k: int):
-        super(ASTDoubleDecoder, self).__init__(conf, k)
+        super(DisASTDoubleDecoder, self).__init__(conf, k)
         decoder_layer = ASTDoubleDecoderLayer(conf, activation=F.gelu)
 
         self.layers = stack_layers(decoder_layer, conf.num_layers)

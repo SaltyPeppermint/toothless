@@ -61,9 +61,9 @@ def plot_random_forest(model_name, feature_names, model):
 
     importances = model.feature_importances_
     std_devs = np.std([tree.feature_importances_ for tree in model.estimators_], axis=0)
-    importance_df = pl.from_dict(
-        {"Feature": feature_names, "Importance": importances, "StdDev": std_devs}
-    ).sort(by="Importance", descending=True)
+    importance_df = pl.from_dict({"Feature": feature_names, "Importance": importances, "StdDev": std_devs}).sort(
+        by="Importance", descending=True
+    )
 
     fig = px.bar(
         importance_df,
@@ -84,7 +84,5 @@ def plot_decision_tree(model_name, feature_names, model):
         by="Importance", descending=True
     )
 
-    fig = px.bar(
-        importance_df, x="Feature", y="Importance", title="Feature Importances in Decision Tree"
-    )
+    fig = px.bar(importance_df, x="Feature", y="Importance", title="Feature Importances in Decision Tree")
     fig.write_image(f"{path_prefix}/decision_tree_feature_importance.png", scale=3)

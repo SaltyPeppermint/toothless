@@ -3,12 +3,12 @@ from pathlib import Path
 from datetime import datetime
 
 import torch
-from torch import Tensor
-from torch import nn
-from torch.nn import CrossEntropyLoss
-from torch import optim
-from torch.optim.lr_scheduler import CosineAnnealingLR, LinearLR
+import torch.multiprocessing as mp
+import torch.nn.functional as F
 import torch.distributed as dist
+from torch import nn, optim, Tensor
+from torch.nn import CrossEntropyLoss
+from torch.optim.lr_scheduler import CosineAnnealingLR, LinearLR
 from torch.distributed.fsdp import (
     FullyShardedDataParallel as FSDP,
     MixedPrecision,
@@ -17,15 +17,16 @@ from torch.distributed.fsdp import (
     FullStateDictConfig,
 )
 from torch.utils.data import DataLoader
-import torch.multiprocessing as mp
 from torch.utils.tensorboard.writer import SummaryWriter
 
 from tqdm.auto import tqdm
 import tyro
 
+from toothless.collators import DisentangledDictCollator, mk_loaders
 from toothless.utils.dist_helper import cleanup_process_group, rank0print, setup_process_group
-from toothless.data import CustomDataset, mk_loaders
-from toothless.model import ASTTransformer, count_parameters
+from toothless.data import CustomDataset
+from toothless.models.disentangled import DisentangledDualTreeTransformer
+from toothless.models.utils import count_parameters
 from toothless.args import DataArguments, TrainingArguments, ModelArguments
 
 
@@ -47,14 +48,15 @@ def fsdp_main(
 
     # Load Data
     vocab_size = len(dataset.vocab)
-    train_dataloader, eval_dataloader = mk_loaders(rank, world_size, dataset, data_args)
+    collator = DisentangledDictCollator(dataset.vocab.pad_token_id, data_args.max_len, data_args.k, dataset.vocab)
+    train_dataloader, eval_dataloader = mk_loaders(rank, world_size, dataset, collator, data_args)
     rank0print(rank, "DataLoaders ready")
 
     # Construct Base Model
     init_start_event = torch.cuda.Event(enable_timing=True)
     init_end_event = torch.cuda.Event(enable_timing=True)
 
-    model = ASTTransformer(model_args, vocab_size, vocab_size, data_args.k)
+    model = DisentangledDualTreeTransformer(model_args, vocab_size, vocab_size, data_args.k)
 
     if writer and train_args.trace:
         example_batch, _ = next(iter(copy.deepcopy(train_dataloader)))
@@ -152,7 +154,7 @@ def train(
         batch = {k: v.to(rank) for k, v in batch.items()}
 
         # Forward pass
-        out = model(batch)
+        out = F.log_softmax(model(batch), dim=-1)
         loss = criterion(out.view(-1, out.size(-1)), batch["tgt_ids_y"].view(-1))
 
         # Backwards pass

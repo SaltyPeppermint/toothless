@@ -1,20 +1,23 @@
-from prettytable import PrettyTable
 from torch import Tensor
 from torch import nn
 import torch
+import torch.nn.functional as F
 
-from eggshell import rise  # type: ignore # noqa: F401
-
-
-from .args import ModelArguments
-from .components import ASTDoubleDecoder, ASTEncoder, Embeddings, UnEmbedding
-from .data import make_std_mask, partial_to_matrices, split_off_special
-from .vocab import SimpleVocab
+from eggshell import rise  # type: ignore
 
 
-class ASTTransformer(nn.Module):
+from .layers.utils import Embeddings
+from .layers.disentangled.decoder import DisASTDoubleDecoder
+from .layers.disentangled.encoder import DisASTEncoder
+from .utils import make_tgt_mask
+from ..args import ModelArguments
+from ..data import partial_to_matrices, split_off_special
+from ..vocab import SimpleVocab
+
+
+class DisentangledDualTreeTransformer(nn.Module):
     def __init__(self, conf: ModelArguments, src_vocab_size: int, tgt_vocab_size: int, k: int, state_dict=None):
-        super(ASTTransformer, self).__init__()
+        super(DisentangledDualTreeTransformer, self).__init__()
 
         assert conf.n_heads == conf.anc_heads + conf.sib_heads
 
@@ -22,11 +25,11 @@ class ASTTransformer(nn.Module):
         self.r_embedding = Embeddings(conf.d_model, src_vocab_size, dropout=conf.dropout, with_pos=conf.with_pos)
         self.tgt_embedding = Embeddings(conf.d_model, tgt_vocab_size, dropout=conf.dropout, with_pos=conf.with_pos)
 
-        self.l_encoder = ASTEncoder(conf, k)
-        self.r_encoder = ASTEncoder(conf, k)
-        self.decoder = ASTDoubleDecoder(conf, k)
+        self.l_encoder = DisASTEncoder(conf, k)
+        self.r_encoder = DisASTEncoder(conf, k)
+        self.decoder = DisASTDoubleDecoder(conf, k)
 
-        self.unembedding = UnEmbedding(conf, tgt_vocab_size)
+        self.output_proj = nn.Linear(conf.d_model, tgt_vocab_size)
 
         if state_dict is None:
             for p in self.parameters():
@@ -40,7 +43,7 @@ class ASTTransformer(nn.Module):
         r_mem = self.r_encode(data)
 
         decoder_outputs = self.decode(data, l_mem, r_mem)
-        return self.unembedding(decoder_outputs)
+        return self.output_proj(decoder_outputs)
 
     def l_encode(self, data: dict[str, Tensor]) -> Tensor:
         l_emb = self.l_embedding(data["l_ids"])
@@ -68,22 +71,10 @@ class ASTTransformer(nn.Module):
         )
 
 
-def count_parameters(model: nn.Module) -> tuple[PrettyTable, int]:
-    table = PrettyTable(["Modules", "Parameters"])
-    total_params = 0
-    for name, parameter in model.named_parameters():
-        if not parameter.requires_grad:
-            continue
-        params = parameter.numel()
-        table.add_row([name, params])
-        total_params += params
-    return table, total_params
-
-
-class GreedyGenerator(nn.Module):
+class DisentangledGreedyGenerator(nn.Module):
     # smth about multi gpu and model.module?
-    def __init__(self, model: ASTTransformer, max_len: int, vocab: SimpleVocab, k: int):
-        super(GreedyGenerator, self).__init__()
+    def __init__(self, model: DisentangledDualTreeTransformer, max_len: int, vocab: SimpleVocab, k: int):
+        super(DisentangledGreedyGenerator, self).__init__()
 
         self.model = model
         self.max_len = max_len
@@ -108,18 +99,18 @@ class GreedyGenerator(nn.Module):
         finished_flags = torch.full((batch_size,), False).to(device)
 
         for i in range(self.max_len - 1):
-            batch["tgt_mask"] = make_std_mask(batch["tgt_ids"], 0)
+            batch["tgt_mask"] = make_tgt_mask(batch["tgt_ids"], 0)
             batch["tgt_anc"], batch["tgt_sib"] = self.pos_matrices(batch["tgt_ids"])
 
             batch = {k: v.to(device) for k, v in batch.items()}
             decoder_outputs = self.model.decode(batch, l_mem, r_mem)
-            out = self.model.unembedding(decoder_outputs)
+            out = self.model.output_proj(decoder_outputs)
             fresh_out = out[:, i, :].squeeze(1)
 
-            prob, next_token = torch.max(fresh_out, dim=-1)
+            probs, next_token = torch.max(F.log_softmax(fresh_out, dim=-1))
 
             batch["tgt_ids"][:, i + 1] = next_token
-            batch["tgt_probs"][:, i + 1] = torch.exp(prob)
+            batch["tgt_probs"][:, i + 1] = torch.exp(probs)
 
             finished_flags = finished_flags | next_token == self.vocab.eos_token_id
             if torch.all(finished_flags):

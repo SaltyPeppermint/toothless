@@ -1,14 +1,13 @@
 import json
 from pathlib import Path
 
-import tyro
-
 import torch
 from torch import Tensor
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP, MixedPrecision, ShardingStrategy
 import torch.multiprocessing as mp
 from torch.utils.data import Dataset
 
+import tyro
 from tqdm.auto import tqdm
 
 from eggshell import FirstErrorDistance, EggshellException
@@ -16,8 +15,10 @@ from eggshell import rise  # type: ignore
 
 from toothless.vocab import SimpleVocab
 from toothless.utils.dist_helper import cleanup_process_group, rank0print, setup_process_group
-from toothless.data import CustomDataset, DictCollator, split_off_special
-from toothless.model import ASTTransformer, GreedyGenerator, count_parameters
+from toothless.collators import DisentangledDictCollator
+from toothless.data import CustomDataset, split_off_special
+from toothless.models.disentangled import DisentangledDualTreeTransformer, DisentangledGreedyGenerator
+from toothless.models.utils import count_parameters
 from toothless.args import DataArguments, InferenceArguments, ModelArguments
 
 
@@ -37,9 +38,9 @@ def fsdp_main(rank: int, world_size: int, infer_args: InferenceArguments, datase
 
     # Construct Base Model
     weights = torch.load(infer_args.folder + f"/tree_transformer{infer_args.model_suffix}.pt")
-    model = ASTTransformer(model_args, len(vocab), len(vocab), data_args.k, state_dict=weights)
+    model = DisentangledDualTreeTransformer(model_args, len(vocab), len(vocab), data_args.k, state_dict=weights)
     model.eval()
-    generator = GreedyGenerator(model, data_args.max_len, vocab, data_args.k)
+    generator = DisentangledGreedyGenerator(model, data_args.max_len, vocab, data_args.k)
     rank0print(rank, "Base Model and Generator ready")
 
     table, total_params = count_parameters(model)
@@ -56,7 +57,7 @@ def fsdp_main(rank: int, world_size: int, infer_args: InferenceArguments, datase
 
     rank0print(rank, "FSDP Model/Generator loaded to GPU and ready")
 
-    data_loader = DictCollator(vocab.pad_token_id, data_args.max_len, data_args.k, vocab)
+    data_loader = DisentangledDictCollator(vocab.pad_token_id, data_args.max_len, data_args.k, vocab)
 
     # infer.json
     rank0print(rank, "\n=================\nRunning inference on infer_data.json ...")
@@ -125,7 +126,7 @@ def _batch_infer(
     batch_size: int,
     vocab: SimpleVocab,
     generator: FSDP,
-    data_loader: DictCollator,
+    data_loader: DisentangledDictCollator,
     dataset: Dataset,
     ds_name: str,
     verbose: bool,

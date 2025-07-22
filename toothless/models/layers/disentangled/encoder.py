@@ -2,10 +2,10 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch import Tensor
 
-from ..args import ModelArguments
+from ....args import ModelArguments
 from .mha import MHTreeAttention
 from .rel_pos import RelCoder
-from .utils import FeedForward, stack_layers
+from ..utils import FeedForward, stack_layers
 
 
 class ASTEncoderLayer(nn.Module):
@@ -33,9 +33,9 @@ class ASTEncoderLayer(nn.Module):
         return src
 
 
-class ASTEncoder(RelCoder):
+class DisASTEncoder(RelCoder):
     def __init__(self, conf: ModelArguments, k: int):
-        super(ASTEncoder, self).__init__(conf, k)
+        super(DisASTEncoder, self).__init__(conf, k)
         encoder_layer = ASTEncoderLayer(conf, activation=F.gelu)
 
         self.layers = stack_layers(encoder_layer, conf.num_layers)

@@ -7,7 +7,7 @@ import torch.nn.functional as F
 from torch import Tensor
 from torch.nn.parameter import Buffer
 
-from ..args import ModelArguments
+from ...args import ModelArguments
 
 
 class UnEmbedding(nn.Module):
@@ -20,6 +20,9 @@ class UnEmbedding(nn.Module):
     def forward(self, outputs: Tensor) -> Tensor:
         out = self.token_linear(outputs)
         return F.log_softmax(self.token_dropout(out), dim=-1)
+
+
+# return F.log_softmax(self.token_dropout(out), dim=-1)
 
 
 class FeedForward(nn.Module):
