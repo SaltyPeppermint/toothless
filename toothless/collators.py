@@ -54,7 +54,6 @@ class VanillaDictCollator(BaseCollator):
         # For matrices this means right and down.
         full_tgt_ids = self._pad_1d([sample["tgt_ids"] for sample in unpadded], True)
         batch["tgt_ids"] = full_tgt_ids[:, :-1]
-        batch["tgt_ids_y"] = full_tgt_ids[:, 1:]
 
         n_tokens = int((full_tgt_ids != self.pad_id).data.sum())
         return batch, n_tokens
