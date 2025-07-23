@@ -4,7 +4,6 @@ import math
 import torch
 import torch.nn as nn
 from torch import Tensor
-from torch.nn.parameter import Buffer
 
 
 class SinusoidalPositionalEncoding(nn.Module):
@@ -25,56 +24,100 @@ class SinusoidalPositionalEncoding(nn.Module):
         return x
 
 
-class RotaryPositionalEncoding(nn.Module):
+class RoPEPositionalEncoding(nn.Module):
     """
-    Initialize the Rotary Positional Encoding.
-
-    :param dim: Dimension of the embeddings (must be even)
-    :param max_seq_len: Maximum sequence length to cache positional encodings for
-    :param base: Base value for frequency computation (default: 5000.0)
+    Rotary Position Embedding (RoPE) implementation.
+    RoPE encodes positional information by rotating query and key vectors.
     """
 
-    def __init__(self, emb_size: int, max_seq_len: int = 256, base: float = 5000.0):
+    def __init__(self, d_model, max_seq_len=8192, base=10000):
         super().__init__()
+        self.d_model = d_model
+        self.max_seq_len = max_seq_len
+        self.base = base
 
-        # Compute inverse frequencies
-        inv_freq = 1.0 / (base ** (torch.arange(0, emb_size, 2) / emb_size))
-        # Position indices
-        t = torch.arange(max_seq_len)
+        # Pre-compute rotation matrices for efficiency
+        self.register_buffer("cos_cached", None, persistent=False)
+        self.register_buffer("sin_cached", None, persistent=False)
+        self.cached_seq_len = 0
 
-        # Compute frequencies
-        freqs = torch.outer(t, inv_freq)
-        emb = torch.cat((freqs, freqs), dim=-1)
+    def _compute_rope_cache(self, seq_len, device, dtype):
+        """Pre-compute cos and sin values for RoPE."""
+        if seq_len <= self.cached_seq_len and self.cos_cached is not None:
+            return self.cos_cached[:seq_len], self.sin_cached[:seq_len]
 
-        self.inv_freq = Buffer(inv_freq, persistent=False)
-        self.cos_cached = Buffer(emb.cos()[None, None, :, :], persistent=False)
-        self.sin_cached = Buffer(emb.sin()[None, None, :, :], persistent=False)
+        # Create position indices
+        position = torch.arange(seq_len, device=device, dtype=dtype)
 
-    def _rotate_half(self, x):
+        # Create frequency indices (only for half the dimensions due to complex pairs)
+        freq_seq = torch.arange(0, self.d_model, 2, device=device, dtype=dtype)
+        inv_freq = 1.0 / (self.base ** (freq_seq / self.d_model))
+
+        # Compute outer product to get all position-frequency combinations
+        freqs = torch.outer(position, inv_freq)  # [seq_len, d_model//2]
+
+        # Duplicate frequencies to match full d_model
+        freqs = torch.cat([freqs, freqs], dim=-1)  # [seq_len, d_model]
+
+        # Compute cos and sin
+        cos_vals = torch.cos(freqs)
+        sin_vals = torch.sin(freqs)
+
+        # Cache the results
+        self.cos_cached = cos_vals
+        self.sin_cached = sin_vals
+        self.cached_seq_len = seq_len
+
+        return cos_vals, sin_vals
+
+    def _apply_rope(self, x: Tensor, cos: Tensor, sin: Tensor) -> Tensor:
         """
-        Rotate the second half of the feature dimension.
-
-        :param x: Input tensor to rotate
-        :return: Rotated tensor
-        """
-        x1, x2 = x.chunk(2, dim=-1)
-        return torch.cat((-x2, x1), dim=-1)
-
-    def forward(self, x: torch.Tensor):
-        """
-        Apply rotary positional encoding to input tensor.
-
-        :param x: Input tensor of shape [batch_size, seq_len, n_heads, d_k]
-        :return: Tensor with rotary positional encoding applied
+        Apply RoPE to input tensor.
+        x: [batch_size, seq_len, d_model]
         """
 
-        seq_len = x.size(1)
+        seq_len = x.size(2)
 
-        # Apply rotary embedding
-        cos = self.cos_cached[:, :, :seq_len, ...].to(x.device)
-        sin = self.sin_cached[:, :, :seq_len, ...].to(x.device)
+        # Split into real and imaginary parts (treat pairs as complex numbers)
+        x1 = x[..., 0::2]  # Even indices
+        x2 = x[..., 1::2]  # Odd indices
 
-        return (x * cos) + (self._rotate_half(x) * sin)
+        # Apply rotation
+        cos = cos[:seq_len, 0::2]  # Match dimensions
+        sin = sin[:seq_len, 0::2]
+
+        # Rotate: (x1 + i*x2) * (cos + i*sin) = (x1*cos - x2*sin) + i*(x1*sin + x2*cos)
+        rotated_x1 = x1 * cos.unsqueeze(0) - x2 * sin.unsqueeze(0)
+        rotated_x2 = x1 * sin.unsqueeze(0) + x2 * cos.unsqueeze(0)
+
+        # Recombine
+        rotated = torch.stack([rotated_x1, rotated_x2], dim=-1)
+        rotated = rotated.flatten(-2)  # Merge last two dimensions
+
+        return rotated
+
+    def forward(self, t: Tensor, seq_len=None):
+        """
+        Apply RoPE to query and key tensors.
+
+        Args:
+            query: Query tensor [batch_size, seq_len, d_model] or [batch_size, seq_len, num_heads, head_dim]
+            key: Key tensor with same shape as query
+            seq_len: Sequence length (inferred if None)
+
+        Returns:
+            Rotated query and key tensors
+        """
+        if seq_len is None:
+            seq_len = t.shape[1]
+
+        device = t.device
+        dtype = t.dtype
+
+        # Get cached cos/sin values
+        cos, sin = self._compute_rope_cache(seq_len, device, dtype)
+
+        return self._apply_rope(t, cos, sin)
 
 
 class Embedding(nn.Module):
@@ -82,7 +125,7 @@ class Embedding(nn.Module):
         super(Embedding, self).__init__()
         self.word_embeddings = nn.Embedding(vocab_size, embedding_dim, padding_idx=0)
         if with_pos:
-            self.pos_emb = RotaryPositionalEncoding(embedding_dim)
+            self.pos_emb = RoPEPositionalEncoding(embedding_dim)
         else:
             self.pos_emb = None
         self.norm = nn.LayerNorm(embedding_dim)

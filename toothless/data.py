@@ -116,9 +116,7 @@ class TrippleDataSet(Dataset[Tripple]):
 
         return anc_matrix, sib_matrix
 
-    def _pyrec_to_tensor(self, expr: rise.RecExpr) -> Tensor:
-        tree_data = expr.to_data()
-
+    def _pyrec_to_tensor(self, tree_data: TreeData) -> Tensor:
         return torch.tensor(
             [self.vocab.bos_token_id]
             + [self.vocab.token2id(node.name) for node in tree_data.nodes()]

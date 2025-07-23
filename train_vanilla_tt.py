@@ -43,6 +43,8 @@ def fsdp_main(
     writer = SummaryWriter(log_dir=train_args.run_log_dir) if rank == 0 else None
 
     dataset = TrippleDataSet(data_args, False)
+    if rank == 0:
+        dataset.vocab.save(save_folder / "vocab.json")
     rank0print(rank, "Dataset ready")
 
     # Load Data
@@ -55,7 +57,7 @@ def fsdp_main(
     init_start_event = torch.cuda.Event(enable_timing=True)
     init_end_event = torch.cuda.Event(enable_timing=True)
 
-    model = VanillaDualTreeTransformer(model_args, vocab_size, vocab_size, data_args.k)
+    model = VanillaDualTreeTransformer(model_args, vocab_size, vocab_size)
 
     if writer and train_args.trace:
         example_batch, _ = next(iter(copy.deepcopy(train_dataloader)))
@@ -254,7 +256,6 @@ def save_model(model: FSDP, save_folder: Path, suffix: str, rank: int):
 if __name__ == "__main__":
     args = tyro.cli(TrainRunArgs)
 
-    dataset = TrippleDataSet(args.data, False)
     start_time = datetime.now()
     save_folder = Path(args.model.output_dir) / start_time.strftime("%d-%m-%y-%Y_%H:%M:%S")
     save_folder.mkdir(exist_ok=True, parents=True)
@@ -264,7 +265,6 @@ if __name__ == "__main__":
         f.write(args.data.to_json())
     with open(save_folder / "train_args.json", mode="w", encoding="utf-8") as f:
         f.write(args.train.to_json())
-    dataset.vocab.save(save_folder / "vocab.json")
 
     world_size = torch.cuda.device_count()
 
