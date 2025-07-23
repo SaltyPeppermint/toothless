@@ -1,3 +1,4 @@
+from typing import Tuple
 import torch
 from torch import nn, Tensor
 
@@ -32,7 +33,7 @@ class RoPEMultiheadAttention(nn.Module):
         value: Tensor,
         attn_mask: Tensor | None = None,
         key_padding_mask: Tensor | None = None,
-    ):
+    ) -> Tuple[Tensor, Tensor]:
         batch_size, q_seq_len, d_model = query.shape
         kv_seq_len = key.shape[1]
 
