@@ -6,7 +6,7 @@ import torch.nn.functional as F
 from eggshell import rise  # type: ignore
 
 
-from .layers.utils import Embedding
+from .layers.disentangled.embedding import Embedding
 from .layers.disentangled.decoder import DisASTDoubleDecoder
 from .layers.disentangled.encoder import DisASTEncoder
 from .utils import make_tgt_mask

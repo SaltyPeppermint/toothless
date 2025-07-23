@@ -1,13 +1,15 @@
+import math
+
 from dataclasses import dataclass
 from torch import Tensor
 from torch import nn
 import torch
 
-from toothless.models.utils import create_causal_mask, create_padding_mask  # type: ignore # noqa: F401
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 
-
-from .layers import Embedding
+from .layers.vanilla.decoder import TransformerDecoderLayer
+from .layers.vanilla.encoder import TransformerEncoderLayer
+from .utils import create_causal_mask  # type: ignore # noqa: F401
 from ..args import ModelArguments
 from ..vocab import SimpleVocab
 
@@ -18,45 +20,33 @@ class VanillaDualTreeTransformer(nn.Module):
 
         assert not conf.disentangled
 
-        self.l_embedding = Embedding(conf.d_model, src_vocab_size, dropout=conf.dropout, with_pos=True)
-        self.r_embedding = Embedding(conf.d_model, src_vocab_size, dropout=conf.dropout, with_pos=True)
-        self.tgt_embedding = Embedding(conf.d_model, tgt_vocab_size, dropout=conf.dropout, with_pos=True)
+        self.conf = conf
 
-        # Left Encoder
-        l_encoder_layer = nn.TransformerEncoderLayer(
-            d_model=conf.d_model,
-            dim_feedforward=conf.dim_feed_forward,
-            dropout=conf.dropout,
-            batch_first=True,
-            nhead=conf.n_heads,
-            activation="gelu",
-        )
-        self.l_encoder = nn.TransformerEncoder(l_encoder_layer, num_layers=conf.num_layers)
+        self.l_embedding = nn.Embedding(src_vocab_size, conf.d_model)
+        self.r_embedding = nn.Embedding(src_vocab_size, conf.d_model)
+        self.tgt_embedding = nn.Embedding(tgt_vocab_size, conf.d_model)
 
-        # Right Encoder
-        r_encoder_layer = nn.TransformerEncoderLayer(
-            d_model=conf.d_model,
-            dim_feedforward=conf.dim_feed_forward,
-            dropout=conf.dropout,
-            batch_first=True,
-            nhead=conf.n_heads,
-            activation="gelu",
-        )
-        self.r_encoder = nn.TransformerEncoder(r_encoder_layer, num_layers=conf.num_layers)
+        self.l_embed_ln = nn.LayerNorm(conf.d_model)
+        self.r_embed_ln = nn.LayerNorm(conf.d_model)
+        self.tgt_embed_ln = nn.LayerNorm(conf.d_model)
+
+        self.dropout = nn.Dropout(conf.dropout)
+
+        # Encoders
+        self.l_encoder = nn.ModuleList([TransformerEncoderLayer(conf) for _ in range(conf.num_layers)])
+        self.r_encoder = nn.ModuleList([TransformerEncoderLayer(conf) for _ in range(conf.num_layers)])
 
         # Memory fusion layer to combine outputs from both encoders
         self.memory_fusion = nn.Linear(conf.d_model * 2, conf.d_model)
+        # self.memory_fusion = nn.Sequential(
+        #     nn.Linear(conf.d_model * 2, conf.d_model * 4),
+        #     nn.GELU(),
+        #     nn.Linear(conf.d_model * 4, conf.d_model),
+        #     nn.LayerNorm(conf.d_model),
+        # )
 
         # Decoder
-        decoder_layer = nn.TransformerDecoderLayer(
-            d_model=conf.d_model,
-            dim_feedforward=conf.dim_feed_forward,
-            nhead=conf.n_heads,
-            dropout=conf.dropout,
-            batch_first=True,
-            activation="gelu",
-        )
-        self.decoder = nn.TransformerDecoder(decoder_layer, conf.num_layers)
+        self.decoder = nn.ModuleList([TransformerDecoderLayer(conf) for _ in range(conf.num_layers)])
 
         # Output projection
         self.output_proj = nn.Linear(conf.d_model, tgt_vocab_size)
@@ -65,30 +55,45 @@ class VanillaDualTreeTransformer(nn.Module):
             for p in self.parameters():
                 if p.dim() > 1:
                     nn.init.xavier_uniform_(p)
+            nn.init.normal_(self.l_embedding.weight, mean=0.0, std=self.conf.d_model**-0.5)
+            nn.init.normal_(self.r_embedding.weight, mean=0.0, std=self.conf.d_model**-0.5)
+            nn.init.normal_(self.tgt_embedding.weight, mean=0.0, std=self.conf.d_model**-0.5)
         else:
             self.load_state_dict(state_dict)
 
-    def l_encode(self, l_ids: Tensor, l_mask: Tensor | None = None) -> Tensor:
-        l_emb = self.l_embedding(l_ids)
-        return self.l_encoder(l_emb, src_key_padding_mask=l_mask)
+    def l_encode(self, l_ids: Tensor, l_mask: Tensor | None = None):
+        # Embeddings
+        l_emb = self.l_embedding(l_ids) * math.sqrt(self.conf.d_model)
+        l_mem = self.dropout(l_emb)
 
-    def r_encode(self, r_ids: Tensor, r_mask: Tensor | None = None) -> Tensor:
-        r_emb = self.l_embedding(r_ids)
-        return self.l_encoder(r_emb, src_key_padding_mask=r_mask)
+        # Apply each RoPE encoder layer
+        for layer in self.l_encoder:
+            l_mem = layer(l_mem, src_key_padding_mask=l_mask)
+        return l_mem
+
+    def r_encode(self, r_ids: Tensor, r_mask: Tensor | None = None):
+        # Embeddings
+        r_emb = self.r_embedding(r_ids) * math.sqrt(self.conf.d_model)
+        r_mem = self.dropout(r_emb)
+
+        # Apply each RoPE encoder layer
+        for layer in self.r_encoder:
+            r_mem = layer(r_mem, src_key_padding_mask=r_mask)
+        return r_mem
 
     def fuse_memories(self, l_mem: Tensor, r_mem: Tensor):
         """Combine outputs from both encoders."""
         # Simple concatenation + linear projection
         # Alternative approaches: attention-based fusion, gating, etc.
-        batch_size, seq_len1, d_model = l_mem.shape
-        seq_len2 = r_mem.shape[1]
+        batch_size, l_len, d_model = l_mem.shape
+        r_len = r_mem.shape[1]
 
         # Pad shorter sequence to match longer one
-        if seq_len1 > seq_len2:
-            padding = torch.zeros(batch_size, seq_len1 - seq_len2, d_model, device=r_mem.device)
+        if l_len > r_len:
+            padding = torch.zeros(batch_size, l_len - r_len, d_model, device=r_mem.device, dtype=r_mem.dtype)
             r_mem = torch.cat([r_mem, padding], dim=1)
-        elif seq_len2 > seq_len1:
-            padding = torch.zeros(batch_size, seq_len2 - seq_len1, d_model, device=l_mem.device)
+        elif r_len > l_len:
+            padding = torch.zeros(batch_size, r_len - l_len, d_model, device=l_mem.device, dtype=l_mem.dtype)
             l_mem = torch.cat([l_mem, padding], dim=1)
 
         # Concatenate and project
@@ -109,33 +114,42 @@ class VanillaDualTreeTransformer(nn.Module):
 
         return memory_padding_mask
 
-    def decode(self, tgt: Tensor, fused_memory: Tensor, tgt_padding_mask=None, memory_padding_mask=None):
+    def decode(
+        self,
+        tgt: Tensor,
+        fused_memory: Tensor,
+        tgt_padding_mask: Tensor | None = None,
+        memory_padding_mask: Tensor | None = None,
+    ):
         """Decode target sequence using fused encoder memories."""
         seq_len = tgt.shape[1]
         device = tgt.device
 
+        # Target embeddings
+        embeddings = self.tgt_embedding(tgt) * math.sqrt(self.conf.d_model)
+        tgt_encoded = self.dropout(embeddings)
+
         # Create causal mask for decoder self-attention
         tgt_causal_mask = create_causal_mask(seq_len, device)
 
-        # Target embeddings
-        tgt_emb = self.tgt_embedding(tgt)
-
-        # Apply decoder
-        output = self.decoder(
-            tgt_emb,
-            fused_memory,
-            tgt_mask=tgt_causal_mask,
-            tgt_key_padding_mask=tgt_padding_mask,
-            memory_key_padding_mask=memory_padding_mask,
-        )
+        # Apply each RoPE decoder layer
+        output = tgt_encoded
+        for layer in self.decoder:
+            output = layer(
+                output,
+                fused_memory,
+                tgt_mask=tgt_causal_mask,
+                tgt_key_padding_mask=tgt_padding_mask,
+                memory_key_padding_mask=memory_padding_mask,
+            )
 
         return output
 
     def forward(
         self,
-        tgt: Tensor,
         l_ids: Tensor,
         r_ids: Tensor,
+        tgt: Tensor,
         l_mask: Tensor | None = None,
         r_mask: Tensor | None = None,
         tgt_mask: Tensor | None = None,
