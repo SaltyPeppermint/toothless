@@ -19,6 +19,7 @@ class DisentangledDualTreeTransformer(nn.Module):
     def __init__(self, conf: ModelArguments, src_vocab_size: int, tgt_vocab_size: int, k: int, state_dict=None):
         super(DisentangledDualTreeTransformer, self).__init__()
 
+        assert conf.disentangled
         assert conf.n_heads == conf.anc_heads + conf.sib_heads
 
         self.l_embedding = Embedding(conf.d_model, src_vocab_size, dropout=conf.dropout, with_pos=conf.with_pos)

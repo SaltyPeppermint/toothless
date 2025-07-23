@@ -1,4 +1,4 @@
-uv run infer_tree_transformer.py \
+uv run infer_disentangled.py \
     --infer_data "data/infer_data.json" \
     --folder "saved_models/08-07-25-2025_12:04:38" \
     --model-suffix "_0" \

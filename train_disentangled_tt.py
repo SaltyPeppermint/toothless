@@ -6,7 +6,7 @@ import torch
 import torch.multiprocessing as mp
 import torch.nn.functional as F
 import torch.distributed as dist
-from torch import nn, optim, Tensor
+from torch import nn, optim
 from torch.nn import CrossEntropyLoss
 from torch.optim.lr_scheduler import CosineAnnealingLR, LinearLR
 from torch.distributed.fsdp import (
@@ -24,10 +24,10 @@ import tyro
 
 from toothless.collators import DisentangledDictCollator, mk_loaders
 from toothless.utils import cleanup_process_group, rank0print, setup_process_group
-from toothless.data import CustomDataset
+from toothless.data import TrippleDataSet, Tripple
 from toothless.models.disentangled import DisentangledDualTreeTransformer
 from toothless.models.utils import count_parameters
-from toothless.args import DataArguments, TrainingArguments, ModelArguments
+from toothless.args import DataArguments, TrainingArguments, ModelArguments, TrainRunArgs
 
 
 def fsdp_main(
@@ -43,7 +43,7 @@ def fsdp_main(
 
     writer = SummaryWriter(log_dir=train_args.run_log_dir) if rank == 0 else None
 
-    dataset = CustomDataset(data_args)
+    dataset = TrippleDataSet(data_args, True)
     rank0print(rank, "Dataset ready")
 
     # Load Data
@@ -135,7 +135,7 @@ def fsdp_main(
 def train(
     rank: int,
     model: FSDP,
-    dataloader: DataLoader[dict[str, Tensor]],
+    dataloader: DataLoader[Tripple],
     criterion: CrossEntropyLoss,
     optimizer: optim.Optimizer,
     warmup_scheduler: LinearLR,
@@ -191,7 +191,7 @@ def train(
 def evalulate(
     rank: int,
     model: nn.Module,
-    dataloader: DataLoader[dict[str, Tensor]],
+    dataloader: DataLoader[Tripple],
     criterion: CrossEntropyLoss,
     epoch: int,
     max_epochs: int,
@@ -226,28 +226,26 @@ def save_model(model: FSDP, save_folder: Path, suffix: str, rank: int):
 
 
 if __name__ == "__main__":
-    model_args = tyro.cli(ModelArguments)
-    data_args = tyro.cli(DataArguments)
-    train_args = tyro.cli(TrainingArguments)
+    args = tyro.cli(TrainRunArgs)
 
-    dataset = CustomDataset(data_args)
+    dataset = TrippleDataSet(args.data, True)
     start_time = datetime.now()
-    save_folder = Path(model_args.output_dir) / start_time.strftime("%d-%m-%y-%Y_%H:%M:%S")
+    save_folder = Path(args.model.output_dir) / start_time.strftime("%d-%m-%y-%Y_%H:%M:%S")
     save_folder.mkdir(exist_ok=True, parents=True)
     with open(save_folder / "model_args.json", mode="w", encoding="utf-8") as f:
-        f.write(model_args.to_json())
+        f.write(args.model.to_json())
     with open(save_folder / "data_args.json", mode="w", encoding="utf-8") as f:
-        f.write(data_args.to_json())
+        f.write(args.data.to_json())
     with open(save_folder / "train_args.json", mode="w", encoding="utf-8") as f:
-        f.write(train_args.to_json())
+        f.write(args.train.to_json())
     dataset.vocab.save(save_folder / "vocab.json")
 
     world_size = torch.cuda.device_count()
 
     if world_size <= 1:
-        fsdp_main(0, world_size, model_args, train_args, data_args, save_folder)
+        fsdp_main(0, world_size, args.model, args.train, args.data, save_folder)
     else:
         mp.spawn(  # type: ignore
-            fsdp_main, args=(world_size, model_args, train_args, data_args, save_folder), nprocs=world_size, join=True
+            fsdp_main, args=(world_size, args.model, args.train, args.data, save_folder), nprocs=world_size, join=True
         )
     print("DONE")

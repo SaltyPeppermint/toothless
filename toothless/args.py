@@ -6,6 +6,7 @@ from dataclass_wizard import JSONWizard
 
 @dataclass
 class ModelArguments(JSONWizard):
+    disentangled: bool = field(metadata={"help": "Use the disentangled or vanilla model."})
     output_dir: str = field(default="model")
     d_model: int = field(default=768, metadata={"help": "Hidden state dimension size."})
     num_layers: int = field(default=12)
@@ -53,6 +54,13 @@ class TrainingArguments(JSONWizard):
     bf16: bool = field(default=True)
     trace: bool = field(default=False)
     run_log_dir: str | None = field(default=None)
+
+
+@dataclass
+class TrainRunArgs:
+    train: TrainingArguments
+    data: DataArguments
+    model: ModelArguments
 
 
 @dataclass

@@ -5,7 +5,7 @@ from datetime import datetime
 import torch
 import torch.multiprocessing as mp
 import torch.distributed as dist
-from torch import nn, optim, Tensor
+from torch import nn, optim
 from torch.nn import CrossEntropyLoss
 from torch.optim.lr_scheduler import CosineAnnealingLR, LinearLR
 from torch.distributed.fsdp import (
@@ -23,10 +23,10 @@ import tyro
 
 from toothless.collators import VanillaDictCollator, mk_loaders
 from toothless.utils import cleanup_process_group, rank0print, setup_process_group
-from toothless.data import CustomDataset
+from toothless.data import TrippleDataSet, Tripple
 from toothless.models.vanilla import VanillaDualTreeTransformer
 from toothless.models.utils import count_parameters, create_padding_mask
-from toothless.args import DataArguments, TrainingArguments, ModelArguments
+from toothless.args import DataArguments, TrainingArguments, ModelArguments, TrainRunArgs
 
 
 def fsdp_main(
@@ -42,7 +42,7 @@ def fsdp_main(
 
     writer = SummaryWriter(log_dir=train_args.run_log_dir) if rank == 0 else None
 
-    dataset = CustomDataset(data_args)
+    dataset = TrippleDataSet(data_args, False)
     rank0print(rank, "Dataset ready")
 
     # Load Data
@@ -93,6 +93,8 @@ def fsdp_main(
 
     criterion = CrossEntropyLoss(ignore_index=dataset.vocab.pad_token_id, label_smoothing=0.1)
 
+    best_eval_loss = float("inf")
+
     rank0print(rank, "Starting training!")
     init_start_event.record(torch.cuda.current_stream())
 
@@ -115,7 +117,12 @@ def fsdp_main(
 
         # Optionally, evaluate the model on the validation set after each epoch
         if train_args.eval_each_epoch:
-            evalulate(rank, model, copy.deepcopy(eval_dataloader), criterion, epoch, train_args.epochs, writer)
+            eval_loss = evalulate(
+                rank, model, copy.deepcopy(eval_dataloader), criterion, epoch, train_args.epochs, writer
+            )
+            if eval_loss < best_eval_loss:
+                best_eval_loss = eval_loss
+                save_model(model, save_folder, "best_eval", rank)
 
         cosine_scheduler.step()
 
@@ -134,7 +141,7 @@ def fsdp_main(
 def train(
     rank: int,
     model: FSDP,
-    dataloader: DataLoader[dict[str, Tensor]],
+    dataloader: DataLoader[Tripple],
     criterion: CrossEntropyLoss,
     optimizer: optim.Optimizer,
     warmup_scheduler: LinearLR,
@@ -151,19 +158,17 @@ def train(
     ):
         # Move batch to device
         l_ids, r_ids, tgt_ids = batch["l_ids"].to(rank), batch["r_ids"].to(rank), batch["tgt_ids"].to(rank)
+        l_mask, r_mask, tgt_mask = batch["l_mask"].to(rank), batch["r_mask"].to(rank), batch["tgt_mask"].to(rank)
 
         # Create input and target for teacher forcing
         tgt_input = tgt_ids[:, :-1]  # All tokens except last
+        tgt_input_mask = tgt_mask[:, :-1]
         tgt_output = tgt_ids[:, 1:]  # All tokens except first (shifted by 1)
 
-        # Create padding masks
-        src1_padding_mask = create_padding_mask(l_ids)
-        src2_padding_mask = create_padding_mask(r_ids)
-        tgt_padding_mask = create_padding_mask(tgt_input)
-
         # Forward pass
-        logits = model(l_ids, r_ids, tgt_input, src1_padding_mask, src2_padding_mask, tgt_padding_mask)
+        logits = model(l_ids, r_ids, tgt_input, l_mask, r_mask, tgt_input_mask)
         loss = criterion(logits.reshape(-1, logits.size(-1)), tgt_output.reshape(-1))
+        # loss = loss / gradient_accumulation_steps
 
         # Backwards pass
         loss.backward()
@@ -199,12 +204,12 @@ def train(
 def evalulate(
     rank: int,
     model: nn.Module,
-    dataloader: DataLoader[dict[str, Tensor]],
+    dataloader: DataLoader[Tripple],
     criterion: CrossEntropyLoss,
     epoch: int,
     max_epochs: int,
     writer: SummaryWriter | None = None,
-):
+) -> float:
     model.eval()
     ddp_loss = torch.zeros(2).to(rank)
     for batch, _num_tokens in dataloader:
@@ -234,6 +239,7 @@ def evalulate(
         writer.add_scalar("Eval loss/epoch", eval_loss, epoch + 1)
 
     rank0print(rank, f"Epoch: {epoch + 1}/{max_epochs} \tValidation loss: {eval_loss:.4f}")
+    return float(eval_loss)
 
 
 def save_model(model: FSDP, save_folder: Path, suffix: str, rank: int):
@@ -246,28 +252,26 @@ def save_model(model: FSDP, save_folder: Path, suffix: str, rank: int):
 
 
 if __name__ == "__main__":
-    model_args = tyro.cli(ModelArguments)
-    data_args = tyro.cli(DataArguments)
-    train_args = tyro.cli(TrainingArguments)
+    args = tyro.cli(TrainRunArgs)
 
-    dataset = CustomDataset(data_args)
+    dataset = TrippleDataSet(args.data, False)
     start_time = datetime.now()
-    save_folder = Path(model_args.output_dir) / start_time.strftime("%d-%m-%y-%Y_%H:%M:%S")
+    save_folder = Path(args.model.output_dir) / start_time.strftime("%d-%m-%y-%Y_%H:%M:%S")
     save_folder.mkdir(exist_ok=True, parents=True)
     with open(save_folder / "model_args.json", mode="w", encoding="utf-8") as f:
-        f.write(model_args.to_json())
+        f.write(args.model.to_json())
     with open(save_folder / "data_args.json", mode="w", encoding="utf-8") as f:
-        f.write(data_args.to_json())
+        f.write(args.data.to_json())
     with open(save_folder / "train_args.json", mode="w", encoding="utf-8") as f:
-        f.write(train_args.to_json())
+        f.write(args.train.to_json())
     dataset.vocab.save(save_folder / "vocab.json")
 
     world_size = torch.cuda.device_count()
 
     if world_size <= 1:
-        fsdp_main(0, world_size, model_args, train_args, data_args, save_folder)
+        fsdp_main(0, world_size, args.model, args.train, args.data, save_folder)
     else:
         mp.spawn(  # type: ignore
-            fsdp_main, args=(world_size, model_args, train_args, data_args, save_folder), nprocs=world_size, join=True
+            fsdp_main, args=(world_size, args.model, args.train, args.data, save_folder), nprocs=world_size, join=True
         )
     print("DONE")

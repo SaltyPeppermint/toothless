@@ -1,6 +1,7 @@
 from pathlib import Path
 import shutil
 import json
+from dataclasses import dataclass
 
 import polars as pl
 # from tokenizers import Tokenizer
@@ -13,12 +14,12 @@ import polars as pl
 # from tokenizers.normalizers import Sequence as NormalizerSequence
 # import matplotlib.pyplot as plt
 
-from eggshell import rise  # type: ignore
+from eggshell import rise, TreeData  # type: ignore
 
 import torch
 from torch import Tensor
 from torch import nn
-from torch.utils import data
+from torch.utils.data import Dataset
 
 from tqdm.auto import tqdm
 
@@ -27,8 +28,24 @@ from .vocab import BOS_TOKEN, EOS_TOKEN, MASK_TOKEN, PAD_TOKEN, UNK_TOKEN, Simpl
 from . import loading
 
 
-class CustomDataset(data.Dataset):
-    def __init__(self, conf: DataArguments):
+@dataclass
+class Tripple:
+    l_ids: Tensor
+    l_str: str
+    tgt_ids: Tensor
+    tgt_str: str
+    r_ids: Tensor
+    r_str: str
+    l_anc: Tensor | None = None
+    l_sib: Tensor | None = None
+    tgt_anc: Tensor | None = None
+    tgt_sib: Tensor | None = None
+    r_anc: Tensor | None = None
+    r_sib: Tensor | None = None
+
+
+class TrippleDataSet(Dataset[Tripple]):
+    def __init__(self, conf: DataArguments, disentangled: bool):
         """
         :param k represents the max relative distance
         """
@@ -37,6 +54,7 @@ class CustomDataset(data.Dataset):
         self.k = conf.k
         self.force_reload = conf.force_reload
         self.sample_limit = conf.sample_limit
+        self.disentangled = disentangled
         torch.manual_seed(conf.rng_seed)
 
         self.cache = Path(conf.cache_dir) / Path(*self.json_root.parts[-2:])
@@ -62,13 +80,51 @@ class CustomDataset(data.Dataset):
     def __len__(self) -> int:
         return self.len
 
-    def __getitem__(self, idx: int) -> dict[str, str]:
+    def __getitem__(self, idx: int) -> Tripple:
         # with ZipFile(self.zipped_samples) as zip_file:
         #     b = zip_file.read(f"{idx}.json")
         #     s = json.loads(b)
+        s = self.get_str(idx)
+
+        l_tree = rise.RecExpr(s["left"]).to_data()
+        tgt_tree = rise.RecExpr(s["middle"]).to_data()
+        r_tree = rise.RecExpr(s["right"]).to_data()
+
+        l_ids = self._pyrec_to_tensor(l_tree)
+        tgt_ids = self._pyrec_to_tensor(tgt_tree)
+        r_ids = self._pyrec_to_tensor(r_tree)
+
+        if self.disentangled:
+            l_anc, l_sib = self._tree_data_to_distance_tensor(l_tree)
+            tgt_anc, tgt_sib = self._tree_data_to_distance_tensor(tgt_tree)
+            r_anc, r_sib = self._tree_data_to_distance_tensor(r_tree)
+            return Tripple(
+                l_ids, s["left"], tgt_ids, s["middle"], r_ids, s["right"], l_anc, l_sib, tgt_anc, tgt_sib, r_anc, r_sib
+            )
+
+        else:
+            return Tripple(l_ids, s["left"], tgt_ids, s["middle"], r_ids, s["right"])
+
+    def get_str(self, idx: int) -> dict[str, str]:
         with open(self.sample_cache / f"{idx}.json", encoding="utf-8") as f:
-            s = json.load(f)
-        return s
+            return json.load(f)
+
+    def _tree_data_to_distance_tensor(self, tree_data: TreeData) -> tuple[Tensor, Tensor]:
+        padder = nn.ConstantPad2d(1, 0)
+        anc_matrix = padder(torch.tensor(tree_data.anc_matrix(self.k), dtype=torch.long))
+        sib_matrix = padder(torch.tensor(tree_data.sib_matrix(self.k), dtype=torch.long))
+
+        return anc_matrix, sib_matrix
+
+    def _pyrec_to_tensor(self, expr: rise.RecExpr) -> Tensor:
+        tree_data = expr.to_data()
+
+        return torch.tensor(
+            [self.vocab.bos_token_id]
+            + [self.vocab.token2id(node.name) for node in tree_data.nodes()]
+            + [self.vocab.eos_token_id],
+            dtype=torch.long,
+        )
 
     def _process_raw(self):
         if not self.force_reload and self.raw_path.is_file():
