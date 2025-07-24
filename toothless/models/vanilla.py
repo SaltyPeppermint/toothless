@@ -66,7 +66,7 @@ class VanillaDualTreeTransformer(nn.Module):
         l_emb = self.l_embedding(l_ids) * math.sqrt(self.conf.d_model)
         l_mem = self.dropout(l_emb)
 
-        # Apply each RoPE encoder layer
+        # Compute each RoPE encoder layer
         for layer in self.l_encoder:
             l_mem = layer(l_mem, src_key_padding_mask=l_mask)
         return l_mem
@@ -76,7 +76,7 @@ class VanillaDualTreeTransformer(nn.Module):
         r_emb = self.r_embedding(r_ids) * math.sqrt(self.conf.d_model)
         r_mem = self.dropout(r_emb)
 
-        # Apply each RoPE encoder layer
+        # Compute each RoPE encoder layer
         for layer in self.r_encoder:
             r_mem = layer(r_mem, src_key_padding_mask=r_mask)
         return r_mem
@@ -84,7 +84,6 @@ class VanillaDualTreeTransformer(nn.Module):
     def fuse_memories(self, l_mem: Tensor, r_mem: Tensor):
         """Combine outputs from both encoders."""
         # Simple concatenation + linear projection
-        # Alternative approaches: attention-based fusion, gating, etc.
         batch_size, l_len, d_model = l_mem.shape
         r_len = r_mem.shape[1]
 
@@ -132,7 +131,7 @@ class VanillaDualTreeTransformer(nn.Module):
         # Create causal mask for decoder self-attention
         tgt_causal_mask = create_causal_mask(seq_len, device)
 
-        # Apply each RoPE decoder layer
+        # Compute each RoPE decoder layer
         output = tgt_encoded
         for layer in self.decoder:
             output = layer(
@@ -344,9 +343,9 @@ def beam_search_with_probabilities(
         model: The VanillaDualTreeTransformer model
         l_batch: First source sequences [batch_size, seq_len]
         r_batch: Second source sequences [batch_size, seq_len]
+        vocab: The used vocabulary
         beam_size: Number of beams to keep
         max_length: Maximum generation length
-        vocab: The used vocabulary
         length_penalty: Length penalty factor (>1.0 favors longer sequences)
 
     Returns:

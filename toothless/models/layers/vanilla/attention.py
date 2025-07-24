@@ -48,8 +48,8 @@ class RoPEMultiheadAttention(nn.Module):
         v = v.view(batch_size, kv_seq_len, self.n_heads, self.head_dim)
 
         # Apply RoPE to Q and K
-        q = self.rope(q, q_seq_len)
-        k = self.rope(k, kv_seq_len)
+        q = self.rope(q)
+        k = self.rope(k)
 
         # Transpose for attention computation: [batch, n_heads, seq_len, head_dim]
         q = q.transpose(1, 2)
