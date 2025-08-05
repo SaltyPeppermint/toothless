@@ -76,7 +76,7 @@ def fsdp_main(
     # Define optimizer and loss function
     optimizer = optim.AdamW(
         model.parameters(),
-        lr=train_args.learning_rate,
+        lr=torch.tensor(train_args.learning_rate),
         betas=(train_args.adam_beta1, train_args.adam_beta2),
         weight_decay=train_args.weight_decay,
     )
@@ -140,6 +140,7 @@ def fsdp_main(
     cleanup_process_group()
 
 
+@torch.compile()
 def train(
     rank: int,
     model: FSDP,
@@ -268,10 +269,5 @@ if __name__ == "__main__":
 
     world_size = torch.cuda.device_count()
 
-    if world_size <= 1:
-        fsdp_main(0, world_size, args.model, args.train, args.data, save_folder)
-    else:
-        mp.spawn(  # type: ignore
-            fsdp_main, args=(world_size, args.model, args.train, args.data, save_folder), nprocs=world_size, join=True
-        )
+    mp.spawn(fsdp_main, args=(world_size, args.model, args.train, args.data, save_folder), nprocs=world_size, join=True)
     print("DONE")

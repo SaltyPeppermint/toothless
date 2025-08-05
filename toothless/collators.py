@@ -27,25 +27,28 @@ class BaseCollator:
 
 class VanillaDictCollator(BaseCollator):
     def __call__(self, tripples: Sequence[Tripple]) -> tuple[dict[str, Tensor], int]:
-        tgt_batch = []
         l_batch = []
         r_batch = []
+        tgt_batch = []
         for tripple in tripples:
-            tgt_batch.append(tripple.tgt_ids)
             l_batch.append(tripple.l_ids)
             r_batch.append(tripple.r_ids)
+            tgt_batch.append(tripple.tgt_ids)
+
+            assert max(len(tripple.l_ids), len(tripple.r_ids), len(tripple.tgt_ids)) <= self.max_len
 
         # Get lengths for sorting/bucketing
         l_lengths = [len(seq) for seq in l_batch]
         r_lengths = [len(seq) for seq in r_batch]
         tgt_lengths = [len(seq) for seq in tgt_batch]
 
+        batch_size = len(tripples)
+
         # Pad sequences to max length in batch
         l_padded = torch.nn.utils.rnn.pad_sequence(l_batch, batch_first=True, padding_value=0)
         r_padded = torch.nn.utils.rnn.pad_sequence(r_batch, batch_first=True, padding_value=0)
         tgt_padded = torch.nn.utils.rnn.pad_sequence(tgt_batch, batch_first=True, padding_value=0)
 
-        batch_size = len(tripples)
         l_mask = torch.zeros(batch_size, l_padded.size(1), dtype=torch.bool)
         r_mask = torch.zeros(batch_size, r_padded.size(1), dtype=torch.bool)
         tgt_mask = torch.zeros(batch_size, tgt_padded.size(1), dtype=torch.bool)
@@ -65,7 +68,7 @@ class VanillaDictCollator(BaseCollator):
             "l_lengths": torch.tensor(l_lengths),
             "r_lengths": torch.tensor(r_lengths),
             "tgt_lengths": torch.tensor(tgt_lengths),
-        }, batch_size
+        }, sum(tgt_lengths)
 
     def _pyrec_to_tensor(self, expr: rise.RecExpr) -> Tensor:
         tree_data = expr.to_data()
