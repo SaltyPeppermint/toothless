@@ -15,20 +15,27 @@ BATCH_SIZE = 1
 WORKER_THREADS = 2
 
 
-def eqsat_check(
+def eqsat_check(left: rise.RecExpr, right: rise.RecExpr, name: str) -> dict[str, dict]:
+    report_str, _ = rise.eqsat_guide_check(left, right, time_limit=TIME_LIMIT, guides=[])
+    return {name: json.loads(report_str)}
+
+
+def eqsat_guide_check(
     left: rise.RecExpr, right: rise.RecExpr, name: str, guide: rise.RecExpr | None = None
 ) -> dict[str, dict]:
-    report_str, _, guide_used = rise.eqsat_check(
-        left,
-        right,
-        time_limit=TIME_LIMIT,
-        guides=[guide] if guide is not None else [],
+    report_str, guide_used = rise.eqsat_guide_check(
+        left, right, time_limit=TIME_LIMIT, guides=[guide] if guide is not None else []
     )
     report = {name: json.loads(report_str)}
     if guide_used and guide is not None:
-        report_str, _, _ = rise.eqsat_check(guide, right, time_limit=TIME_LIMIT)
+        report_str, _ = rise.eqsat_guide_check(guide, right, time_limit=TIME_LIMIT)
         report[f"{name}_2"] = json.loads(report_str)
     return report
+
+
+def eqsat_rules_check(left: rise.RecExpr, right: rise.RecExpr, name: str, ordered_rules: list[str]) -> dict[str, dict]:
+    report_str = rise.eqsat_ordered_rules_check(left, right, time_limit=TIME_LIMIT, ordered_rules=ordered_rules)
+    return {name: json.loads(report_str)}
 
 
 def check_tuple(sample: dict[str, str]) -> dict[str, dict]:
@@ -36,8 +43,9 @@ def check_tuple(sample: dict[str, str]) -> dict[str, dict]:
     right = rise.RecExpr(sample["right"])
 
     tuple_report = eqsat_check(left, right, "baseline")
-    tuple_report |= eqsat_check(left, right, "middle", rise.RecExpr(sample["middle"]))
-    tuple_report |= eqsat_check(left, right, "generated", rise.RecExpr(sample["generated"]))
+    tuple_report = eqsat_rules_check(left, right, "baseline")
+    tuple_report |= eqsat_guide_check(left, right, "middle", rise.RecExpr(sample["middle"]))
+    tuple_report |= eqsat_guide_check(left, right, "generated", rise.RecExpr(sample["generated"]))
 
     return tuple_report
 

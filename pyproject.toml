@@ -18,8 +18,8 @@ dependencies = [
     "dataclass-wizard>=0.35.0",
     "termcolor>=3.1.0",
     "tyro>=0.9.26",
-    "eggshell",
     "plotly>=6.2.0",
+    "eggshell",
 ]
 # "transformers>=4.48.2",
 # "tokenizers>=0.21.0",
