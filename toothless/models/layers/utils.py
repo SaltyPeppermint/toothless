@@ -1,3 +1,4 @@
+import copy
 import torch
 from torch import nn, Tensor
 
@@ -89,3 +90,15 @@ class RotaryPositionalEncoding(nn.Module):
 
         # Apply rotary embedding
         return self._apply_rotary_pos_emb(x, cos, sin)
+
+
+def concat_vec(vec1, vec2, dim):
+    if vec1 is None:
+        return vec2
+    if vec2 is None:
+        return vec1
+    return torch.cat([vec1, vec2], dim=dim)
+
+
+def stack_layers(module: nn.Module, n_layers: int) -> nn.ModuleList:
+    return nn.ModuleList([copy.deepcopy(module) for _ in range(n_layers)])

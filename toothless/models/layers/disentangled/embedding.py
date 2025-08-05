@@ -1,7 +1,7 @@
 import torch.nn as nn
 from torch import Tensor
 
-from ..utils import RoPEPositionalEncoding
+from ..utils import RotaryPositionalEncoding
 
 
 class Embedding(nn.Module):
@@ -9,7 +9,7 @@ class Embedding(nn.Module):
         super(Embedding, self).__init__()
         self.word_embeddings = nn.Embedding(vocab_size, embedding_dim, padding_idx=0)
         if with_pos:
-            self.pos_emb = RoPEPositionalEncoding(embedding_dim)
+            self.pos_emb = RotaryPositionalEncoding(embedding_dim)
         else:
             self.pos_emb = None
         self.norm = nn.LayerNorm(embedding_dim)
