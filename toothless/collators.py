@@ -54,9 +54,9 @@ class VanillaDictCollator(BaseCollator):
         r_padded = torch.nn.utils.rnn.pad_sequence(r_batch, batch_first=True, padding_value=0)
         tgt_padded = torch.nn.utils.rnn.pad_sequence(tgt_batch, batch_first=True, padding_value=0)
 
-        l_mask = torch.zeros(batch_size, l_padded.size(1), dtype=torch.bool)
-        r_mask = torch.zeros(batch_size, r_padded.size(1), dtype=torch.bool)
-        tgt_mask = torch.zeros(batch_size, tgt_padded.size(1), dtype=torch.bool)
+        l_mask = torch.zeros(batch_size, l_padded.shape[1], dtype=torch.bool)
+        r_mask = torch.zeros(batch_size, r_padded.shape[1], dtype=torch.bool)
+        tgt_mask = torch.zeros(batch_size, tgt_padded.shape[1], dtype=torch.bool)
 
         for i, (l_len, r_len, tgt_len) in enumerate(zip(l_lengths, r_lengths, tgt_lengths)):
             l_mask[i, l_len:] = True  # Mask padding positions
@@ -139,7 +139,7 @@ class DisentangledDictCollator(BaseCollator):
         pad_len = self.max_len
         if extra_pad:
             pad_len += 1  # Extra padding since tgt will be shifted
-        paddings = [(0, pad_len - s.size(-1)) for s in samples]
+        paddings = [(0, pad_len - s.shape[-1]) for s in samples]
         padded_elements = [F.pad(s, p, "constant", self.pad_id) for s, p in zip(samples, paddings)]
         return torch.stack(padded_elements)
 
@@ -154,7 +154,7 @@ class DisentangledDictCollator(BaseCollator):
         pad_len = self.max_len
         if extra_pad:
             pad_len += 1  # Extra padding since tgt will be shifted
-        paddings = [(0, pad_len - s.size(-1), 0, pad_len - s.size(-2)) for s in samples]
+        paddings = [(0, pad_len - s.shape[-1], 0, pad_len - s.shape[-2]) for s in samples]
         padded_elements = [F.pad(s, p, "constant", self.pad_id) for s, p in zip(samples, paddings)]
         return torch.stack(padded_elements)
 

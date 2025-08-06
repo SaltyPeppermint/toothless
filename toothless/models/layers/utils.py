@@ -73,7 +73,7 @@ class RotaryPositionalEncoding(nn.Module):
         Returns:
             Rotated Tensor
         """
-        seq_len = x.size(-2)
+        seq_len = x.shape[-2]
 
         # Ensure cache is large enough
         cache_len = max(self.max_seq_len, start_pos + seq_len)

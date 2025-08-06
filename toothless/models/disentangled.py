@@ -90,7 +90,7 @@ class DisentangledGreedyGenerator(nn.Module):
         l_mem = self.model.l_encode(batch)
         r_mem = self.model.r_encode(batch)
 
-        batch_size = r_mem.size(0)
+        batch_size = r_mem.shape[0]
         device = self.model_device()
 
         assert self.vocab.pad_token_id == 0
@@ -138,8 +138,8 @@ class DisentangledGreedyGenerator(nn.Module):
                 # 0 3 4 0 0
                 # 0 0 0 0 0
                 # 0 0 0 0 0
-                padded_tgt_anc[: tgt_anc.size(0), : tgt_anc.size(1)] = tgt_anc
-                padded_tgt_sib[: tgt_sib.size(0), : tgt_sib.size(1)] = tgt_sib
+                padded_tgt_anc[: tgt_anc.shape[0], : tgt_anc.shape[1]] = tgt_anc
+                padded_tgt_sib[: tgt_sib.shape[0], : tgt_sib.shape[1]] = tgt_sib
                 # Extra padding since tgt will be shifted
             batch_tgt_anc.append(padded_tgt_anc)
             batch_tgt_sib.append(padded_tgt_sib)

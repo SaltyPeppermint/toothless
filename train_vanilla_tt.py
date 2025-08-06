@@ -170,7 +170,7 @@ def train(
 
         # Forward pass
         logits = model(l_ids, r_ids, tgt_input, l_mask, r_mask, tgt_input_mask)
-        loss = criterion(logits.reshape(-1, logits.size(-1)), tgt_output.reshape(-1))
+        loss = criterion(logits.reshape(-1, logits.shape[-1]), tgt_output.reshape(-1))
         # loss = loss / gradient_accumulation_steps
 
         # Backwards pass
@@ -231,7 +231,7 @@ def evalulate(
         # Forward pass
         with torch.no_grad():
             logits = model(l_ids, r_ids, tgt_input, src1_padding_mask, src2_padding_mask, tgt_padding_mask)
-            loss = criterion(logits.reshape(-1, logits.size(-1)), tgt_output.reshape(-1))
+            loss = criterion(logits.reshape(-1, logits.shape[-1]), tgt_output.reshape(-1))
 
             ddp_loss[0] += loss
             ddp_loss[1] += len(batch)

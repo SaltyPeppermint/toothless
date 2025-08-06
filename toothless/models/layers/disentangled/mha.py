@@ -52,7 +52,7 @@ class MHTreeAttention(nn.Module):
         if cross_pos_indices is None:
             cross_pos_indices = pos_indices
 
-        batch_size = hidden_state.size(0)
+        batch_size = hidden_state.shape[0]
         # batch_size, num_heads, seq_len, d_proj
         query = self.q_proj(hidden_state).view(batch_size, -1, self.num_heads, self.d_k).transpose(1, 2)
         key = self.k_proj(cross_state).view(batch_size, -1, self.num_heads, self.d_k).transpose(1, 2)
@@ -119,7 +119,7 @@ class MHTreeAttention(nn.Module):
             # (
             #     torch.clamp(relative_pos + att_span, 0, att_span * 2 - 1)
             #     .squeeze(0)
-            #     .expand([query.size(0), query.size(1), query.size(-1)])
+            #     .expand([query.shape[0], query.shape[1], query.shape[-1]])
             # )
             c2p_attn = torch.gather(c2p_attn, dim=-1, index=kv_pos_indices.transpose(-2, -1))
             attn_scores += c2p_attn
@@ -134,7 +134,7 @@ class MHTreeAttention(nn.Module):
 
     def finalize_output(self, output: Tensor) -> Tensor:
         output = output.permute(0, 2, 1, 3).contiguous()
-        new_value_shape = output.size()[:-2] + (-1,)
+        new_value_shape = output.shape[:-2] + (-1,)
         output = output.view(*new_value_shape)
         output = self.out_proj(output)
 
@@ -142,6 +142,6 @@ class MHTreeAttention(nn.Module):
 
 
 def transpose_for_scores(x: Tensor, num_heads: int):
-    new_x_shape = x.size()[:-1] + (num_heads, -1)
+    new_x_shape = x.shape[:-1] + (num_heads, -1)
     x = x.view(*new_x_shape)
-    return x.permute(0, 2, 1, 3)  # .contiguous().view(-1, x.size(1), x.size(-1))
+    return x.permute(0, 2, 1, 3)  # .contiguous().view(-1, x.shape[1], x.shape[-1])

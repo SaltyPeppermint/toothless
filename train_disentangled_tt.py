@@ -155,7 +155,7 @@ def train(
 
         # Forward pass
         out = F.log_softmax(model(batch), dim=-1)
-        loss = criterion(out.view(-1, out.size(-1)), batch["tgt_ids_y"].view(-1))
+        loss = criterion(out.view(-1, out.shape[-1]), batch["tgt_ids_y"].view(-1))
 
         # Backwards pass
         loss.backward()
@@ -203,7 +203,7 @@ def evalulate(
         batch = {k: v.to(rank) for k, v in batch.items()}
         with torch.no_grad():
             out = model(batch)
-            loss = criterion(out.view(-1, out.size(-1)), batch["tgt_ids_y"].view(-1))
+            loss = criterion(out.view(-1, out.shape[-1]), batch["tgt_ids_y"].view(-1))
 
             ddp_loss[0] += loss
             ddp_loss[1] += len(batch)
