@@ -36,6 +36,7 @@ class Tripple:
     tgt_str: str
     r_ids: Tensor
     r_str: str
+    rules_chain: list[str]
     l_anc: Tensor | None = None
     l_sib: Tensor | None = None
     tgt_anc: Tensor | None = None
@@ -81,10 +82,8 @@ class TrippleDataSet(Dataset[Tripple]):
         return self.len
 
     def __getitem__(self, idx: int) -> Tripple:
-        # with ZipFile(self.zipped_samples) as zip_file:
-        #     b = zip_file.read(f"{idx}.json")
-        #     s = json.loads(b)
-        s = self.get_str(idx)
+        with open(self.sample_cache / f"{idx}.json", encoding="utf-8") as f:
+            s = json.load(f)
 
         l_tree = rise.RecExpr(s["left"]).to_data()
         tgt_tree = rise.RecExpr(s["middle"]).to_data()
@@ -99,15 +98,23 @@ class TrippleDataSet(Dataset[Tripple]):
             tgt_anc, tgt_sib = self._tree_data_to_distance_tensor(tgt_tree)
             r_anc, r_sib = self._tree_data_to_distance_tensor(r_tree)
             return Tripple(
-                l_ids, s["left"], tgt_ids, s["middle"], r_ids, s["right"], l_anc, l_sib, tgt_anc, tgt_sib, r_anc, r_sib
+                l_ids,
+                s["left"],
+                tgt_ids,
+                s["middle"],
+                r_ids,
+                s["right"],
+                s["rules"],
+                l_anc,
+                l_sib,
+                tgt_anc,
+                tgt_sib,
+                r_anc,
+                r_sib,
             )
 
         else:
-            return Tripple(l_ids, s["left"], tgt_ids, s["middle"], r_ids, s["right"])
-
-    def get_str(self, idx: int) -> dict[str, str]:
-        with open(self.sample_cache / f"{idx}.json", encoding="utf-8") as f:
-            return json.load(f)
+            return Tripple(l_ids, s["left"], tgt_ids, s["middle"], r_ids, s["right"], s["rules"])
 
     def _tree_data_to_distance_tensor(self, tree_data: TreeData) -> tuple[Tensor, Tensor]:
         padder = nn.ConstantPad2d(1, 0)
@@ -146,20 +153,22 @@ class TrippleDataSet(Dataset[Tripple]):
         self.sample_cache.mkdir()
 
         raw_data = pl.read_parquet(self.raw_path)
-        expl_chains = raw_data.get_column("explanation_chain")
+        expr_chains = raw_data.get_column("expr_chain").to_list()
+        rules_chains = raw_data.get_column("rules_chain").to_list()
 
-        index_tripples = [self._pick_fixed_distance_indices(len(chain) - 1) for chain in expl_chains]
+        index_tripples = [self._pick_fixed_distance_indices(len(chain) - 1) for chain in expr_chains]
         length = sum([len(chain_pairs) for chain_pairs in index_tripples])
         print(f"Total tripples: {length}")
 
         samples = []
         with tqdm(total=length, desc="Creating tripples...") as pbar:
-            for chain, index_tripple in zip(expl_chains, index_tripples):
+            for expr_chain, rules_chain, index_tripple in zip(expr_chains, rules_chains, index_tripples):
                 for left_idx, middle_idx, right_idx in index_tripple:
                     sample = {
-                        "left": str(chain[left_idx]),
-                        "middle": str(chain[middle_idx]),
-                        "right": str(chain[right_idx]),
+                        "left": str(expr_chain[left_idx]),
+                        "middle": str(expr_chain[middle_idx]),
+                        "right": str(expr_chain[right_idx]),
+                        "rules": rules_chain[left_idx : right_idx + 1],
                     }
 
                     samples.append(sample)

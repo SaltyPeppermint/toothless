@@ -147,7 +147,7 @@ def train(
     model.train()
     ddp_loss = torch.zeros(2).to(rank)
 
-    for batch_idx, (batch, num_tokens) in enumerate(
+    for batch_idx, (batch, _rules_chain, num_tokens) in enumerate(
         tqdm(dataloader, desc=f"Training Epoch {epoch + 1}/{train_args.epochs}")
     ):
         # Move batch to device

@@ -38,22 +38,34 @@ def _load_fragment(data_file: Path) -> pl.DataFrame:
         json_content = json.load(f)
 
     exprs = [rise.RecExpr(x["sample"]) for x in json_content["sample_data"]]
-    # features = rise.PyRecExpr.batch_simple_features(exprs, var_names, ignore_unknown)
-    # schema = rise.PyRecExpr.simple_feature_names(var_names, ignore_unknown)
     start_term = rise.RecExpr(json_content["start_expr"])
 
-    # df = pl.DataFrame(features, schema=schema, orient="row")
-    df = pl.DataFrame()
+    rule_chains = []
+    expr_chains = []
+    for x in json_content["sample_data"]:
+        r_c = []
+        expl_c = []
+        for y in x["explanation"]["explanation_chain"]:
+            expl_c.append(y["rec_expr"])
+            applied_rules = y["applied_rules"]
+            if len(applied_rules) == 0:
+                r_c.append("")
+            else:
+                r_c.append(applied_rules[0])
+        rule_chains.append(r_c)
+        expr_chains.append(expl_c)
 
-    expl_chain = pl.Series(
-        name="explanation_chain",
-        values=[[y["rec_expr"] for y in x["explanation"]["explanation_chain"]] for x in json_content["sample_data"]],
-    )
-    generation = pl.Series(name="generation", values=[i["generation"] for i in json_content["sample_data"]])
-    goal_expr = pl.Series(name="goal_expr", values=[str(i) for i in exprs])
-    df = df.with_columns([generation, expl_chain, goal_expr])
+    df = pl.DataFrame()
     df = df.with_columns(
-        pl.col("explanation_chain").map_elements(lambda x: x[len(x) // 2], return_dtype=pl.String).alias("middle_expr")
+        [
+            pl.Series(name="generation", values=[i["generation"] for i in json_content["sample_data"]]),
+            pl.Series(name="expr_chain", values=expr_chains),
+            pl.Series(name="rules_chain", values=rule_chains),
+            pl.Series(name="goal_expr", values=[str(i) for i in exprs]),
+        ]
+    )
+    df = df.with_columns(
+        pl.col("expr_chain").map_elements(lambda x: x[len(x) // 2], return_dtype=pl.String).alias("middle_expr")
     )
     df = df.with_columns(pl.lit(str(start_term)).alias("start_expr"))
 

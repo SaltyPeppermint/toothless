@@ -1,8 +1,8 @@
 uv run infer_vanilla_tt.py \
     --infer_data "data/infer_data.json" \
-    --folder "saved_models/23-07-25-2025_19:45:56" \
+    --folder "saved_models/25-08-05_13:25:52" \
     --model-suffix "_0" \
     --n-train-data 4096 \
     --n-eval-data 4096 \
-    --batch-size 16
+    --batch-size 32
 #torchrun --nproc_per_node 1 --nnodes 1 --node_rank 0 --master_addr localhost --master_port 6601

@@ -156,7 +156,7 @@ def train(
     model.train()
     ddp_loss = torch.zeros(2).to(rank)
 
-    for batch_idx, (batch, num_tokens) in enumerate(
+    for batch_idx, (batch, _rules_chain, num_tokens) in enumerate(
         tqdm(dataloader, desc=f"Training Epoch {epoch + 1}/{train_args.epochs}")
     ):
         # Move batch to device
@@ -258,7 +258,7 @@ if __name__ == "__main__":
     args = tyro.cli(TrainRunArgs)
 
     start_time = datetime.now()
-    save_folder = Path(args.model.output_dir) / start_time.strftime("%d-%m-%y-%Y_%H:%M:%S")
+    save_folder = Path(args.model.output_dir) / start_time.strftime("%y-%m-%d-%H:%M:%S")
     save_folder.mkdir(exist_ok=True, parents=True)
     with open(save_folder / "model_args.json", mode="w", encoding="utf-8") as f:
         f.write(args.model.to_json())
