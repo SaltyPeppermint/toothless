@@ -15,7 +15,7 @@ from toothless.vocab import SimpleVocab
 from toothless.utils import cleanup_process_group, rank0print, setup_process_group
 from toothless.collators import VanillaDictCollator
 from toothless.data import TrippleDataSet, Tripple
-from toothless.models.disentangled import DisentangledDualTreeTransformer
+from toothless.models.vanilla import VanillaDualTreeTransformer
 from toothless.models.utils import count_parameters
 from toothless.args import DataArguments, InferenceArguments, ModelArguments
 import toothless.models.vanilla as vanilla
@@ -39,7 +39,7 @@ def fsdp_main(rank: int, world_size: int, infer_args: InferenceArguments, datase
     # Construct Base Model
     weights = torch.load(infer_args.folder + f"/tree_transformer{infer_args.model_suffix}.pt")
 
-    model = DisentangledDualTreeTransformer(model_args, len(vocab), len(vocab), data_args.k, state_dict=weights)
+    model = VanillaDualTreeTransformer(model_args, len(vocab), len(vocab), state_dict=weights)
     rank0print(rank, "Base model ready")
 
     # FSDP model and Mixed Precision Config
@@ -59,20 +59,20 @@ def fsdp_main(rank: int, world_size: int, infer_args: InferenceArguments, datase
     collator = VanillaDictCollator(vocab.pad_token_id, data_args.max_len, data_args.k, vocab)
 
     # infer.json
-    rank0print(rank, "\n=================\nRunning inference on infer_data.json ...")
-    with open(infer_args.infer_data, encoding="utf-8") as f:
-        tripples = json.load(f)
+    # rank0print(rank, "\n=================\nRunning inference on infer_data.json ...")
+    # with open(infer_args.infer_data, encoding="utf-8") as f:
+    #     tripples = json.load(f)
 
-    batch, _n_tokens = collator(tripples)
+    # batch, _rules_chain, _n_tokens = collator(tripples)
 
-    result = vanilla.generate_with_probabilities(model, batch["l_ids"], batch["r_ids"], vocab)
+    # result = vanilla.generate_with_probabilities(model, batch["l_ids"], batch["r_ids"], vocab)
 
-    p = Path("viz/asts/infer_data")
-    p.mkdir(parents=True, exist_ok=True)
-    infer.batch_process_result(
-        rank, vocab, tripples, result.tokens.tolist(), result.token_probs.tolist(), p, 0, infer_args.verbose
-    )
-    del batch, result
+    # p = Path("viz/asts/infer_data")
+    # p.mkdir(parents=True, exist_ok=True)
+    # infer.batch_process_result(
+    #     rank, vocab, tripples, result.tokens.tolist(), result.token_probs.tolist(), p, 0, infer_args.verbose
+    # )
+    # del batch, result
 
     # Running inference on dataset samples
     train_dataset, eval_dataset = torch.utils.data.random_split(
@@ -80,7 +80,7 @@ def fsdp_main(rank: int, world_size: int, infer_args: InferenceArguments, datase
     )
 
     train_distances, train_gen_tripples = _batch_infer(
-        rank, data_args.sample_distance, infer_args, vocab, model, collator, train_dataset, "train"
+        rank, data_args, infer_args, vocab, model, collator, train_dataset, "train"
     )
     with open("train_gen_tripples_vanilla.json", mode="w", encoding="utf-8") as f:
         json.dump(train_gen_tripples, f)
@@ -88,7 +88,7 @@ def fsdp_main(rank: int, world_size: int, infer_args: InferenceArguments, datase
     infer.print_distance(rank, train_distances, "TRAIN")
 
     eval_distances, eval_gen_tripples = _batch_infer(
-        rank, data_args.sample_distance, infer_args, vocab, model, collator, eval_dataset, "eval"
+        rank, data_args, infer_args, vocab, model, collator, eval_dataset, "eval"
     )
     with open("eval_gen_tripples_vanilla.json", mode="w", encoding="utf-8") as f:
         json.dump(eval_gen_tripples, f)
@@ -100,7 +100,7 @@ def fsdp_main(rank: int, world_size: int, infer_args: InferenceArguments, datase
 
 def _batch_infer(
     rank: int,
-    sample_distance: int,
+    data_args: DataArguments,
     infer_args: InferenceArguments,
     vocab: SimpleVocab,
     model: FSDP,
@@ -123,10 +123,10 @@ def _batch_infer(
 
     for i in tqdm(range(0, n, infer_args.batch_size), desc=f"Inference Batch (Batch Size {infer_args.batch_size})"):
         tripples = [dataset[i] for i in range(i, i + infer_args.batch_size)]
-        batch, _n_tokens = collator(tripples)
-        result = vanilla.generate_with_probabilities(model, batch["l_ids"], batch["r_ids"], vocab)
+        batch, _rules_chain, _n_tokens = collator(tripples)
+        result = vanilla.generate_with_probabilities(model, batch["l_ids"], batch["r_ids"], vocab, data_args.max_len)
 
-        p = Path(f"viz/asts/d{sample_distance}/{ds_name}_dataset")
+        p = Path(f"viz/asts/d{data_args.sample_distance}/{ds_name}_dataset")
         p.mkdir(parents=True, exist_ok=True)
         batch_distance, batch_gen_tripples = infer.batch_process_result(
             rank, vocab, tripples, result.tokens.tolist(), result.token_probs.tolist(), p, i, infer_args.verbose
@@ -140,7 +140,6 @@ def _batch_infer(
 
 if __name__ == "__main__":
     infer_args = tyro.cli(InferenceArguments)
-    print(vars(infer_args))
     with open(Path(infer_args.folder) / "data_args.json", encoding="utf-8") as f:
         data_args = DataArguments.from_json(f.read())
     assert isinstance(data_args, DataArguments)
@@ -151,5 +150,4 @@ if __name__ == "__main__":
     if world_size <= 1:
         fsdp_main(0, world_size, infer_args, dataset)
     else:
-        mp.spawn(fsdp_main, args=(world_size, infer_args, dataset), nprocs=world_size, join=True)  # type: ignore
-    print("\nDONE")
+        mp.spawn(fsdp_main, args=(world_size, infer_args, dataset), nprocs=world_size, join=True)

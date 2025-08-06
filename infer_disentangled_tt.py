@@ -63,7 +63,7 @@ def fsdp_main(rank: int, world_size: int, infer_args: InferenceArguments, datase
     with open(infer_args.infer_data, encoding="utf-8") as f:
         tripples = json.load(f)
 
-    batch, _n_tokens = data_loader(tripples)
+    batch, _rules_chain, _n_tokens = data_loader(tripples)
     batch = {k: v.to(rank) for k, v in batch.items()}
     batch_ids, batch_probs = generator(batch)
 
@@ -123,7 +123,7 @@ def _batch_infer(
 
     for i in tqdm(range(0, n, infer_args.batch_size), desc=f"Inference Batch (Batch Size {infer_args.batch_size})"):
         tripples = [dataset[i] for i in range(i, i + infer_args.batch_size)]
-        batch, _n_tokens = collator(tripples)
+        batch, _rules_chain, _n_tokens = collator(tripples)
         batch = {k: v.to(rank) for k, v in batch.items()}
         batch_ids, batch_probs = generator(batch)
 

@@ -9,7 +9,7 @@ from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 
 from .layers.vanilla.decoder import TransformerDecoderLayer
 from .layers.vanilla.encoder import TransformerEncoderLayer
-from .utils import create_causal_mask  # type: ignore # noqa: F401
+from .utils import create_causal_mask
 from ..args import ModelArguments
 from ..vocab import SimpleVocab
 
@@ -201,12 +201,13 @@ class GenerationResult:
         return result
 
 
+@torch.compile()
 def generate_with_probabilities(
     model: VanillaDualTreeTransformer | FSDP,
     l_batch: Tensor,
     r_batch: Tensor,
     vocab: SimpleVocab,
-    max_length: int = 256,
+    max_len: int,
     temperature: float = 0.0,
     top_k: int | None = None,
     top_p: int | None = None,
@@ -218,7 +219,7 @@ def generate_with_probabilities(
         model: The VanillaDualTreeTransformer model
         l_batch: First source sequences [batch_size, seq_len]
         r_batch: Second source sequences [batch_size, seq_len]
-        max_length: Maximum generation length
+        max_len: Maximum generation length
         vocab: The used vocabulary
         temperature: Sampling temperature (1.0 = no change, <1.0 = more conservative, >1.0 = more random, 0.0 = no randomness)
         top_k: Keep only top k tokens for sampling (None = no filtering)
@@ -243,17 +244,20 @@ def generate_with_probabilities(
         r_mem = model.r_encode(r_batch)
         fused_memory = model.fuse_memories(l_mem, r_mem)
 
-    # Initialize generation
+    # Initialize generation with all start tokens
     generated_tokens = torch.full((batch_size, 1), start_token, device=device, dtype=torch.long)
-    token_probabilities = torch.zeros((batch_size, max_length + 1), device=device)  # +1 for start token
+    token_probabilities = torch.zeros((batch_size, max_len + 1), device=device)  # +1 for start token
     token_probabilities[:, 0] = 1.0  # Start token has probability 1.0
 
     finished = torch.zeros(batch_size, dtype=torch.bool, device=device)
 
-    for step in range(max_length):
+    for step in range(max_len):
+        print(f"step {step}")
         with torch.no_grad():
             # Get logits for current sequence
-            logits = model.decode(generated_tokens, fused_memory)
+            # Dont forget to project them up into your vocabulary!
+            logits = model.output_proj(model.decode(generated_tokens, fused_memory))
+
             next_token_logits = logits[:, -1, :]  # Last position logits
 
             # Apply temperature
@@ -327,13 +331,14 @@ def generate_with_probabilities(
     )
 
 
+@torch.compile()
 def beam_search_with_probabilities(
     model: VanillaDualTreeTransformer | FSDP,
     l_batch: Tensor,
     r_batch: Tensor,
     vocab: SimpleVocab,
+    max_len: int,
     beam_size: int = 3,
-    max_length: int = 20,
     length_penalty: float = 1.0,
 ) -> GenerationResult:
     """
@@ -345,7 +350,7 @@ def beam_search_with_probabilities(
         r_batch: Second source sequences [batch_size, seq_len]
         vocab: The used vocabulary
         beam_size: Number of beams to keep
-        max_length: Maximum generation length
+        max_len: Maximum generation length
         length_penalty: Length penalty factor (>1.0 favors longer sequences)
 
     Returns:
@@ -375,7 +380,7 @@ def beam_search_with_probabilities(
     # Track finished beams
     finished_beams = torch.zeros(batch_size, beam_size, dtype=torch.bool, device=device)
 
-    for step in range(max_length):
+    for step in range(max_len):
         # Expand memory for all beams
         expanded_memory = (
             fused_memory.unsqueeze(1)
