@@ -252,7 +252,6 @@ def generate_with_probabilities(
     finished = torch.zeros(batch_size, dtype=torch.bool, device=device)
 
     for step in range(max_len):
-        print(f"step {step}")
         with torch.no_grad():
             # Get logits for current sequence
             # Dont forget to project them up into your vocabulary!
