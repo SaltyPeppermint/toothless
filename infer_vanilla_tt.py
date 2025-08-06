@@ -1,4 +1,3 @@
-import json
 from pathlib import Path
 
 import torch
@@ -23,7 +22,7 @@ import toothless.inference as infer
 
 
 def fsdp_main(rank: int, world_size: int, infer_args: InferenceArguments, dataset: TrippleDataSet):
-    setup_process_group(world_size)
+    setup_process_group(rank, world_size)
     rank0print("Distributed Network ready")
     torch.cuda.set_device(rank)
 
@@ -83,7 +82,7 @@ def fsdp_main(rank: int, world_size: int, infer_args: InferenceArguments, datase
         rank, data_args, infer_args, vocab, model, collator, train_dataset, "train"
     )
     with open("train_gen_tripples_vanilla.json", mode="w", encoding="utf-8") as f:
-        json.dump(train_gen_tripples, f)
+        f.write(infer.InferResult.list_to_json(train_gen_tripples))
     del train_gen_tripples
     infer.print_distance(rank, train_distances, "TRAIN")
 
@@ -91,7 +90,7 @@ def fsdp_main(rank: int, world_size: int, infer_args: InferenceArguments, datase
         rank, data_args, infer_args, vocab, model, collator, eval_dataset, "eval"
     )
     with open("eval_gen_tripples_vanilla.json", mode="w", encoding="utf-8") as f:
-        json.dump(eval_gen_tripples, f)
+        f.write(infer.InferResult.list_to_json(eval_gen_tripples))
     del eval_gen_tripples
     infer.print_distance(rank, eval_distances, "EVAL")
 
@@ -107,7 +106,7 @@ def _batch_infer(
     collator: VanillaDictCollator,
     dataset: Subset[Tripple],
     ds_name: str,
-) -> tuple[list[FirstErrorDistance], list[dict[str, str]]]:
+) -> tuple[list[FirstErrorDistance], list[infer.InferResult]]:
     if ds_name == "eval":
         n = infer_args.n_eval_data if infer_args.n_eval_data else len(dataset)
     elif ds_name == "train":
@@ -123,13 +122,13 @@ def _batch_infer(
 
     for i in tqdm(range(0, n, infer_args.batch_size), desc=f"Inference Batch (Batch Size {infer_args.batch_size})"):
         tripples = [dataset[i] for i in range(i, i + infer_args.batch_size)]
-        batch, _rules_chain, _n_tokens = collator(tripples)
+        batch, rule_chains, _n_tokens = collator(tripples)
         result = vanilla.generate_with_probabilities(model, batch["l_ids"], batch["r_ids"], vocab, data_args.max_len)
 
         p = Path(f"viz/asts/d{data_args.sample_distance}/{ds_name}_dataset")
         p.mkdir(parents=True, exist_ok=True)
         batch_distance, batch_gen_tripples = infer.batch_process_result(
-            vocab, tripples, result.tokens.tolist(), result.token_probs.tolist(), p, i, infer_args.verbose
+            vocab, tripples, result.tokens.tolist(), result.token_probs.tolist(), rule_chains, p, i, infer_args.verbose
         )
         distances.extend(batch_distance)
         gen_tripples.extend(batch_gen_tripples)
@@ -147,7 +146,4 @@ if __name__ == "__main__":
 
     world_size = torch.cuda.device_count()
 
-    if world_size <= 1:
-        fsdp_main(0, world_size, infer_args, dataset)
-    else:
-        mp.spawn(fsdp_main, args=(world_size, infer_args, dataset), nprocs=world_size, join=True)
+    mp.spawn(fsdp_main, args=(world_size, infer_args, dataset), nprocs=world_size, join=True)

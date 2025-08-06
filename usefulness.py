@@ -1,18 +1,18 @@
 import json
 from collections import defaultdict
-# from multiprocessing import Pool, Manager
-
 
 from tqdm.auto import tqdm
 
-
 from eggshell import rise  # type: ignore
+
+from toothless.inference import InferResult  # type: ignore
 
 
 MAX_SAMPLES = 50000
 TIME_LIMIT = 10.0
 BATCH_SIZE = 1
 WORKER_THREADS = 2
+PATH = "train_gen_tripples_vanilla.json"
 
 
 def eqsat_check(left: rise.RecExpr, right: rise.RecExpr, name: str) -> dict[str, dict]:
@@ -20,39 +20,38 @@ def eqsat_check(left: rise.RecExpr, right: rise.RecExpr, name: str) -> dict[str,
     return {name: json.loads(report_str)}
 
 
-def eqsat_guide_check(
-    left: rise.RecExpr, right: rise.RecExpr, name: str, guide: rise.RecExpr | None = None
-) -> dict[str, dict]:
+def eqsat_guide_check(left: rise.RecExpr, right: rise.RecExpr, guide: rise.RecExpr, name: str) -> dict[str, dict]:
     report_str, guide_used = rise.eqsat_guide_check(
         left, right, time_limit=TIME_LIMIT, guides=[guide] if guide is not None else []
     )
     report = {name: json.loads(report_str)}
-    if guide_used and guide is not None:
+    if guide_used:
         report_str, _ = rise.eqsat_guide_check(guide, right, time_limit=TIME_LIMIT)
         report[f"{name}_2"] = json.loads(report_str)
     return report
 
 
-def eqsat_rules_check(left: rise.RecExpr, right: rise.RecExpr, name: str, ordered_rules: list[str]) -> dict[str, dict]:
+def eqsat_rules_check(left: rise.RecExpr, right: rise.RecExpr, ordered_rules: list[str], name: str) -> dict[str, dict]:
+    ordered_rules = [r for r in ordered_rules if r]
     report_str = rise.eqsat_ordered_rules_check(left, right, time_limit=TIME_LIMIT, ordered_rules=ordered_rules)
     return {name: json.loads(report_str)}
 
 
-def check_tuple(sample: dict[str, str]) -> dict[str, dict]:
-    left = rise.RecExpr(sample["left"])
-    right = rise.RecExpr(sample["right"])
+def check_tuple(sample: InferResult) -> dict[str, dict]:
+    left = rise.RecExpr(sample.left)
+    right = rise.RecExpr(sample.right)
 
     tuple_report = eqsat_check(left, right, "baseline")
-    tuple_report = eqsat_rules_check(left, right, "baseline")
-    tuple_report |= eqsat_guide_check(left, right, "middle", rise.RecExpr(sample["middle"]))
-    tuple_report |= eqsat_guide_check(left, right, "generated", rise.RecExpr(sample["generated"]))
+    tuple_report = eqsat_rules_check(left, right, sample.rules_chain, "rules_chain")
+    tuple_report |= eqsat_guide_check(left, right, rise.RecExpr(sample.middle), "middle")
+    tuple_report |= eqsat_guide_check(left, right, rise.RecExpr(sample.generated), "generated")
 
     return tuple_report
 
 
 if __name__ == "__main__":
-    with open("eval_gen_tripples.json", encoding="utf-8") as f:
-        eval_tuples = json.load(f)
+    with open(PATH, encoding="utf-8") as f:
+        eval_tuples = InferResult.from_list(json.load(f))
 
     n_samples = min(len(eval_tuples), MAX_SAMPLES)
 
@@ -61,17 +60,15 @@ if __name__ == "__main__":
     for tuple in tqdm(eval_tuples[:n_samples], desc=f"Evaluating {n_samples} samples"):
         reports.append(check_tuple(tuple))
 
-    # with Manager() as manager:
-    #     shared_list = manager.list(eval_tuples[:n_samples])
-
-    #     with Pool(processes=WORKER_THREADS) as pool:
-    #         for r in tqdm(pool.imap_unordered(check_tuple, shared_list, chunksize=BATCH_SIZE)):
-    #             reports.append(r)
-
     max_nodes = []
-    stop_reasons = {"baseline": defaultdict(int), "middle": defaultdict(int), "generated": defaultdict(int)}
+    stop_reasons = {
+        "baseline": defaultdict(int),
+        "middle": defaultdict(int),
+        "generated": defaultdict(int),
+        "rules_chain": defaultdict(int),
+    }
     reached_after_guide = {"middle": 0, "generated": 0}
-    guide_reduced_mem = {"middle": 0, "generated": 0}
+    guide_reduced_mem = {"middle": 0, "generated": 0, "rules_chain": 0}
 
     for report in reports:
         max_node = {}
@@ -81,6 +78,12 @@ if __name__ == "__main__":
 
         max_node["middle"] = report["middle"]["report"]["egraph_nodes"]
         stop_reasons["middle"][str(report["middle"]["report"]["stop_reason"])] += 1
+
+        max_node["rules_chain"] = report["rules_chain"]["report"]["egraph_nodes"]
+        stop_reasons["rules_chain"][str(report["rules_chain"]["report"]["stop_reason"])] += 1
+
+        if max_node["baseline"] < max_node["rules_chain"]:
+            guide_reduced_mem["rules_chain"] += 1
 
         if "middle_2" in report:
             max_node["middle"] = max(max_node["middle"], report["middle_2"]["report"]["egraph_nodes"])

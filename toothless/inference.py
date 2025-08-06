@@ -1,5 +1,7 @@
 from pathlib import Path
+from dataclasses import dataclass
 
+from dataclass_wizard import JSONWizard
 
 from eggshell import FirstErrorDistance, EggshellException
 from eggshell import rise  # type: ignore
@@ -9,18 +11,28 @@ from toothless.utils import rank0print
 from toothless.data import split_off_special, Tripple
 
 
+@dataclass
+class InferResult(JSONWizard):
+    left: str
+    right: str
+    middle: str
+    generated: str
+    rules_chain: list[str]
+
+
 def batch_process_result(
     vocab: SimpleVocab,
     tripples: list[Tripple],
     batch_ids: list[list[int]],
     batch_probs: list[list[float]],
+    rule_chains: list[list[str]],
     path: Path,
     id_offset: int,
     verbose: bool,
-) -> tuple[list[FirstErrorDistance], list[dict[str, str]]]:
+) -> tuple[list[FirstErrorDistance], list[InferResult]]:
     batch_distances = []
     batch_gen_tripples = []
-    for i, (tripple, ids, token_probs) in enumerate(zip(tripples, batch_ids, batch_probs)):
+    for i, (tripple, ids, token_probs, rule_chain) in enumerate(zip(tripples, batch_ids, batch_probs, rule_chains)):
         sample_id = i + id_offset
 
         rise.RecExpr(tripple.l_str).to_dot(f"{sample_id} left", str(path / f"{sample_id}_left"))
@@ -56,7 +68,7 @@ def batch_process_result(
                 transparent=True,
             )
             batch_gen_tripples.append(
-                {"left": tripple.l_str, "middle": tripple.tgt_str, "right": tripple.r_str, "generated": str(lowered)}
+                InferResult(tripple.l_str, tripple.r_str, tripple.tgt_str, str(lowered), rule_chain)
             )
 
             if verbose:
