@@ -37,7 +37,7 @@ def fsdp_main(
     data_args: DataArguments,
     save_folder: Path,
 ):
-    setup_process_group(rank, world_size)
+    setup_process_group(world_size)
     torch.cuda.set_device(rank)
 
     writer = SummaryWriter(log_dir=train_args.run_log_dir) if rank == 0 else None
@@ -45,13 +45,13 @@ def fsdp_main(
     dataset = TrippleDataSet(data_args, False)
     if rank == 0:
         dataset.vocab.save(save_folder / "vocab.json")
-    rank0print(rank, "Dataset ready")
+    rank0print("Dataset ready")
 
     # Load Data
     vocab_size = len(dataset.vocab)
     collator = VanillaDictCollator(dataset.vocab.pad_token_id, data_args.max_len, data_args.k, dataset.vocab)
     train_dataloader, eval_dataloader = mk_loaders(rank, world_size, dataset, collator, data_args)
-    rank0print(rank, "DataLoaders ready")
+    rank0print("DataLoaders ready")
 
     # Construct Base Model
     init_start_event = torch.cuda.Event(enable_timing=True)
@@ -64,8 +64,8 @@ def fsdp_main(
         writer.add_graph(model, example_batch)
 
     table, total_params = count_parameters(model)
-    rank0print(rank, table)
-    rank0print(rank, f"Total Parameters: {total_params}")
+    rank0print(table)
+    rank0print(f"Total Parameters: {total_params}")
 
     # FSDP model and Mixed Precision Config
     mixed_precision = MixedPrecision(param_dtype=torch.bfloat16, cast_forward_inputs=True) if train_args.bf16 else None
@@ -97,7 +97,7 @@ def fsdp_main(
 
     best_eval_loss = float("inf")
 
-    rank0print(rank, "Starting training!")
+    rank0print("Starting training!")
     init_start_event.record(torch.cuda.current_stream())
 
     for epoch in range(train_args.epochs):
@@ -129,11 +129,11 @@ def fsdp_main(
         cosine_scheduler.step()
 
     init_end_event.record(torch.cuda.current_stream())
-    rank0print(rank, "Training finished!")
+    rank0print("Training finished!")
 
     if rank == 0:
         init_end_event.synchronize()
-    rank0print(rank, f"CUDA event elapsed time: {init_start_event.elapsed_time(init_end_event) / 1000} sec")
+    rank0print(f"CUDA event elapsed time: {init_start_event.elapsed_time(init_end_event) / 1000} sec")
 
     save_model(model, save_folder, "final", rank)
 
@@ -201,7 +201,7 @@ def train(
     if writer is not None:
         writer.add_scalar("Train Loss/epoch", train_loss, epoch + 1)
 
-    rank0print(rank, f"Epoch: {epoch + 1}/{train_args.epochs} \tTrain Loss: {train_loss:.6f}")
+    rank0print(f"Epoch: {epoch + 1}/{train_args.epochs} \tTrain Loss: {train_loss:.6f}")
 
 
 def evalulate(
@@ -241,7 +241,7 @@ def evalulate(
     if writer is not None:
         writer.add_scalar("Eval loss/epoch", eval_loss, epoch + 1)
 
-    rank0print(rank, f"Epoch: {epoch + 1}/{max_epochs} \tValidation loss: {eval_loss:.4f}")
+    rank0print(f"Epoch: {epoch + 1}/{max_epochs} \tValidation loss: {eval_loss:.4f}")
     return float(eval_loss)
 
 

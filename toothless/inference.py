@@ -10,7 +10,6 @@ from toothless.data import split_off_special, Tripple
 
 
 def batch_process_result(
-    rank: int,
     vocab: SimpleVocab,
     tripples: list[Tripple],
     batch_ids: list[list[int]],
@@ -31,14 +30,14 @@ def batch_process_result(
         rise.RecExpr(tripple.r_str).to_dot(f"{sample_id} right", str(path / f"{sample_id}_right"))
 
         if verbose:
-            rank0print(rank, "----------")
-            rank0print(rank, f"Sample {sample_id}", "blue")
-            rank0print(rank, "LEFT:", "green")
-            rank0print(rank, tripple.r_str)
-            rank0print(rank, "MIDDLE:", "green")
-            rank0print(rank, tripple.tgt_str)
-            rank0print(rank, "RIGHT:", "green")
-            rank0print(rank, tripple.r_str)
+            rank0print("----------")
+            rank0print(f"Sample {sample_id}", "blue")
+            rank0print("LEFT:", "green")
+            rank0print(tripple.r_str)
+            rank0print("MIDDLE:", "green")
+            rank0print(tripple.tgt_str)
+            rank0print("RIGHT:", "green")
+            rank0print(tripple.r_str)
 
         raw_generated_tokens = [vocab.id2token(int(i)) for i in ids if i]
         generated_tokens = split_off_special(raw_generated_tokens, vocab)
@@ -61,38 +60,38 @@ def batch_process_result(
             )
 
             if verbose:
-                rank0print(rank, "GENERATED:", "green")
-                rank0print(rank, lowered)
+                rank0print("GENERATED:", "green")
+                rank0print(lowered)
 
         except EggshellException as e:
             generated.to_dot(f"{sample_id} generated (damaged)", str(path / f"{sample_id}_generated"))  # type: ignore
             generated.to_dot(
                 f"{sample_id} generated (damaged)", str(path / f"{sample_id}_generated_t"), transparent=True
             )
-            rank0print(rank, "COULD NOT PROPERLY PARSE GENERATED GUIDE.", "red")
-            rank0print(rank, e, "red")
+            rank0print("COULD NOT PROPERLY PARSE GENERATED GUIDE.", "red")
+            rank0print(e, "red")
             if verbose:
-                rank0print(rank, "BEST ATTEMPT:", "red")
-                rank0print(rank, generated)
-                rank0print(rank, f"Used {generated.used_tokens} out of {len(generated_tokens)}", "red")
+                rank0print("BEST ATTEMPT:", "red")
+                rank0print(generated)
+                rank0print(f"Used {generated.used_tokens} out of {len(generated_tokens)}", "red")
 
     return batch_distances, batch_gen_tripples
 
 
 def print_distance(rank: int, distances: list[FirstErrorDistance], ds_name: str):
-    rank0print(rank, f"\n### AVERAGE DISTANCE IN {ds_name} DATASET ###", "yellow")
+    rank0print(f"\n### AVERAGE DISTANCE IN {ds_name} DATASET ###", "yellow")
     n_hits = sum([d.n_hits for d in distances])
-    rank0print(rank, f"Hits: {n_hits}", "yellow")
+    rank0print(f"Hits: {n_hits}", "yellow")
     n_misses = sum([d.n_misses for d in distances])
-    rank0print(rank, f"Misses: {n_misses}", "yellow")
+    rank0print(f"Misses: {n_misses}", "yellow")
     perfect_matches = sum([1 for d in distances if d.n_misses == 0])
-    rank0print(rank, f"Perfect matches: {perfect_matches}", "yellow")
+    rank0print(f"Perfect matches: {perfect_matches}", "yellow")
 
     avg_hit_prob = _avg_prob([d.hit_probabilities() for d in distances if d])
-    rank0print(rank, f"Average Hit Probability: {avg_hit_prob}", "yellow")
+    rank0print(f"Average Hit Probability: {avg_hit_prob}", "yellow")
     avg_miss_prob = _avg_prob([d.miss_probabilities() for d in distances if d])
-    rank0print(rank, f"Average Miss Probability: {avg_miss_prob}", "yellow")
-    rank0print(rank, "\n")
+    rank0print(f"Average Miss Probability: {avg_miss_prob}", "yellow")
+    rank0print("\n")
 
 
 def _avg_prob(probs: list[list[float | None]]):

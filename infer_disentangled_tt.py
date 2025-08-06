@@ -22,8 +22,8 @@ import toothless.inference as infer
 
 
 def fsdp_main(rank: int, world_size: int, infer_args: InferenceArguments, dataset: TrippleDataSet):
-    setup_process_group(rank, world_size)
-    rank0print(rank, "Distributed Network ready")
+    setup_process_group(world_size)
+    rank0print("Distributed Network ready")
     torch.cuda.set_device(rank)
 
     # Load Data
@@ -40,12 +40,12 @@ def fsdp_main(rank: int, world_size: int, infer_args: InferenceArguments, datase
     model = DisentangledDualTreeTransformer(model_args, len(vocab), len(vocab), data_args.k, state_dict=weights)
     model.eval()
     generator = DisentangledGreedyGenerator(model, data_args.max_len, vocab, data_args.k)
-    rank0print(rank, "Base Model and Generator ready")
+    rank0print("Base Model and Generator ready")
 
     table, total_params = count_parameters(model)
     if infer_args.verbose:
-        rank0print(rank, table)
-    rank0print(rank, f"Total Parameters: {total_params}")
+        rank0print(table)
+    rank0print(f"Total Parameters: {total_params}")
 
     # FSDP model and Mixed Precision Config
     mixed_precision = MixedPrecision(param_dtype=torch.bfloat16, cast_forward_inputs=True) if infer_args.bf16 else None
@@ -54,12 +54,12 @@ def fsdp_main(rank: int, world_size: int, infer_args: InferenceArguments, datase
     generator = FSDP(generator, sharding_strategy=sharding_strategy, mixed_precision=mixed_precision, device_id=rank)
     generator.eval()
 
-    rank0print(rank, "FSDP Model/Generator loaded to GPU and ready")
+    rank0print("FSDP Model/Generator loaded to GPU and ready")
 
     data_loader = DisentangledDictCollator(vocab.pad_token_id, data_args.max_len, data_args.k, vocab)
 
     # infer.json
-    rank0print(rank, "\n=================\nRunning inference on infer_data.json ...")
+    rank0print("\n=================\nRunning inference on infer_data.json ...")
     with open(infer_args.infer_data, encoding="utf-8") as f:
         tripples = json.load(f)
 
@@ -69,7 +69,7 @@ def fsdp_main(rank: int, world_size: int, infer_args: InferenceArguments, datase
 
     p = Path("viz/asts/infer_data")
     p.mkdir(parents=True, exist_ok=True)
-    infer.batch_process_result(rank, vocab, tripples, batch_ids, batch_probs, p, 0, infer_args.verbose)
+    infer.batch_process_result(vocab, tripples, batch_ids, batch_probs, p, 0, infer_args.verbose)
     del batch_ids, batch_probs, batch
 
     # Running inference on dataset samples
@@ -115,7 +115,7 @@ def _batch_infer(
     else:
         raise ValueError("Unknown Dataset name")
 
-    rank0print(rank, f"\n=================\nRunning inference on {n} samples of {ds_name} dataset ...")
+    rank0print(f"\n=================\nRunning inference on {n} samples of {ds_name} dataset ...")
     distances = []
     gen_tripples = []
 
@@ -130,7 +130,7 @@ def _batch_infer(
         p = Path(f"viz/asts/d{sample_distance}/{ds_name}_dataset")
         p.mkdir(parents=True, exist_ok=True)
         batch_distance, batch_gen_tripples = infer.batch_process_result(
-            rank, vocab, tripples, batch_ids, batch_probs, p, i, infer_args.verbose
+            vocab, tripples, batch_ids, batch_probs, p, i, infer_args.verbose
         )
         distances.extend(batch_distance)
         gen_tripples.extend(batch_gen_tripples)
@@ -152,19 +152,19 @@ def _batch_infer(
 
 
 # def _print_distance(rank: int, distances: list[FirstErrorDistance], ds_name: str):
-#     rank0print(rank, f"\n### AVERAGE DISTANCE IN {ds_name} DATASET ###", "yellow")
+#     rank0print(f"\n### AVERAGE DISTANCE IN {ds_name} DATASET ###", "yellow")
 #     n_hits = sum([d.n_hits for d in distances])
-#     rank0print(rank, f"Hits: {n_hits}", "yellow")
+#     rank0print(f"Hits: {n_hits}", "yellow")
 #     n_misses = sum([d.n_misses for d in distances])
-#     rank0print(rank, f"Misses: {n_misses}", "yellow")
+#     rank0print(f"Misses: {n_misses}", "yellow")
 #     perfect_matches = sum([1 for d in distances if d.n_misses == 0])
-#     rank0print(rank, f"Perfect matches: {perfect_matches}", "yellow")
+#     rank0print(f"Perfect matches: {perfect_matches}", "yellow")
 
 #     avg_hit_prob = _avg_prob([d.hit_probabilities() for d in distances if d])
-#     rank0print(rank, f"Average Hit Probability: {avg_hit_prob}", "yellow")
+#     rank0print(f"Average Hit Probability: {avg_hit_prob}", "yellow")
 #     avg_miss_prob = _avg_prob([d.miss_probabilities() for d in distances if d])
-#     rank0print(rank, f"Average Miss Probability: {avg_miss_prob}", "yellow")
-#     rank0print(rank, "\n")
+#     rank0print(f"Average Miss Probability: {avg_miss_prob}", "yellow")
+#     rank0print("\n")
 
 
 # def _batch_process_result(
@@ -189,14 +189,14 @@ def _batch_infer(
 #         rise.RecExpr(tripple["right"]).to_dot(f"{sample_id} right", str(path / f"{sample_id}_right"))
 
 #         if verbose:
-#             rank0print(rank, "----------")
-#             rank0print(rank, f"Sample {sample_id}", "blue")
-#             rank0print(rank, "LEFT:", "green")
-#             rank0print(rank, tripple["left"])
-#             rank0print(rank, "MIDDLE:", "green")
-#             rank0print(rank, tripple["middle"])
-#             rank0print(rank, "RIGHT:", "green")
-#             rank0print(rank, tripple["right"])
+#             rank0print("----------")
+#             rank0print(f"Sample {sample_id}", "blue")
+#             rank0print("LEFT:", "green")
+#             rank0print(tripple["left"])
+#             rank0print("MIDDLE:", "green")
+#             rank0print(tripple["middle"])
+#             rank0print("RIGHT:", "green")
+#             rank0print(tripple["right"])
 
 #         raw_generated_tokens = [vocab.id2token(int(i)) for i in ids if i]
 #         generated_tokens = split_off_special(raw_generated_tokens, vocab)
@@ -218,20 +218,20 @@ def _batch_infer(
 #             batch_gen_tripples.append(tripple)
 
 #             if verbose:
-#                 rank0print(rank, "GENERATED:", "green")
-#                 rank0print(rank, lowered)
+#                 rank0print("GENERATED:", "green")
+#                 rank0print(lowered)
 
 #         except EggshellException as e:
 #             generated.to_dot(f"{sample_id} generated (damaged)", str(path / f"{sample_id}_generated"))  # type: ignore
 #             generated.to_dot(
 #                 f"{sample_id} generated (damaged)", str(path / f"{sample_id}_generated_t"), transparent=True
 #             )
-#             rank0print(rank, "COULD NOT PROPERLY PARSE GENERATED GUIDE.", "red")
-#             rank0print(rank, e, "red")
+#             rank0print("COULD NOT PROPERLY PARSE GENERATED GUIDE.", "red")
+#             rank0print(e, "red")
 #             if verbose:
-#                 rank0print(rank, "BEST ATTEMPT:", "red")
-#                 rank0print(rank, generated)
-#                 rank0print(rank, f"Used {generated.used_tokens} out of {len(generated_tokens)}", "red")
+#                 rank0print("BEST ATTEMPT:", "red")
+#                 rank0print(generated)
+#                 rank0print(f"Used {generated.used_tokens} out of {len(generated_tokens)}", "red")
 
 #     return batch_distances, batch_gen_tripples
 

@@ -5,22 +5,22 @@ import torch.distributed as dist
 from termcolor import cprint
 
 
-def rank0print(rank: int, message, color: str | tuple[int, int, int] | None = None):
-    if rank == 0:
+def rank0print(message, color: str | tuple[int, int, int] | None = None):
+    if dist.get_rank() == 0:
         cprint(message, color)
 
 
-def rank0eprint(rank: int, message):
-    if rank == 0:
+def rank0eprint(message):
+    if dist.get_rank() == 0:
         print(message, file=sys.stderr)
 
 
-def setup_process_group(rank, world_size):
+def setup_process_group(world_size):
     os.environ["MASTER_ADDR"] = "localhost"
     os.environ["MASTER_PORT"] = "6601"
 
     # initialize the process group
-    dist.init_process_group("nccl", rank=rank, world_size=world_size)
+    dist.init_process_group("nccl", world_size=world_size)
     print("Process group created")
 
 

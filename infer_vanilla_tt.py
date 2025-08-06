@@ -23,8 +23,8 @@ import toothless.inference as infer
 
 
 def fsdp_main(rank: int, world_size: int, infer_args: InferenceArguments, dataset: TrippleDataSet):
-    setup_process_group(rank, world_size)
-    rank0print(rank, "Distributed Network ready")
+    setup_process_group(world_size)
+    rank0print("Distributed Network ready")
     torch.cuda.set_device(rank)
 
     # Load Data
@@ -40,7 +40,7 @@ def fsdp_main(rank: int, world_size: int, infer_args: InferenceArguments, datase
     weights = torch.load(infer_args.folder + f"/tree_transformer{infer_args.model_suffix}.pt")
 
     model = VanillaDualTreeTransformer(model_args, len(vocab), len(vocab), state_dict=weights)
-    rank0print(rank, "Base model ready")
+    rank0print("Base model ready")
 
     # FSDP model and Mixed Precision Config
     mixed_precision = MixedPrecision(param_dtype=torch.bfloat16, cast_forward_inputs=True) if infer_args.bf16 else None
@@ -51,15 +51,15 @@ def fsdp_main(rank: int, world_size: int, infer_args: InferenceArguments, datase
 
     table, total_params = count_parameters(model)
     if infer_args.verbose:
-        rank0print(rank, table)
-    rank0print(rank, f"Total Parameters: {total_params}")
+        rank0print(table)
+    rank0print(f"Total Parameters: {total_params}")
 
-    rank0print(rank, "FSDP Model/Generator loaded to GPU and ready")
+    rank0print("FSDP Model/Generator loaded to GPU and ready")
 
     collator = VanillaDictCollator(vocab.pad_token_id, data_args.max_len, data_args.k, vocab)
 
     # infer.json
-    # rank0print(rank, "\n=================\nRunning inference on infer_data.json ...")
+    # rank0print("\n=================\nRunning inference on infer_data.json ...")
     # with open(infer_args.infer_data, encoding="utf-8") as f:
     #     tripples = json.load(f)
 
@@ -115,7 +115,7 @@ def _batch_infer(
     else:
         raise ValueError("Unknown Dataset name")
 
-    rank0print(rank, f"\n=================\nRunning inference on {n} samples of {ds_name} dataset ...")
+    rank0print(f"\n=================\nRunning inference on {n} samples of {ds_name} dataset ...")
     distances = []
     gen_tripples = []
 
@@ -129,7 +129,7 @@ def _batch_infer(
         p = Path(f"viz/asts/d{data_args.sample_distance}/{ds_name}_dataset")
         p.mkdir(parents=True, exist_ok=True)
         batch_distance, batch_gen_tripples = infer.batch_process_result(
-            rank, vocab, tripples, result.tokens.tolist(), result.token_probs.tolist(), p, i, infer_args.verbose
+            vocab, tripples, result.tokens.tolist(), result.token_probs.tolist(), p, i, infer_args.verbose
         )
         distances.extend(batch_distance)
         gen_tripples.extend(batch_gen_tripples)
