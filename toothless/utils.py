@@ -15,12 +15,12 @@ def rank0eprint(message):
         print(message, file=sys.stderr)
 
 
-def setup_process_group(world_size):
+def setup_process_group(rank: int, world_size: int):
     os.environ["MASTER_ADDR"] = "localhost"
     os.environ["MASTER_PORT"] = "6601"
 
     # initialize the process group
-    dist.init_process_group("nccl", world_size=world_size)
+    dist.init_process_group("nccl", rank=rank, world_size=world_size)
     print("Process group created")
 
 

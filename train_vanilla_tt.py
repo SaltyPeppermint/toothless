@@ -37,7 +37,7 @@ def fsdp_main(
     data_args: DataArguments,
     save_folder: Path,
 ):
-    setup_process_group(world_size)
+    setup_process_group(rank, world_size)
     torch.cuda.set_device(rank)
 
     writer = SummaryWriter(log_dir=train_args.run_log_dir) if rank == 0 else None
