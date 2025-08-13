@@ -7,16 +7,16 @@ import torch
 
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 
-from .layers.vanilla.decoder import TransformerDecoderLayer
-from .layers.vanilla.encoder import TransformerEncoderLayer
-from .utils import create_causal_mask
-from ..args import ModelArguments
-from ..vocab import SimpleVocab
+from .layers.decoder import TransformerDecoderLayer
+from .layers.encoder import TransformerEncoderLayer
+from .layers.utils import create_causal_mask
+from .args import ModelArguments
+from .vocab import SimpleVocab
 
 
-class VanillaDualTreeTransformer(nn.Module):
+class DualTreeTransformer(nn.Module):
     def __init__(self, conf: ModelArguments, src_vocab_size: int, tgt_vocab_size: int, state_dict=None):
-        super(VanillaDualTreeTransformer, self).__init__()
+        super(DualTreeTransformer, self).__init__()
 
         assert not conf.disentangled
 
@@ -26,9 +26,9 @@ class VanillaDualTreeTransformer(nn.Module):
         self.r_embedding = nn.Embedding(src_vocab_size, conf.d_model)
         self.tgt_embedding = nn.Embedding(tgt_vocab_size, conf.d_model)
 
-        self.l_embed_ln = nn.LayerNorm(conf.d_model)
-        self.r_embed_ln = nn.LayerNorm(conf.d_model)
-        self.tgt_embed_ln = nn.LayerNorm(conf.d_model)
+        self.l_embed_ln = nn.RMSNorm(conf.d_model)
+        self.r_embed_ln = nn.RMSNorm(conf.d_model)
+        self.tgt_embed_ln = nn.RMSNorm(conf.d_model)
 
         self.dropout = nn.Dropout(conf.dropout)
 
@@ -42,7 +42,7 @@ class VanillaDualTreeTransformer(nn.Module):
         #     nn.Linear(conf.d_model * 2, conf.d_model * 4),
         #     nn.GELU(),
         #     nn.Linear(conf.d_model * 4, conf.d_model),
-        #     nn.LayerNorm(conf.d_model),
+        #     nn.RMSNorm(conf.d_model),
         # )
 
         # Decoder
@@ -203,7 +203,7 @@ class GenerationResult:
 
 @torch.compile()
 def generate_with_probabilities(
-    model: VanillaDualTreeTransformer | FSDP,
+    model: DualTreeTransformer | FSDP,
     l_batch: Tensor,
     r_batch: Tensor,
     vocab: SimpleVocab,
@@ -332,7 +332,7 @@ def generate_with_probabilities(
 
 @torch.compile()
 def beam_search_with_probabilities(
-    model: VanillaDualTreeTransformer | FSDP,
+    model: DualTreeTransformer | FSDP,
     l_batch: Tensor,
     r_batch: Tensor,
     vocab: SimpleVocab,

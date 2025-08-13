@@ -1,6 +1,20 @@
+import copy
+
 from prettytable import PrettyTable
 from torch import Tensor, nn
 import torch
+
+
+def concat_vec(vec1, vec2, dim):
+    if vec1 is None:
+        return vec2
+    if vec2 is None:
+        return vec1
+    return torch.cat([vec1, vec2], dim=dim)
+
+
+def stack_layers(module: nn.Module, n_layers: int) -> nn.ModuleList:
+    return nn.ModuleList([copy.deepcopy(module) for _ in range(n_layers)])
 
 
 def count_parameters(model: nn.Module) -> tuple[PrettyTable, int]:

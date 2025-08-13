@@ -2,7 +2,7 @@ from typing import Tuple
 import torch
 from torch import nn, Tensor
 
-from ..utils import RotaryPositionalEncoding
+from .rope import RotaryPositionalEncoding
 
 
 class RoPEMultiheadAttention(nn.Module):

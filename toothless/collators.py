@@ -8,7 +8,7 @@ from torch import Tensor
 from torch.utils.data.distributed import DistributedSampler
 from torch.utils.data import DataLoader
 
-from .models.utils import make_tgt_mask
+from .layers.utils import make_tgt_mask
 from .data import TrippleDataSet, Tripple
 from .args import DataArguments
 from .vocab import SimpleVocab

@@ -14,10 +14,9 @@ from toothless.vocab import SimpleVocab
 from toothless.utils import cleanup_process_group, rank0print, setup_process_group
 from toothless.collators import VanillaDictCollator
 from toothless.data import TrippleDataSet, Tripple
-from toothless.models.vanilla import VanillaDualTreeTransformer
-from toothless.models.utils import count_parameters
+from toothless.model import DualTreeTransformer
+from toothless.layers.utils import count_parameters
 from toothless.args import DataArguments, InferenceArguments, ModelArguments
-import toothless.models.vanilla as vanilla
 import toothless.inference as infer
 
 
@@ -41,7 +40,7 @@ def fsdp_main(rank: int, world_size: int, infer_args: InferenceArguments, datase
     # Construct Base Model
     weights = torch.load(infer_args.folder + f"/weights/tree_transformer{infer_args.model_suffix}.pt")
 
-    model = VanillaDualTreeTransformer(model_args, len(vocab), len(vocab), state_dict=weights)
+    model = DualTreeTransformer(model_args, len(vocab), len(vocab), state_dict=weights)
     rank0print("Base model ready")
 
     # FSDP model and Mixed Precision Config
@@ -110,7 +109,7 @@ def _batch_infer(
     for i in tqdm(range(0, n, infer_args.batch_size), desc=f"Inference Batch (Batch Size {infer_args.batch_size})"):
         tripples = [dataset[i] for i in range(i, i + infer_args.batch_size)]
         batch, rule_chains, _n_tokens = collator(tripples)
-        result = vanilla.generate_with_probabilities(model, batch["l_ids"], batch["r_ids"], vocab, data_args.max_len)
+        result = model.generate_with_probabilities(model, batch["l_ids"], batch["r_ids"], vocab, data_args.max_len)
 
         p = Path(eval_folder / "viz/asts/")
         p.mkdir(parents=True, exist_ok=True)

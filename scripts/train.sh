@@ -7,7 +7,7 @@ uv run train.py \
     --model.with-pos \
     --model.num-layers 12 \
     --model.output-dir "models" \
-    --data.sample-distance 2 \
+    --data.sample-distance 16 \
     --data.sample-limit 1000000 \
     --data.data-path "data/start_goal_with_expl/start_and_goal-2025-01-29-b33b4ba4-ee88-48b5-981b-c2b809d6504f/0" \
 

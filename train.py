@@ -24,8 +24,8 @@ import tyro
 from toothless.collators import VanillaDictCollator, mk_loaders
 from toothless.utils import cleanup_process_group, rank0print, setup_process_group
 from toothless.data import TrippleDataSet, Tripple
-from toothless.models.vanilla import VanillaDualTreeTransformer
-from toothless.models.utils import count_parameters, create_padding_mask
+from toothless.model import DualTreeTransformer
+from toothless.layers.utils import count_parameters, create_padding_mask
 from toothless.args import DataArguments, TrainingArguments, ModelArguments, TrainRunArgs
 
 
@@ -57,7 +57,7 @@ def fsdp_main(
     init_start_event = torch.cuda.Event(enable_timing=True)
     init_end_event = torch.cuda.Event(enable_timing=True)
 
-    model = VanillaDualTreeTransformer(model_args, vocab_size, vocab_size)
+    model = DualTreeTransformer(model_args, vocab_size, vocab_size)
 
     if writer and train_args.trace:
         example_batch, _ = next(iter(copy.deepcopy(train_dataloader)))
