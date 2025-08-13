@@ -1,4 +1,4 @@
-uv run infer_vanilla_tt.py \
+uv run infer.py \
     --infer_data "data/infer_data.json" \
     --folder "models/25-08-05_13:25:52" \
     --model-suffix "_0" \

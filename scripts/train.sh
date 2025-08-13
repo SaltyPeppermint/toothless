@@ -1,4 +1,4 @@
-uv run train_vanilla_tt.py \
+uv run train.py \
     --train.save-model-end \
     --train.logging-steps 1 \
     --train.epochs 1 \

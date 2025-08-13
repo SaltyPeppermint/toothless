@@ -30,7 +30,7 @@ singularity exec --nv --bind /beegfs:/mnt /scratch/heinimann/container.sif \
     git clone https://github.com/SaltyPeppermint/toothless /tmp/toothless
 
 singularity exec --nv --bind /beegfs:/mnt /scratch/heinimann/container.sif \
-    /venv/bin/python3 /tmp/toothless/train_tree_transformer.py \
+    /venv/bin/python3 /tmp/toothless/train.py \
     --data-path "/mnt/scratch/heinimann/data/start_goal_with_expl/start_and_goal-2025-01-29-b33b4ba4-ee88-48b5-981b-c2b809d6504f/0" \
     --cache-dir "/mnt/scratch/heinimann/cache" \
     --sample-cache-dir "/tmp/sample_cache" \
