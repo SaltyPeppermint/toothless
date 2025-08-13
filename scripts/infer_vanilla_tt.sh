@@ -1,6 +1,6 @@
 uv run infer_vanilla_tt.py \
     --infer_data "data/infer_data.json" \
-    --folder "saved_models/25-08-05_13:25:52" \
+    --folder "models/25-08-05_13:25:52" \
     --model-suffix "_0" \
     --n-train-data 4096 \
     --n-eval-data 4096 \

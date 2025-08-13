@@ -34,7 +34,7 @@ singularity exec --nv --bind /beegfs:/mnt /scratch/heinimann/container.sif \
     --data-path "/mnt/scratch/heinimann/data/start_goal_with_expl/start_and_goal-2025-01-29-b33b4ba4-ee88-48b5-981b-c2b809d6504f/0" \
     --cache-dir "/mnt/scratch/heinimann/cache" \
     --sample-cache-dir "/tmp/sample_cache" \
-    --output-dir "/mnt/home/users/h/heinimann/saved_models" \
+    --output-dir "/mnt/home/users/h/heinimann/models" \
     --run-log-dir "/mnt/home/users/h/heinimann/runs" \
     --save_model_end True \
     --batch-size 64 \

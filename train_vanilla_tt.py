@@ -251,7 +251,8 @@ def save_model(model: FSDP, save_folder: Path, suffix: str, rank: int):
     with FSDP.state_dict_type(model, StateDictType.FULL_STATE_DICT, save_policy):
         states = model.state_dict()
         if rank == 0:
-            torch.save(states, f"{save_folder}/tree_transformer_{suffix}.pt")
+            Path(f"{save_folder}/weights").mkdir(exist_ok=True, parents=True)
+            torch.save(states, f"{save_folder}/weights/tree_transformer_{suffix}.pt")
 
 
 if __name__ == "__main__":
