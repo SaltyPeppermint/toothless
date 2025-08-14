@@ -1,5 +1,5 @@
-from torch import Tensor, nn
 import torch
+from torch import Tensor, nn
 
 
 class RotaryPositionalEncoding(nn.Module):
@@ -12,14 +12,17 @@ class RotaryPositionalEncoding(nn.Module):
         base: Base for frequency computation (default: 10000)
     """
 
-    def __init__(self, dim: int, max_seq_len: int = 256, base: float = 10000.0):
+    def __init__(self, dim: int, max_seq_len: int = 256, base: float = 10000.0, device: torch.device | None = None):
         super().__init__()
 
         assert dim % 2 == 0, "Embedding dimension must be even"
 
         # Precompute frequency inverse values
-        inv_freq = 1.0 / (base ** (torch.arange(0, dim, 2).float() / dim))
+        inv_freq = 1.0 / (base ** (torch.arange(0, dim, 2, dtype=torch.bfloat16) / dim))
         self.register_buffer("inv_freq", inv_freq, persistent=False)
+
+        if device is not None:
+            inv_freq = inv_freq.to(device)
 
         self._cos_cache = None
         self._sin_cache = None

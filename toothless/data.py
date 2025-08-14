@@ -1,9 +1,22 @@
-from pathlib import Path
 import shutil
 import json
+from pathlib import Path
 from dataclasses import dataclass
 
+import torch
+from torch import Tensor
+from torch.utils.data import Dataset
+
 import polars as pl
+from tqdm.auto import tqdm
+
+from eggshell import rise, TreeData  # type: ignore
+
+from .args import DataArguments
+from .vocab import BOS_TOKEN, EOS_TOKEN, MASK_TOKEN, PAD_TOKEN, UNK_TOKEN, SimpleVocab
+from . import loading
+
+
 # from tokenizers import Tokenizer
 # from tokenizers.models import BPE
 # from tokenizers.normalizers import BertNormalizer
@@ -13,19 +26,6 @@ import polars as pl
 # from tokenizers.normalizers import Strip
 # from tokenizers.normalizers import Sequence as NormalizerSequence
 # import matplotlib.pyplot as plt
-
-from eggshell import rise, TreeData  # type: ignore
-
-import torch
-from torch import Tensor
-from torch import nn
-from torch.utils.data import Dataset
-
-from tqdm.auto import tqdm
-
-from .args import DataArguments
-from .vocab import BOS_TOKEN, EOS_TOKEN, MASK_TOKEN, PAD_TOKEN, UNK_TOKEN, SimpleVocab
-from . import loading
 
 
 @dataclass
@@ -52,7 +52,6 @@ class TrippleDataSet(Dataset[Tripple]):
         """
         self.json_root = Path(conf.data_path)
         self.sample_distance = conf.sample_distance
-        self.k = conf.k
         self.force_reload = conf.force_reload
         self.sample_limit = conf.sample_limit
         self.disentangled = disentangled
@@ -93,35 +92,7 @@ class TrippleDataSet(Dataset[Tripple]):
         tgt_ids = self._pyrec_to_tensor(tgt_tree)
         r_ids = self._pyrec_to_tensor(r_tree)
 
-        if self.disentangled:
-            l_anc, l_sib = self._tree_data_to_distance_tensor(l_tree)
-            tgt_anc, tgt_sib = self._tree_data_to_distance_tensor(tgt_tree)
-            r_anc, r_sib = self._tree_data_to_distance_tensor(r_tree)
-            return Tripple(
-                l_ids,
-                s["left"],
-                tgt_ids,
-                s["middle"],
-                r_ids,
-                s["right"],
-                s["rules"],
-                l_anc,
-                l_sib,
-                tgt_anc,
-                tgt_sib,
-                r_anc,
-                r_sib,
-            )
-
-        else:
-            return Tripple(l_ids, s["left"], tgt_ids, s["middle"], r_ids, s["right"], s["rules"])
-
-    def _tree_data_to_distance_tensor(self, tree_data: TreeData) -> tuple[Tensor, Tensor]:
-        padder = nn.ConstantPad2d(1, 0)
-        anc_matrix = padder(torch.tensor(tree_data.anc_matrix(self.k), dtype=torch.long))
-        sib_matrix = padder(torch.tensor(tree_data.sib_matrix(self.k), dtype=torch.long))
-
-        return anc_matrix, sib_matrix
+        return Tripple(l_ids, s["left"], tgt_ids, s["middle"], r_ids, s["right"], s["rules"])
 
     def _pyrec_to_tensor(self, tree_data: TreeData) -> Tensor:
         return torch.tensor(
@@ -214,15 +185,6 @@ class TrippleDataSet(Dataset[Tripple]):
         acc = set()
         rec(0, max_index, acc, self.sample_distance)
         return acc
-
-
-def partial_to_matrices(partial_tok: list[str], k: int) -> tuple[Tensor, Tensor]:
-    tree_data = rise.GeneratedRecExpr(partial_tok).to_data()
-
-    padder = nn.ConstantPad2d((1, 0, 1, 0), 0)
-    anc_matrix = padder(torch.tensor(tree_data.anc_matrix(k), dtype=torch.long))
-    sib_matrix = padder(torch.tensor(tree_data.sib_matrix(k), dtype=torch.long))
-    return anc_matrix, sib_matrix
 
 
 def split_off_special(partial_tok: list[str], vocab: SimpleVocab) -> list[str]:

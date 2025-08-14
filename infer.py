@@ -12,10 +12,10 @@ from eggshell import FirstErrorDistance
 
 from toothless.vocab import SimpleVocab
 from toothless.utils import cleanup_process_group, rank0print, setup_process_group
-from toothless.collators import VanillaDictCollator
+from toothless.collators import DictCollator
 from toothless.data import TrippleDataSet, Tripple
-from toothless.model import DualTreeTransformer
-from toothless.layers.utils import count_parameters
+from toothless.model import DualTreeTransformer, generate_with_probabilities
+from toothless.utils import count_parameters
 from toothless.args import DataArguments, InferenceArguments, ModelArguments
 import toothless.inference as infer
 
@@ -40,7 +40,7 @@ def fsdp_main(rank: int, world_size: int, infer_args: InferenceArguments, datase
     # Construct Base Model
     weights = torch.load(infer_args.folder + f"/weights/tree_transformer{infer_args.model_suffix}.pt")
 
-    model = DualTreeTransformer(model_args, len(vocab), len(vocab), state_dict=weights)
+    model = DualTreeTransformer(model_args, len(vocab), len(vocab), dataset.vocab.pad_token_id, state_dict=weights)
     rank0print("Base model ready")
 
     # FSDP model and Mixed Precision Config
@@ -57,7 +57,7 @@ def fsdp_main(rank: int, world_size: int, infer_args: InferenceArguments, datase
 
     rank0print("FSDP Model/Generator loaded to GPU and ready")
 
-    collator = VanillaDictCollator(vocab.pad_token_id, data_args.max_len, data_args.k, vocab)
+    collator = DictCollator(vocab.pad_token_id, data_args.max_len, vocab)
 
     # Running inference on dataset samples
     train_dataset, eval_dataset = torch.utils.data.random_split(
@@ -70,7 +70,7 @@ def fsdp_main(rank: int, world_size: int, infer_args: InferenceArguments, datase
     with open(eval_folder / "train_gen_tripples_vanilla.json", mode="w", encoding="utf-8") as f:
         f.write(infer.InferResult.list_to_json(train_gen_tripples))
     del train_gen_tripples
-    infer.print_distance(rank, train_distances, "TRAIN")
+    infer.print_distance(train_distances, "TRAIN")
 
     eval_distances, eval_gen_tripples = _batch_infer(
         data_args, infer_args, vocab, model, collator, eval_dataset, "eval", eval_folder
@@ -78,7 +78,7 @@ def fsdp_main(rank: int, world_size: int, infer_args: InferenceArguments, datase
     with open(eval_folder / "eval_gen_tripples_vanilla.json", mode="w", encoding="utf-8") as f:
         f.write(infer.InferResult.list_to_json(eval_gen_tripples))
     del eval_gen_tripples
-    infer.print_distance(rank, eval_distances, "EVAL")
+    infer.print_distance(eval_distances, "EVAL")
 
     cleanup_process_group()
 
@@ -88,7 +88,7 @@ def _batch_infer(
     infer_args: InferenceArguments,
     vocab: SimpleVocab,
     model: FSDP,
-    collator: VanillaDictCollator,
+    collator: DictCollator,
     dataset: Subset[Tripple],
     ds_name: str,
     eval_folder: Path,
@@ -109,7 +109,7 @@ def _batch_infer(
     for i in tqdm(range(0, n, infer_args.batch_size), desc=f"Inference Batch (Batch Size {infer_args.batch_size})"):
         tripples = [dataset[i] for i in range(i, i + infer_args.batch_size)]
         batch, rule_chains, _n_tokens = collator(tripples)
-        result = model.generate_with_probabilities(model, batch["l_ids"], batch["r_ids"], vocab, data_args.max_len)
+        result = generate_with_probabilities(model, batch["l_ids"], batch["r_ids"], vocab, data_args.max_len)
 
         p = Path(eval_folder / "viz/asts/")
         p.mkdir(parents=True, exist_ok=True)

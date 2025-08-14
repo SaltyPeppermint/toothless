@@ -1,55 +1,40 @@
 import math
-
 from dataclasses import dataclass
+
+import torch
 from torch import Tensor
 from torch import nn
-import torch
-
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 
 from .layers.decoder import TransformerDecoderLayer
 from .layers.encoder import TransformerEncoderLayer
-from .layers.utils import create_causal_mask
 from .args import ModelArguments
 from .vocab import SimpleVocab
 
 
 class DualTreeTransformer(nn.Module):
-    def __init__(self, conf: ModelArguments, src_vocab_size: int, tgt_vocab_size: int, state_dict=None):
+    def __init__(
+        self, conf: ModelArguments, src_vocab_size: int, tgt_vocab_size: int, pad_token_id: int, state_dict=None
+    ):
         super(DualTreeTransformer, self).__init__()
 
-        assert not conf.disentangled
-
         self.conf = conf
+        self.pad_token_id = pad_token_id
 
         self.l_embedding = nn.Embedding(src_vocab_size, conf.d_model)
         self.r_embedding = nn.Embedding(src_vocab_size, conf.d_model)
         self.tgt_embedding = nn.Embedding(tgt_vocab_size, conf.d_model)
 
-        self.l_embed_ln = nn.RMSNorm(conf.d_model)
-        self.r_embed_ln = nn.RMSNorm(conf.d_model)
-        self.tgt_embed_ln = nn.RMSNorm(conf.d_model)
-
-        self.dropout = nn.Dropout(conf.dropout)
-
         # Encoders
         self.l_encoder = nn.ModuleList([TransformerEncoderLayer(conf) for _ in range(conf.num_layers)])
         self.r_encoder = nn.ModuleList([TransformerEncoderLayer(conf) for _ in range(conf.num_layers)])
-
-        # Memory fusion layer to combine outputs from both encoders
-        self.memory_fusion = nn.Linear(conf.d_model * 2, conf.d_model)
-        # self.memory_fusion = nn.Sequential(
-        #     nn.Linear(conf.d_model * 2, conf.d_model * 4),
-        #     nn.GELU(),
-        #     nn.Linear(conf.d_model * 4, conf.d_model),
-        #     nn.RMSNorm(conf.d_model),
-        # )
 
         # Decoder
         self.decoder = nn.ModuleList([TransformerDecoderLayer(conf) for _ in range(conf.num_layers)])
 
         # Output projection
         self.output_proj = nn.Linear(conf.d_model, tgt_vocab_size)
+        self.output_norm = nn.RMSNorm(conf.d_model)
 
         if state_dict is None:
             for p in self.parameters():
@@ -61,113 +46,67 @@ class DualTreeTransformer(nn.Module):
         else:
             self.load_state_dict(state_dict)
 
-    def l_encode(self, l_ids: Tensor, l_mask: Tensor | None = None):
+    @torch.compile()
+    def l_encode(self, l_ids: Tensor, l_mask: Tensor):
         # Embeddings
-        l_emb = self.l_embedding(l_ids) * math.sqrt(self.conf.d_model)
-        l_mem = self.dropout(l_emb)
+        l_mem = self.l_embedding(l_ids) * math.sqrt(self.conf.d_model)
 
         # Compute each RoPE encoder layer
         for layer in self.l_encoder:
-            l_mem = layer(l_mem, src_key_padding_mask=l_mask)
+            l_mem = layer(l_mem, l_mask)
         return l_mem
 
-    def r_encode(self, r_ids: Tensor, r_mask: Tensor | None = None):
+    @torch.compile()
+    def r_encode(self, r_ids: Tensor, r_mask: Tensor):
         # Embeddings
-        r_emb = self.r_embedding(r_ids) * math.sqrt(self.conf.d_model)
-        r_mem = self.dropout(r_emb)
+        r_mem = self.r_embedding(r_ids) * math.sqrt(self.conf.d_model)
 
         # Compute each RoPE encoder layer
         for layer in self.r_encoder:
-            r_mem = layer(r_mem, src_key_padding_mask=r_mask)
+            r_mem = layer(r_mem, r_mask)
         return r_mem
 
-    def fuse_memories(self, l_mem: Tensor, r_mem: Tensor):
-        """Combine outputs from both encoders."""
-        # Simple concatenation + linear projection
-        batch_size, l_len, d_model = l_mem.shape
-        r_len = r_mem.shape[1]
-
-        # Pad shorter sequence to match longer one
-        if l_len > r_len:
-            padding = torch.zeros(batch_size, l_len - r_len, d_model, device=r_mem.device, dtype=r_mem.dtype)
-            r_mem = torch.cat([r_mem, padding], dim=1)
-        elif r_len > l_len:
-            padding = torch.zeros(batch_size, r_len - l_len, d_model, device=l_mem.device, dtype=l_mem.dtype)
-            l_mem = torch.cat([l_mem, padding], dim=1)
-
-        # Concatenate and project
-        fused_memory = torch.cat([l_mem, r_mem], dim=-1)  # [batch, seq_len, 2*d_model]
-
-        return self.memory_fusion(fused_memory)  # [batch, seq_len, d_model]
-
-    @staticmethod
-    def fuse_mask(l_mask: Tensor | None = None, r_mask: Tensor | None = None) -> Tensor | None:
-        # Create memory padding mask
-        memory_padding_mask = None
-        if l_mask is not None and r_mask is not None:
-            # Use the longer sequence's padding mask
-            if l_mask.shape[1] >= r_mask.shape[1]:
-                memory_padding_mask = l_mask
-            else:
-                memory_padding_mask = r_mask
-
-        return memory_padding_mask
-
-    def decode(
-        self,
-        tgt: Tensor,
-        fused_memory: Tensor,
-        tgt_padding_mask: Tensor | None = None,
-        memory_padding_mask: Tensor | None = None,
-    ):
+    @torch.compile()
+    def decode(self, tgt: Tensor, l_mem: Tensor, r_mem: Tensor, tgt_mask: Tensor, l_mask: Tensor, r_mask: Tensor):
         """Decode target sequence using fused encoder memories."""
-        seq_len = tgt.shape[1]
-        device = tgt.device
 
         # Target embeddings
-        embeddings = self.tgt_embedding(tgt) * math.sqrt(self.conf.d_model)
-        tgt_encoded = self.dropout(embeddings)
-
-        # Create causal mask for decoder self-attention
-        tgt_causal_mask = create_causal_mask(seq_len, device)
+        output = self.tgt_embedding(tgt) * math.sqrt(self.conf.d_model)
 
         # Compute each RoPE decoder layer
-        output = tgt_encoded
         for layer in self.decoder:
-            output = layer(
-                output,
-                fused_memory,
-                tgt_mask=tgt_causal_mask,
-                tgt_key_padding_mask=tgt_padding_mask,
-                memory_key_padding_mask=memory_padding_mask,
-            )
+            output = layer(output, l_mem, r_mem, tgt_mask, l_mask, r_mask)
 
-        return output
+        return self.output_proj(self.output_norm(output))
 
-    def forward(
-        self,
-        l_ids: Tensor,
-        r_ids: Tensor,
-        tgt: Tensor,
-        l_mask: Tensor | None = None,
-        r_mask: Tensor | None = None,
-        tgt_mask: Tensor | None = None,
-    ):
+    @torch.compile()
+    def forward(self, tgt_ids: Tensor, l_ids: Tensor, r_ids: Tensor):
         # Encode both source sequences
+        l_mask = create_padding_mask(l_ids, pad_token_id=self.pad_token_id)
         l_mem = self.l_encode(l_ids, l_mask)
+
+        r_mask = create_padding_mask(r_ids, pad_token_id=self.pad_token_id)
         r_mem = self.r_encode(r_ids, r_mask)
 
-        # Fuse outputs together
-        fused_memory = self.fuse_memories(l_mem, r_mem)
+        tgt_mask = create_padding_mask(tgt_ids, pad_token_id=self.pad_token_id)
+        # Decode and project to vocabulary
+        return self.decode(tgt_ids, l_mem, r_mem, tgt_mask, l_mask, r_mask)
 
-        # Fuse masks
-        fused_mask = self.fuse_mask(l_mask, r_mask)
 
-        # Decode
-        decoder_output = self.decode(tgt, fused_memory, tgt_padding_mask=tgt_mask, memory_padding_mask=fused_mask)
+def create_padding_mask(
+    input_ids: Tensor,
+    pad_token_id: int = 0,
+    device: torch.device | None = None,
+) -> Tensor:
+    """
+    Creates a padding mask for attention mechanisms.
+    """
+    if device is None:
+        device = input_ids.device
 
-        # Project to vocabulary
-        return self.output_proj(decoder_output)
+    mask = (input_ids == pad_token_id).unsqueeze(1).unsqueeze(2)
+
+    return mask.to(device)
 
 
 @dataclass
@@ -201,7 +140,6 @@ class GenerationResult:
         return result
 
 
-@torch.compile()
 def generate_with_probabilities(
     model: DualTreeTransformer | FSDP,
     l_batch: Tensor,
@@ -232,17 +170,20 @@ def generate_with_probabilities(
     device = next(model.parameters()).device
     batch_size = l_batch.shape[0]
 
-    l_batch = l_batch.to(device)
-    r_batch = r_batch.to(device)
-
+    pad_token = vocab.pad_token_id
     start_token = vocab.bos_token_id
     end_token = vocab.eos_token_id
 
+    l_batch = l_batch.to(device)
+    l_mask = create_padding_mask(l_batch, pad_token_id=pad_token)
+
+    r_batch = r_batch.to(device)
+    r_mask = create_padding_mask(r_batch, pad_token_id=pad_token)
+
     # Encode sources once
     with torch.no_grad():
-        l_mem = model.l_encode(l_batch)
-        r_mem = model.r_encode(r_batch)
-        fused_memory = model.fuse_memories(l_mem, r_mem)
+        l_mem = model.l_encode(l_batch, l_mask)
+        r_mem = model.r_encode(r_batch, r_mask)
 
     # Initialize generation with all start tokens
     generated_tokens = torch.full((batch_size, 1), start_token, device=device, dtype=torch.long)
@@ -253,9 +194,9 @@ def generate_with_probabilities(
 
     for step in range(max_len):
         with torch.no_grad():
+            tgt_mask = create_padding_mask(generated_tokens, pad_token_id=pad_token)
             # Get logits for current sequence
-            # Dont forget to project them up into your vocabulary!
-            logits = model.output_proj(model.decode(generated_tokens, fused_memory))
+            logits = model.decode(generated_tokens, l_mem, r_mem, tgt_mask, l_mask, r_mask)
 
             next_token_logits = logits[:, -1, :]  # Last position logits
 
@@ -330,7 +271,6 @@ def generate_with_probabilities(
     )
 
 
-@torch.compile()
 def beam_search_with_probabilities(
     model: DualTreeTransformer | FSDP,
     l_batch: Tensor,
@@ -359,17 +299,20 @@ def beam_search_with_probabilities(
     device = next(model.parameters()).device
     batch_size = l_batch.shape[0]
 
-    l_batch = l_batch.to(device)
-    r_batch = r_batch.to(device)
-
+    pad_token = vocab.pad_token_id
     start_token = vocab.bos_token_id
     end_token = vocab.eos_token_id
 
+    l_batch = l_batch.to(device)
+    l_mask = create_padding_mask(l_batch, pad_token_id=pad_token)
+
+    r_batch = r_batch.to(device)
+    r_mask = create_padding_mask(r_batch, pad_token_id=pad_token)
+
     # Encode sources once
     with torch.no_grad():
-        l_mem = model.l_encode(l_batch)
-        r_mem = model.r_encode(r_batch)
-        fused_memory = model.fuse_memories(l_mem, r_mem)
+        l_mem = model.l_encode(l_batch, l_mask)
+        r_mem = model.r_encode(r_batch, r_mask)
 
     # Initialize beams for each batch element
     beams = torch.full((batch_size, beam_size, 1), start_token, device=device, dtype=torch.long)
@@ -381,15 +324,21 @@ def beam_search_with_probabilities(
 
     for step in range(max_len):
         # Expand memory for all beams
-        expanded_memory = (
-            fused_memory.unsqueeze(1)
+        l_expanded_memory = (
+            l_mem.unsqueeze(1)
             .expand(-1, beam_size, -1, -1)
-            .reshape(batch_size * beam_size, fused_memory.shape[1], fused_memory.shape[2])
+            .reshape(batch_size * beam_size, l_mem.shape[1], l_mem.shape[2])
+        )
+        r_expanded_memory = (
+            r_mem.unsqueeze(1)
+            .expand(-1, beam_size, -1, -1)
+            .reshape(batch_size * beam_size, r_mem.shape[1], r_mem.shape[2])
         )
         current_beams = beams.reshape(batch_size * beam_size, -1)
 
         with torch.no_grad():
-            logits = model.decode(current_beams, expanded_memory)
+            tgt_mask = create_padding_mask(current_beams, pad_token_id=pad_token)
+            logits = model.decode(current_beams, l_expanded_memory, r_expanded_memory, tgt_mask, l_mask, r_mask)
             log_probs = torch.log_softmax(logits[:, -1, :], dim=-1)
             probs = torch.softmax(logits[:, -1, :], dim=-1)
 
