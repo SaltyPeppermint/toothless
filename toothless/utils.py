@@ -1,8 +1,40 @@
 import os
 import sys
+
+import torch
 import torch.distributed as dist
+from torch import nn, Tensor
 
 from termcolor import cprint
+from prettytable import PrettyTable
+
+
+def count_parameters(model: nn.Module) -> tuple[PrettyTable, int]:
+    table = PrettyTable(["Modules", "Parameters"])
+    total_params = 0
+    for name, parameter in model.named_parameters():
+        if not parameter.requires_grad:
+            continue
+        params = parameter.numel()
+        table.add_row([name, params])
+        total_params += params
+    return table, total_params
+
+
+def create_padding_mask(
+    input_ids: Tensor,
+    pad_token_id: int = 0,
+    device: torch.device | None = None,
+) -> torch.Tensor:
+    """
+    Creates a padding mask for attention mechanisms.
+    """
+    if device is None:
+        device = input_ids.device
+
+    # Create mask (1 for padding, 0 for actual tokens)
+
+    return (input_ids == pad_token_id).to(device)
 
 
 def rank0print(message, color: str | tuple[int, int, int] | None = None):

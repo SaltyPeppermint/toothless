@@ -17,15 +17,16 @@ from torch.distributed.fsdp import (
 )
 from torch.utils.data import DataLoader
 from torch.utils.tensorboard.writer import SummaryWriter
+from torch.profiler import profile, ProfilerActivity
 
 from tqdm.auto import tqdm
 import tyro
 
-from toothless.collators import VanillaDictCollator, mk_loaders
+from toothless.collators import DictCollator, mk_loaders
 from toothless.utils import cleanup_process_group, rank0print, setup_process_group
 from toothless.data import TrippleDataSet, Tripple
 from toothless.model import DualTreeTransformer
-from toothless.layers.utils import count_parameters, create_padding_mask
+from toothless.utils import count_parameters
 from toothless.args import DataArguments, TrainingArguments, ModelArguments, TrainRunArgs
 
 
@@ -49,7 +50,7 @@ def fsdp_main(
 
     # Load Data
     vocab_size = len(dataset.vocab)
-    collator = VanillaDictCollator(dataset.vocab.pad_token_id, data_args.max_len, data_args.k, dataset.vocab)
+    collator = DictCollator(dataset.vocab.pad_token_id, data_args.max_len, dataset.vocab)
     train_dataloader, eval_dataloader = mk_loaders(rank, world_size, dataset, collator, data_args)
     rank0print("DataLoaders ready")
 
@@ -57,7 +58,7 @@ def fsdp_main(
     init_start_event = torch.cuda.Event(enable_timing=True)
     init_end_event = torch.cuda.Event(enable_timing=True)
 
-    model = DualTreeTransformer(model_args, vocab_size, vocab_size)
+    model = DualTreeTransformer(model_args, vocab_size, vocab_size, dataset.vocab.pad_token_id)
 
     if writer and train_args.trace:
         example_batch, _ = next(iter(copy.deepcopy(train_dataloader)))
@@ -68,10 +69,16 @@ def fsdp_main(
     rank0print(f"Total Parameters: {total_params}")
 
     # FSDP model and Mixed Precision Config
-    mixed_precision = MixedPrecision(param_dtype=torch.bfloat16, cast_forward_inputs=True) if train_args.bf16 else None
+    mixed_precision = MixedPrecision(param_dtype=torch.bfloat16) if train_args.bf16 else None
     sharding_strategy = ShardingStrategy.FULL_SHARD if world_size > 1 else ShardingStrategy.NO_SHARD
 
-    model = FSDP(model, sharding_strategy=sharding_strategy, mixed_precision=mixed_precision, device_id=rank)
+    model = FSDP(
+        model,
+        sharding_strategy=sharding_strategy,
+        mixed_precision=mixed_precision,
+        device_id=rank,
+        # use_orig_params=True, ALLOWS FULL GRAPH CAPTURE BUT WE DONT HAVE CHONKY GPU
+    )
 
     # Define optimizer and loss function
     optimizer = optim.AdamW(
@@ -99,6 +106,8 @@ def fsdp_main(
 
     rank0print("Starting training!")
     init_start_event.record(torch.cuda.current_stream())
+
+    # profil_model(rank, model, copy.deepcopy(train_dataloader), criterion)
 
     for epoch in range(train_args.epochs):
         train(
@@ -140,7 +149,33 @@ def fsdp_main(
     cleanup_process_group()
 
 
-@torch.compile()
+def profil_model(rank: int, model: FSDP, dataloader: DataLoader[Tripple], criterion: CrossEntropyLoss):
+    model.train()
+    dl_iter = iter(dataloader)
+
+    for batch_idx in tqdm(range(2), desc="Profiling... "):
+        batch, _, _ = next(dl_iter)
+
+        # Move batch to device
+        tgt_ids, l_ids, r_ids = batch["tgt_ids"].to(rank), batch["l_ids"].to(rank), batch["r_ids"].to(rank)
+
+        # Create input and target for teacher forcing
+        tgt_input = tgt_ids[:, :-1]  # All tokens except last
+        tgt_output = tgt_ids[:, 1:]  # All tokens except first (shifted by 1)
+
+        # Forward pass
+
+        with profile(activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA], record_shapes=True) as prof:
+            _ = model(tgt_input, l_ids, r_ids)
+            logits = model(tgt_input, l_ids, r_ids)
+            loss = criterion(logits.reshape(-1, logits.shape[-1]), tgt_output.reshape(-1))
+
+            # Backwards pass
+            loss.backward()
+
+        prof.export_chrome_trace(f"trace{batch_idx}.json")
+
+
 def train(
     rank: int,
     model: FSDP,
@@ -156,22 +191,19 @@ def train(
     model.train()
     ddp_loss = torch.zeros(2).to(rank)
 
-    for batch_idx, (batch, _rules_chain, num_tokens) in enumerate(
+    for batch_idx, (batch, _, num_tokens) in enumerate(
         tqdm(dataloader, desc=f"Training Epoch {epoch + 1}/{train_args.epochs}")
     ):
         # Move batch to device
-        l_ids, r_ids, tgt_ids = batch["l_ids"].to(rank), batch["r_ids"].to(rank), batch["tgt_ids"].to(rank)
-        l_mask, r_mask, tgt_mask = batch["l_mask"].to(rank), batch["r_mask"].to(rank), batch["tgt_mask"].to(rank)
+        tgt_ids, l_ids, r_ids = batch["tgt_ids"].to(rank), batch["l_ids"].to(rank), batch["r_ids"].to(rank)
 
         # Create input and target for teacher forcing
         tgt_input = tgt_ids[:, :-1]  # All tokens except last
-        tgt_input_mask = tgt_mask[:, :-1]
         tgt_output = tgt_ids[:, 1:]  # All tokens except first (shifted by 1)
 
         # Forward pass
-        logits = model(l_ids, r_ids, tgt_input, l_mask, r_mask, tgt_input_mask)
+        logits = model(tgt_input, l_ids, r_ids)
         loss = criterion(logits.reshape(-1, logits.shape[-1]), tgt_output.reshape(-1))
-        # loss = loss / gradient_accumulation_steps
 
         # Backwards pass
         loss.backward()
@@ -215,24 +247,18 @@ def evalulate(
 ) -> float:
     model.eval()
     ddp_loss = torch.zeros(2).to(rank)
-    for batch, _num_tokens in dataloader:
+    for batch, _, _ in dataloader:
         # Move batch to device
-        l_ids, r_ids, tgt_ids = batch["l_ids"].to(rank), batch["r_ids"].to(rank), batch["tgt_ids"].to(rank)
+        tgt_ids, l_ids, r_ids = batch["tgt_ids"].to(rank), batch["l_ids"].to(rank), batch["r_ids"].to(rank)
 
         # Create input and target for teacher forcing
         tgt_input = tgt_ids[:, :-1]  # All tokens except last
         tgt_output = tgt_ids[:, 1:]  # All tokens except first (shifted by 1)
 
-        # Create padding masks
-        src1_padding_mask = create_padding_mask(l_ids)
-        src2_padding_mask = create_padding_mask(r_ids)
-        tgt_padding_mask = create_padding_mask(tgt_input)
-
         # Forward pass
         with torch.no_grad():
-            logits = model(l_ids, r_ids, tgt_input, src1_padding_mask, src2_padding_mask, tgt_padding_mask)
+            logits = model(tgt_input, l_ids, r_ids)
             loss = criterion(logits.reshape(-1, logits.shape[-1]), tgt_output.reshape(-1))
-
             ddp_loss[0] += loss
             ddp_loss[1] += len(batch)
 

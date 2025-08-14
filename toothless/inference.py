@@ -6,9 +6,9 @@ from dataclass_wizard import JSONWizard
 from eggshell import FirstErrorDistance, EggshellException
 from eggshell import rise  # type: ignore
 
-from toothless.vocab import SimpleVocab
-from toothless.utils import rank0print
-from toothless.data import split_off_special, Tripple
+from .vocab import SimpleVocab
+from .utils import rank0print
+from .data import split_off_special, Tripple
 
 
 @dataclass
@@ -90,7 +90,7 @@ def batch_process_result(
     return batch_distances, batch_gen_tripples
 
 
-def print_distance(rank: int, distances: list[FirstErrorDistance], ds_name: str):
+def print_distance(distances: list[FirstErrorDistance], ds_name: str):
     rank0print(f"\n### AVERAGE DISTANCE IN {ds_name} DATASET ###", "yellow")
     n_hits = sum([d.n_hits for d in distances])
     rank0print(f"Hits: {n_hits}", "yellow")

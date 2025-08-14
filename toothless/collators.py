@@ -1,31 +1,23 @@
 from typing import Sequence
 
-from eggshell import rise  # type: ignore
-
 import torch
-import torch.nn.functional as F
 from torch import Tensor
 from torch.utils.data.distributed import DistributedSampler
 from torch.utils.data import DataLoader
 
-from .layers.utils import make_tgt_mask
+from eggshell import rise  # type: ignore
+
 from .data import TrippleDataSet, Tripple
 from .args import DataArguments
 from .vocab import SimpleVocab
 
 
-class BaseCollator:
-    def __init__(self, pad_id: int, max_len: int, k: int, vocab: SimpleVocab):
+class DictCollator:
+    def __init__(self, pad_id: int, max_len: int, vocab: SimpleVocab):
         self.pad_id = pad_id
         self.max_len = max_len
-        self.k = k
         self.vocab = vocab
 
-    def __call__(self, tripples: Sequence[Tripple]) -> tuple[dict[str, Tensor], list[list[str]], int]:
-        raise NotImplementedError
-
-
-class VanillaDictCollator(BaseCollator):
     def __call__(self, tripples: Sequence[Tripple]) -> tuple[dict[str, Tensor], list[list[str]], int]:
         assert type(tripples[0]) is Tripple
 
@@ -42,42 +34,13 @@ class VanillaDictCollator(BaseCollator):
 
             assert max(len(tripple.l_ids), len(tripple.r_ids), len(tripple.tgt_ids)) <= self.max_len
 
-        # Get lengths for sorting/bucketing
-        l_lengths = [len(seq) for seq in l_batch]
-        r_lengths = [len(seq) for seq in r_batch]
-        tgt_lengths = [len(seq) for seq in tgt_batch]
+        batch = {
+            "tgt_ids": torch.nested.nested_tensor(tgt_batch, layout=torch.jagged).to_padded_tensor(self.pad_id),
+            "l_ids": torch.nested.nested_tensor(l_batch, layout=torch.jagged).to_padded_tensor(self.pad_id),
+            "r_ids": torch.nested.nested_tensor(r_batch, layout=torch.jagged).to_padded_tensor(self.pad_id),
+        }
 
-        batch_size = len(tripples)
-
-        # Pad sequences to max length in batch
-        l_padded = torch.nn.utils.rnn.pad_sequence(l_batch, batch_first=True, padding_value=0)
-        r_padded = torch.nn.utils.rnn.pad_sequence(r_batch, batch_first=True, padding_value=0)
-        tgt_padded = torch.nn.utils.rnn.pad_sequence(tgt_batch, batch_first=True, padding_value=0)
-
-        l_mask = torch.zeros(batch_size, l_padded.shape[1], dtype=torch.bool)
-        r_mask = torch.zeros(batch_size, r_padded.shape[1], dtype=torch.bool)
-        tgt_mask = torch.zeros(batch_size, tgt_padded.shape[1], dtype=torch.bool)
-
-        for i, (l_len, r_len, tgt_len) in enumerate(zip(l_lengths, r_lengths, tgt_lengths)):
-            l_mask[i, l_len:] = True  # Mask padding positions
-            r_mask[i, r_len:] = True
-            tgt_mask[i, tgt_len:] = True
-
-        return (
-            {
-                "l_ids": l_padded,
-                "r_ids": r_padded,
-                "tgt_ids": tgt_padded,
-                "l_mask": l_mask,
-                "r_mask": r_mask,
-                "tgt_mask": tgt_mask,
-                "l_lengths": torch.tensor(l_lengths),
-                "r_lengths": torch.tensor(r_lengths),
-                "tgt_lengths": torch.tensor(tgt_lengths),
-            },
-            rules_chains,
-            sum(tgt_lengths),
-        )
+        return batch, rules_chains, sum([len(seq) for seq in tgt_batch])
 
     def _pyrec_to_tensor(self, expr: rise.RecExpr) -> Tensor:
         tree_data = expr.to_data()
@@ -90,80 +53,11 @@ class VanillaDictCollator(BaseCollator):
         )
 
 
-class DisentangledDictCollator(BaseCollator):
-    def __call__(self, tripples: Sequence[Tripple]) -> tuple[dict[str, Tensor], list[list[str]], int]:
-        batch = {}
-
-        # batched_data["distance"] = torch.stack([sample["distance"] for sample in batch])
-
-        rules_chains = [sample.rules_chain for sample in tripples]
-
-        batch["l_ids"] = self._pad_1d([sample.l_ids for sample in tripples], False)
-        batch["l_anc"] = self._pad_2d([sample.l_anc for sample in tripples if sample.l_anc is not None], False)
-        batch["l_sib"] = self._pad_2d([sample.l_sib for sample in tripples if sample.l_sib is not None], False)
-        batch["l_mask"] = (batch["l_ids"] == self.pad_id).unsqueeze(1).unsqueeze(1)
-
-        batch["r_ids"] = self._pad_1d([sample.r_ids for sample in tripples], False)
-        batch["r_anc"] = self._pad_2d([sample.r_anc for sample in tripples if sample.r_anc is not None], False)
-        batch["r_sib"] = self._pad_2d([sample.r_sib for sample in tripples if sample.r_sib is not None], False)
-        batch["r_mask"] = (batch["r_ids"] == self.pad_id).unsqueeze(1).unsqueeze(1)
-
-        n_tokens = 0
-        # The _y versions are always shifted right.
-        # For matrices this means right and down.
-        full_tgt_ids = self._pad_1d([sample.tgt_ids for sample in tripples], True)
-        batch["tgt_ids"] = full_tgt_ids[:, :-1]
-        batch["tgt_ids_y"] = full_tgt_ids[:, 1:]
-        batch["tgt_mask"] = make_tgt_mask(batch["tgt_ids"], self.pad_id)
-
-        full_tgt_anc = self._pad_2d([sample.tgt_anc for sample in tripples if sample.tgt_anc is not None], True)
-        batch["tgt_anc"] = full_tgt_anc[:, :-1, :-1]
-        batch["tgt_anc_y"] = full_tgt_anc[:, 1:, 1:]
-
-        full_tgt_sib = self._pad_2d([sample.tgt_sib for sample in tripples if sample.tgt_sib is not None], True)
-        batch["tgt_sib"] = full_tgt_sib[:, :-1, :-1]
-        batch["tgt_sib_y"] = full_tgt_sib[:, 1:, 1:]
-
-        n_tokens = int((full_tgt_ids != self.pad_id).data.sum())
-
-        return batch, rules_chains, n_tokens
-
-    def _pad_1d(self, samples: list[Tensor], extra_pad: bool) -> Tensor:
-        """
-        Pad sequences to the same length along one simple dimension
-        Generate padding directions depending on max_len
-
-        :param samples: List of input tensors to pad and stack
-        :return: Padded and stacked samples
-        """
-        pad_len = self.max_len
-        if extra_pad:
-            pad_len += 1  # Extra padding since tgt will be shifted
-        paddings = [(0, pad_len - s.shape[-1]) for s in samples]
-        padded_elements = [F.pad(s, p, "constant", self.pad_id) for s, p in zip(samples, paddings)]
-        return torch.stack(padded_elements)
-
-    def _pad_2d(self, samples: list[Tensor], extra_pad: bool) -> Tensor:
-        """
-        Find largest dimensions of the square 2-dimensional matrices (they are always square)
-        Generate padding directions depending on largest element in batch
-
-        :param samples: List of input tensors to pad and stack
-        :return: Padded and stacked samples
-        """
-        pad_len = self.max_len
-        if extra_pad:
-            pad_len += 1  # Extra padding since tgt will be shifted
-        paddings = [(0, pad_len - s.shape[-1], 0, pad_len - s.shape[-2]) for s in samples]
-        padded_elements = [F.pad(s, p, "constant", self.pad_id) for s, p in zip(samples, paddings)]
-        return torch.stack(padded_elements)
-
-
 def mk_loaders(
     rank: int,
     world_size: int,
     dataset: TrippleDataSet,
-    collator: BaseCollator,
+    collator: DictCollator,
     data_args: DataArguments,
     shuffle: bool = True,
 ) -> tuple[DataLoader[Tripple], DataLoader[Tripple]]:

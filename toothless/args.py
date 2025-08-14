@@ -6,17 +6,13 @@ from dataclass_wizard import JSONWizard
 
 @dataclass
 class ModelArguments(JSONWizard):
-    disentangled: bool = field(metadata={"help": "Use the disentangled or vanilla model."})
     output_dir: str = field(default="model")
     d_model: int = field(default=768, metadata={"help": "Hidden state dimension size."})
     num_layers: int = field(default=12)
+    head_dim: int = field(default=64)
     dim_feed_forward: int = field(default=3072, metadata={"help": "Feed forward dimension size."})
     dropout: float = field(default=0.1)
     n_heads: int = field(default=12)
-    anc_heads: int = field(default=8)
-    sib_heads: int = field(default=4)
-    pos_type: str = field(default="p2q_p2k", metadata={"help": "Position type seperated by underscore."})
-    with_pos: bool = field(default=False, metadata={"help": "Enable rotary positional encoding for decoder."})
 
 
 @dataclass
@@ -29,7 +25,6 @@ class DataArguments(JSONWizard):
         default=8, metadata={"help": "Minimum distance when splitting the explanation chains recursively."}
     )
     batch_size: int = field(default=16)
-    k: int = field(default=15, metadata={"help": "Max relative positional distance."})
     max_len: int = field(default=192)
     force_reload: bool = field(default=False)
     sample_limit: int | None = field(default=None)

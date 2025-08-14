@@ -1,43 +1,58 @@
+import torch
 from torch import nn, Tensor
 
-from .attention import RoPEMultiheadAttention
+from .attention import PackedRoPEMHA
 from .swiglu import SwiGLUFFN
 from ..args import ModelArguments
 
 
 class TransformerDecoderLayer(nn.Module):
-    def __init__(self, conf: ModelArguments):
+    def __init__(self, conf: ModelArguments, device: torch.device | None = None, dtype: torch.dtype | None = None):
+        factory_kwargs = {"device": device, "dtype": dtype}
         super().__init__()
-        self.self_attn = RoPEMultiheadAttention(conf.d_model, conf.n_heads, conf.dropout)
-        self.self_attn_norm = nn.RMSNorm(conf.d_model)
+        self.self_attn = PackedRoPEMHA(
+            conf.d_model, conf.n_heads, conf.head_dim, dropout=conf.dropout, **factory_kwargs
+        )
+        self.self_attn_norm = nn.RMSNorm(conf.d_model, **factory_kwargs)
 
-        self.cross_attn = RoPEMultiheadAttention(conf.d_model, conf.n_heads, conf.dropout)
-        self.cross_attn_norm = nn.RMSNorm(conf.d_model)
+        self.l_cross_attn = PackedRoPEMHA(
+            conf.d_model, conf.n_heads, conf.head_dim, dropout=conf.dropout, **factory_kwargs
+        )
+        self.l_cross_attn_norm = nn.RMSNorm(conf.d_model, **factory_kwargs)
 
-        self.feed_forward = SwiGLUFFN(conf.d_model, conf.dim_feed_forward)
-        self.ff_norm = nn.RMSNorm(conf.d_model)
+        self.r_cross_attn = PackedRoPEMHA(
+            conf.d_model, conf.n_heads, conf.head_dim, dropout=conf.dropout, **factory_kwargs
+        )
+        self.r_cross_attn_norm = nn.RMSNorm(conf.d_model, **factory_kwargs)
+
+        self.feed_forward = SwiGLUFFN(conf.d_model, conf.dim_feed_forward, **factory_kwargs)
+        self.ff_norm = nn.RMSNorm(conf.d_model, **factory_kwargs)
 
     def forward(
         self,
         tgt: Tensor,
-        memory: Tensor,
-        tgt_mask: Tensor | None = None,
-        memory_mask: Tensor | None = None,
-        tgt_key_padding_mask: Tensor | None = None,
-        memory_key_padding_mask: Tensor | None = None,
+        l_mem: Tensor,
+        r_mem: Tensor,
+        tgt_padding_mask: Tensor,
+        l_padding_mask: Tensor,
+        r_padding_mask: Tensor,
     ) -> Tensor:
         # Self attention
         normed_tgt = self.self_attn_norm(tgt)
-        attn_out, _ = self.self_attn(normed_tgt, normed_tgt, normed_tgt, tgt_mask, tgt_key_padding_mask)
+        attn_out = self.self_attn(normed_tgt, normed_tgt, normed_tgt, tgt_padding_mask, is_causal=True)
         tgt = tgt + attn_out
 
-        # Memory attention
-        normed_memory = self.cross_attn_norm(memory)
-        normed_tgt = self.cross_attn_norm(tgt)
-        cross_attn_out, _ = self.cross_attn(
-            normed_tgt, normed_memory, normed_memory, memory_mask, memory_key_padding_mask
-        )
-        tgt = tgt + cross_attn_out
+        # Left Memory attention
+        normed_memory = self.l_cross_attn_norm(l_mem)
+        normed_tgt = self.l_cross_attn_norm(tgt)
+        l_cross_attn_out = self.l_cross_attn(normed_tgt, normed_memory, normed_memory, l_padding_mask, is_causal=False)
+
+        # Right Memory attention
+        normed_memory = self.r_cross_attn_norm(r_mem)
+        normed_tgt = self.r_cross_attn_norm(tgt)
+        r_cross_attn_out = self.l_cross_attn(normed_tgt, normed_memory, normed_memory, r_padding_mask, is_causal=False)
+
+        tgt = tgt + l_cross_attn_out + r_cross_attn_out
 
         # Feedforward
         tgt = tgt + self.feed_forward(self.ff_norm(tgt))

@@ -3,9 +3,8 @@ uv run train.py \
     --train.logging-steps 1 \
     --train.epochs 1 \
     --train.warmup-steps 500 \
-    --model.disentangled False \
-    --model.with-pos \
     --model.num-layers 12 \
+    --model.head-dim 64 \
     --model.output-dir "models" \
     --data.sample-distance 16 \
     --data.sample-limit 1000000 \
