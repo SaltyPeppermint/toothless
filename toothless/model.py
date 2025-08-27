@@ -46,7 +46,7 @@ class DualTreeTransformer(nn.Module):
         else:
             self.load_state_dict(state_dict)
 
-    @torch.compile()
+    @torch.compile(fullgraph=True)
     def l_encode(self, l_ids: Tensor, l_mask: Tensor):
         # Embeddings
         l_mem = self.l_embedding(l_ids) * math.sqrt(self.conf.d_model)
@@ -56,7 +56,7 @@ class DualTreeTransformer(nn.Module):
             l_mem = layer(l_mem, l_mask)
         return l_mem
 
-    @torch.compile()
+    @torch.compile(fullgraph=True)
     def r_encode(self, r_ids: Tensor, r_mask: Tensor):
         # Embeddings
         r_mem = self.r_embedding(r_ids) * math.sqrt(self.conf.d_model)
@@ -66,7 +66,7 @@ class DualTreeTransformer(nn.Module):
             r_mem = layer(r_mem, r_mask)
         return r_mem
 
-    @torch.compile()
+    @torch.compile(fullgraph=True)
     def decode(self, tgt: Tensor, l_mem: Tensor, r_mem: Tensor, tgt_mask: Tensor, l_mask: Tensor, r_mask: Tensor):
         """Decode target sequence using fused encoder memories."""
 
@@ -79,7 +79,7 @@ class DualTreeTransformer(nn.Module):
 
         return self.output_proj(self.output_norm(output))
 
-    @torch.compile()
+    @torch.compile(fullgraph=True)
     def forward(self, tgt_ids: Tensor, l_ids: Tensor, r_ids: Tensor):
         # Encode both source sequences
         l_mask = create_padding_mask(l_ids, pad_token_id=self.pad_token_id)

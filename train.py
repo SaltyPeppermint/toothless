@@ -5,19 +5,16 @@ from datetime import datetime
 import torch
 import torch.multiprocessing as mp
 import torch.distributed as dist
+import torch.distributed.checkpoint as dcp
+
 from torch import nn, optim
 from torch.nn import CrossEntropyLoss
 from torch.optim.lr_scheduler import CosineAnnealingLR, LinearLR
-from torch.distributed.fsdp import (
-    FullyShardedDataParallel as FSDP,
-    MixedPrecision,
-    ShardingStrategy,
-    StateDictType,
-    FullStateDictConfig,
-)
+from torch.distributed.fsdp import FullyShardedDataParallel as FSDP, MixedPrecision, ShardingStrategy
 from torch.utils.data import DataLoader
 from torch.utils.tensorboard.writer import SummaryWriter
 from torch.profiler import profile, ProfilerActivity
+from torch.distributed.checkpoint.state_dict import get_state_dict
 
 from tqdm.auto import tqdm
 import tyro
@@ -77,7 +74,7 @@ def fsdp_main(
         sharding_strategy=sharding_strategy,
         mixed_precision=mixed_precision,
         device_id=rank,
-        # use_orig_params=True, ALLOWS FULL GRAPH CAPTURE BUT WE DONT HAVE CHONKY GPU
+        use_orig_params=True,  # ALLOWS FULL GRAPH CAPTURE BUT WE DONT HAVE CHONKY GPU
     )
 
     # Define optimizer and loss function
@@ -103,6 +100,8 @@ def fsdp_main(
     criterion = CrossEntropyLoss(ignore_index=dataset.vocab.pad_token_id, label_smoothing=0.1)
 
     best_eval_loss = float("inf")
+    if rank == 0:
+        (save_folder / "weights").mkdir(exist_ok=True, parents=True)
 
     rank0print("Starting training!")
     init_start_event.record(torch.cuda.current_stream())
@@ -124,7 +123,8 @@ def fsdp_main(
         )
 
         # use a barrier to make sure training is done on all ranks
-        save_model(model, save_folder, str(epoch), rank)
+        model_state_dict, _optimizer_state_dict = get_state_dict(model, optimizer)
+        _checkpoint_future = dcp.async_save(model_state_dict, checkpoint_id=save_folder / "weights" / f"{epoch}.pt")
 
         # Optionally, evaluate the model on the validation set after each epoch
         if train_args.eval_each_epoch:
@@ -133,7 +133,10 @@ def fsdp_main(
             )
             if eval_loss < best_eval_loss:
                 best_eval_loss = eval_loss
-                save_model(model, save_folder, "best_eval", rank)
+                model_state_dict, _optimizer_state_dict = get_state_dict(model, optimizer)
+                _checkpoint_future = dcp.async_save(
+                    model_state_dict, checkpoint_id=save_folder / "weights" / "best_eval.pt"
+                )
 
         cosine_scheduler.step()
 
@@ -144,7 +147,8 @@ def fsdp_main(
         init_end_event.synchronize()
     rank0print(f"CUDA event elapsed time: {init_start_event.elapsed_time(init_end_event) / 1000} sec")
 
-    save_model(model, save_folder, "final", rank)
+    model_state_dict, _optimizer_state_dict = get_state_dict(model, optimizer)
+    _checkpoint_future = dcp.async_save(model_state_dict, checkpoint_id=save_folder / "weights" / "final.pt")
 
     cleanup_process_group()
 
@@ -269,16 +273,6 @@ def evalulate(
 
     rank0print(f"Epoch: {epoch + 1}/{max_epochs} \tValidation loss: {eval_loss:.4f}")
     return float(eval_loss)
-
-
-def save_model(model: FSDP, save_folder: Path, suffix: str, rank: int):
-    dist.barrier()
-    save_policy = FullStateDictConfig(offload_to_cpu=True, rank0_only=True)
-    with FSDP.state_dict_type(model, StateDictType.FULL_STATE_DICT, save_policy):
-        states = model.state_dict()
-        if rank == 0:
-            Path(f"{save_folder}/weights").mkdir(exist_ok=True, parents=True)
-            torch.save(states, f"{save_folder}/weights/tree_transformer_{suffix}.pt")
 
 
 if __name__ == "__main__":
