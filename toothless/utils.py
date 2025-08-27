@@ -52,7 +52,8 @@ def setup_process_group(rank: int, world_size: int):
     os.environ["MASTER_PORT"] = "6601"
 
     # initialize the process group
-    dist.init_process_group("nccl", rank=rank, world_size=world_size)
+    # cpu for async save
+    dist.init_process_group("cpu:gloo,cuda:nccl", rank=rank, world_size=world_size)
     print("Process group created")
 
 
