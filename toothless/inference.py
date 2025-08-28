@@ -8,7 +8,7 @@ from eggshell import rise  # type: ignore
 
 from .vocab import SimpleVocab
 from .utils import rank0print
-from .data import split_off_special, Tripple
+from .data import split_off_special, Triple
 
 
 @dataclass
@@ -22,7 +22,7 @@ class InferResult(JSONWizard):
 
 def batch_process_result(
     vocab: SimpleVocab,
-    tripples: list[Tripple],
+    triples: list[Triple],
     batch_ids: list[list[int]],
     batch_probs: list[list[float]],
     rule_chains: list[list[str]],
@@ -31,25 +31,25 @@ def batch_process_result(
     verbose: bool,
 ) -> tuple[list[FirstErrorDistance], list[InferResult]]:
     batch_distances = []
-    batch_gen_tripples = []
-    for i, (tripple, ids, token_probs, rule_chain) in enumerate(zip(tripples, batch_ids, batch_probs, rule_chains)):
+    batch_gen_triples = []
+    for i, (triple, ids, token_probs, rule_chain) in enumerate(zip(triples, batch_ids, batch_probs, rule_chains)):
         sample_id = i + id_offset
 
-        rise.RecExpr(tripple.l_str).to_dot(f"{sample_id} left", str(path / f"{sample_id}_left"))
-        middle = rise.RecExpr(tripple.tgt_str)
+        rise.RecExpr(triple.l_str).to_dot(f"{sample_id} left", str(path / f"{sample_id}_left"))
+        middle = rise.RecExpr(triple.tgt_str)
         middle.to_dot(f"{sample_id} middle", str(path / f"{sample_id}_middle"))
         middle.to_dot(f"{sample_id} middle", str(path / f"{sample_id}_middle_t"), transparent=True)
-        rise.RecExpr(tripple.r_str).to_dot(f"{sample_id} right", str(path / f"{sample_id}_right"))
+        rise.RecExpr(triple.r_str).to_dot(f"{sample_id} right", str(path / f"{sample_id}_right"))
 
         if verbose:
             rank0print("----------")
             rank0print(f"Sample {sample_id}", "blue")
             rank0print("LEFT:", "green")
-            rank0print(tripple.r_str)
+            rank0print(triple.r_str)
             rank0print("MIDDLE:", "green")
-            rank0print(tripple.tgt_str)
+            rank0print(triple.tgt_str)
             rank0print("RIGHT:", "green")
-            rank0print(tripple.r_str)
+            rank0print(triple.r_str)
 
         raw_generated_tokens = [vocab.id2token(int(i)) for i in ids if i]
         generated_tokens = split_off_special(raw_generated_tokens, vocab)
@@ -67,9 +67,7 @@ def batch_process_result(
                 marked_ids=distance.miss_ids(),
                 transparent=True,
             )
-            batch_gen_tripples.append(
-                InferResult(tripple.l_str, tripple.r_str, tripple.tgt_str, str(lowered), rule_chain)
-            )
+            batch_gen_triples.append(InferResult(triple.l_str, triple.r_str, triple.tgt_str, str(lowered), rule_chain))
 
             if verbose:
                 rank0print("GENERATED:", "green")
@@ -87,7 +85,7 @@ def batch_process_result(
                 rank0print(generated)
                 rank0print(f"Used {generated.used_tokens} out of {len(generated_tokens)}", "red")
 
-    return batch_distances, batch_gen_tripples
+    return batch_distances, batch_gen_triples
 
 
 def print_distance(distances: list[FirstErrorDistance], ds_name: str):

@@ -26,10 +26,11 @@ from . import loading
 # from tokenizers.normalizers import Strip
 # from tokenizers.normalizers import Sequence as NormalizerSequence
 # import matplotlib.pyplot as plt
+CACHE_BATCH_SIZE = 10000
 
 
 @dataclass
-class Tripple:
+class Triple:
     l_ids: Tensor
     l_str: str
     tgt_ids: Tensor
@@ -45,8 +46,8 @@ class Tripple:
     r_sib: Tensor | None = None
 
 
-class TrippleDataSet(Dataset[Tripple]):
-    def __init__(self, conf: DataArguments, disentangled: bool):
+class TripleDataSet(Dataset[Triple]):
+    def __init__(self, conf: DataArguments):
         """
         :param k represents the max relative distance
         """
@@ -54,7 +55,6 @@ class TrippleDataSet(Dataset[Tripple]):
         self.sample_distance = conf.sample_distance
         self.force_reload = conf.force_reload
         self.sample_limit = conf.sample_limit
-        self.disentangled = disentangled
         torch.manual_seed(conf.rng_seed)
 
         self.cache = Path(conf.cache_dir) / Path(*self.json_root.parts[-2:])
@@ -80,9 +80,12 @@ class TrippleDataSet(Dataset[Tripple]):
     def __len__(self) -> int:
         return self.len
 
-    def __getitem__(self, idx: int) -> Tripple:
-        with open(self.sample_cache / f"{idx}.json", encoding="utf-8") as f:
-            s = json.load(f)
+    def __getitem__(self, idx: int) -> Triple:
+        file_id = idx // CACHE_BATCH_SIZE
+        with open(self.sample_cache / f"{file_id}.json", encoding="utf-8") as f:
+            sample_batch = json.load(f)
+
+        s = sample_batch[idx % CACHE_BATCH_SIZE]
 
         l_tree = rise.RecExpr(s["left"]).to_data()
         tgt_tree = rise.RecExpr(s["middle"]).to_data()
@@ -92,7 +95,7 @@ class TrippleDataSet(Dataset[Tripple]):
         tgt_ids = self._pyrec_to_tensor(tgt_tree)
         r_ids = self._pyrec_to_tensor(r_tree)
 
-        return Tripple(l_ids, s["left"], tgt_ids, s["middle"], r_ids, s["right"], s["rules"])
+        return Triple(l_ids, s["left"], tgt_ids, s["middle"], r_ids, s["right"], s["rules"])
 
     def _pyrec_to_tensor(self, tree_data: TreeData) -> Tensor:
         return torch.tensor(
@@ -127,14 +130,14 @@ class TrippleDataSet(Dataset[Tripple]):
         expr_chains = raw_data.get_column("expr_chain").to_list()
         rules_chains = raw_data.get_column("rules_chain").to_list()
 
-        index_tripples = [self._pick_fixed_distance_indices(len(chain) - 1) for chain in expr_chains]
-        length = sum([len(chain_pairs) for chain_pairs in index_tripples])
-        print(f"Total tripples: {length}")
+        index_triples = [self._pick_fixed_distance_indices(len(chain) - 1) for chain in expr_chains]
+        length = sum([len(chain_pairs) for chain_pairs in index_triples])
+        print(f"Total triples: {length}")
 
         samples = []
-        with tqdm(total=length, desc="Creating tripples...") as pbar:
-            for expr_chain, rules_chain, index_tripple in zip(expr_chains, rules_chains, index_tripples):
-                for left_idx, middle_idx, right_idx in index_tripple:
+        with tqdm(total=length, desc="Creating triples...") as pbar:
+            for expr_chain, rules_chain, index_triple in zip(expr_chains, rules_chains, index_triples):
+                for left_idx, middle_idx, right_idx in index_triple:
                     sample = {
                         "left": str(expr_chain[left_idx]),
                         "middle": str(expr_chain[middle_idx]),
@@ -149,9 +152,9 @@ class TrippleDataSet(Dataset[Tripple]):
         with open(self.sample_cache_metadata_path, mode="w", encoding="utf-8") as p:
             json.dump({"n_samples": len(samples), "sample_distance": self.sample_distance}, p)
 
-        for i, sample in enumerate(tqdm(samples, desc="Saving to cache...")):
+        for i, sample_batch in enumerate(tqdm(_chunks(samples, CACHE_BATCH_SIZE), desc="Saving to cache...")):
             with open(self.sample_cache / f"{i}.json", mode="w", encoding="utf-8") as p:
-                json.dump(sample, p)
+                json.dump(sample_batch, p)
 
         print("Data processed!")
 
@@ -193,6 +196,12 @@ def split_off_special(partial_tok: list[str], vocab: SimpleVocab) -> list[str]:
         if j in vocab.special_tokens:
             return partial_tok[:i]
     return partial_tok
+
+
+def _chunks(lst: list[dict], n: int):
+    """Yield successive n-sized chunks from lst."""
+    for i in range(0, len(lst), n):
+        yield lst[i : i + n]
 
 
 def _min_none(a: None | int, b: None | int) -> int:

@@ -105,9 +105,9 @@ wheels = [
 [[package]]
 name = "eggshell"
 version = "0.0.1"
-source = { path = "cache/eggshell-0.0.1-cp312-abi3-manylinux_2_39_x86_64.whl" }
+source = { path = "cache/eggshell-0.0.1-cp312-abi3-macosx_11_0_arm64.whl" }
 wheels = [
-    { filename = "eggshell-0.0.1-cp312-abi3-manylinux_2_39_x86_64.whl", hash = "sha256:80345a22416ba9f3243249968ed7380047eb47f537c851fff6d7c55e8d039459" },
+    { filename = "eggshell-0.0.1-cp312-abi3-macosx_11_0_arm64.whl", hash = "sha256:49765ba1de4cb2336d9a78e56ca7ce968fce408bc4fa7f5b52ce70c7ea140a61" },
 ]
 
 [[package]]
@@ -950,7 +950,7 @@ dependencies = [
 [package.metadata]
 requires-dist = [
     { name = "dataclass-wizard", specifier = ">=0.35.0" },
-    { name = "eggshell", path = "cache/eggshell-0.0.1-cp312-abi3-manylinux_2_39_x86_64.whl" },
+    { name = "eggshell", path = "cache/eggshell-0.0.1-cp312-abi3-macosx_11_0_arm64.whl" },
     { name = "matplotlib", specifier = ">=3" },
     { name = "plotly", specifier = ">=6.2.0" },
     { name = "polars", specifier = ">=1.21.0" },

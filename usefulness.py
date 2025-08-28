@@ -57,7 +57,7 @@ def check_tuple(sample: InferResult) -> dict[str, dict]:
 
 
 if __name__ == "__main__":
-    with open(EVAL_PATH / "train_gen_tripples.json", encoding="utf-8") as f:
+    with open(EVAL_PATH / "train_gen_triples.json", encoding="utf-8") as f:
         eval_tuples = InferResult.from_list(json.load(f))
 
     n_samples = min(len(eval_tuples), MAX_SAMPLES)

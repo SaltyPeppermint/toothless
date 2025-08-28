@@ -24,7 +24,6 @@ class DataArguments(JSONWizard):
     sample_distance: int = field(
         default=8, metadata={"help": "Minimum distance when splitting the explanation chains recursively."}
     )
-    batch_size: int = field(default=16)
     max_len: int = field(default=192)
     force_reload: bool = field(default=False)
     sample_limit: int | None = field(default=None)
@@ -37,6 +36,7 @@ class TrainingArguments(JSONWizard):
     eval_each_epoch: bool = field(default=True)
     save_model_end: bool = field(default=True)
     tmax: int = field(default=2)
+    batch_size: int = field(default=16)
     learning_rate: float = field(default=1e-5)
     min_lr: float = field(default=1e-6)
     warmup_steps: int = field(default=1000)

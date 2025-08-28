@@ -21,7 +21,7 @@ import tyro
 
 from toothless.collators import DictCollator, mk_loaders
 from toothless.utils import cleanup_process_group, rank0print, setup_process_group
-from toothless.data import TrippleDataSet, Tripple
+from toothless.data import TripleDataSet, Triple
 from toothless.model import DualTreeTransformer
 from toothless.utils import count_parameters
 from toothless.args import DataArguments, TrainingArguments, ModelArguments, TrainRunArgs
@@ -40,7 +40,7 @@ def fsdp_main(
 
     writer = SummaryWriter(log_dir=train_args.run_log_dir) if rank == 0 else None
 
-    dataset = TrippleDataSet(data_args, False)
+    dataset = TripleDataSet(data_args)
     if rank == 0:
         dataset.vocab.save(save_folder / "vocab.json")
     rank0print("Dataset ready")
@@ -48,7 +48,9 @@ def fsdp_main(
     # Load Data
     vocab_size = len(dataset.vocab)
     collator = DictCollator(dataset.vocab.pad_token_id, data_args.max_len, dataset.vocab)
-    train_dataloader, eval_dataloader = mk_loaders(rank, world_size, dataset, collator, data_args)
+    train_dataloader, eval_dataloader = mk_loaders(
+        rank, world_size, dataset, collator, data_args, train_args.batch_size
+    )
     rank0print("DataLoaders ready")
 
     # Construct Base Model
@@ -153,7 +155,7 @@ def fsdp_main(
     cleanup_process_group()
 
 
-def profil_model(rank: int, model: FSDP, dataloader: DataLoader[Tripple], criterion: CrossEntropyLoss):
+def profil_model(rank: int, model: FSDP, dataloader: DataLoader[Triple], criterion: CrossEntropyLoss):
     model.train()
     dl_iter = iter(dataloader)
 
@@ -183,7 +185,7 @@ def profil_model(rank: int, model: FSDP, dataloader: DataLoader[Tripple], criter
 def train(
     rank: int,
     model: FSDP,
-    dataloader: DataLoader[Tripple],
+    dataloader: DataLoader[Triple],
     criterion: CrossEntropyLoss,
     optimizer: optim.Optimizer,
     warmup_scheduler: LinearLR,
@@ -243,7 +245,7 @@ def train(
 def evalulate(
     rank: int,
     model: nn.Module,
-    dataloader: DataLoader[Tripple],
+    dataloader: DataLoader[Triple],
     criterion: CrossEntropyLoss,
     epoch: int,
     max_epochs: int,

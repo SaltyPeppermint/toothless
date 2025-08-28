@@ -10,17 +10,17 @@ from tqdm.auto import tqdm
 
 from eggshell import FirstErrorDistance
 
+import toothless.inference as infer
 from toothless.vocab import SimpleVocab
 from toothless.utils import cleanup_process_group, rank0print, setup_process_group
 from toothless.collators import DictCollator
-from toothless.data import TrippleDataSet, Tripple
+from toothless.data import TripleDataSet, Triple
 from toothless.model import DualTreeTransformer, generate_with_probabilities
 from toothless.utils import count_parameters
 from toothless.args import DataArguments, InferenceArguments, ModelArguments
-import toothless.inference as infer
 
 
-def fsdp_main(rank: int, world_size: int, infer_args: InferenceArguments, dataset: TrippleDataSet):
+def fsdp_main(rank: int, world_size: int, infer_args: InferenceArguments, dataset: TripleDataSet):
     setup_process_group(rank, world_size)
     rank0print("Distributed Network ready")
     torch.cuda.set_device(rank)
@@ -64,20 +64,20 @@ def fsdp_main(rank: int, world_size: int, infer_args: InferenceArguments, datase
         dataset, [data_args.split_size, 1 - data_args.split_size], torch.Generator().manual_seed(data_args.rng_seed)
     )
 
-    train_distances, train_gen_tripples = _batch_infer(
+    train_distances, train_gen_triples = _batch_infer(
         data_args, infer_args, vocab, model, collator, train_dataset, "train", eval_folder
     )
-    with open(eval_folder / "train_gen_tripples_vanilla.json", mode="w", encoding="utf-8") as f:
-        f.write(infer.InferResult.list_to_json(train_gen_tripples))
-    del train_gen_tripples
+    with open(eval_folder / "train_gen_triples_vanilla.json", mode="w", encoding="utf-8") as f:
+        f.write(infer.InferResult.list_to_json(train_gen_triples))
+    del train_gen_triples
     infer.print_distance(train_distances, "TRAIN")
 
-    eval_distances, eval_gen_tripples = _batch_infer(
+    eval_distances, eval_gen_triples = _batch_infer(
         data_args, infer_args, vocab, model, collator, eval_dataset, "eval", eval_folder
     )
-    with open(eval_folder / "eval_gen_tripples_vanilla.json", mode="w", encoding="utf-8") as f:
-        f.write(infer.InferResult.list_to_json(eval_gen_tripples))
-    del eval_gen_tripples
+    with open(eval_folder / "eval_gen_triples_vanilla.json", mode="w", encoding="utf-8") as f:
+        f.write(infer.InferResult.list_to_json(eval_gen_triples))
+    del eval_gen_triples
     infer.print_distance(eval_distances, "EVAL")
 
     cleanup_process_group()
@@ -89,7 +89,7 @@ def _batch_infer(
     vocab: SimpleVocab,
     model: FSDP,
     collator: DictCollator,
-    dataset: Subset[Tripple],
+    dataset: Subset[Triple],
     ds_name: str,
     eval_folder: Path,
 ) -> tuple[list[FirstErrorDistance], list[infer.InferResult]]:
@@ -102,25 +102,25 @@ def _batch_infer(
 
     rank0print(f"\n=================\nRunning inference on {n} samples of {ds_name} dataset ...")
     distances = []
-    gen_tripples = []
+    gen_triples = []
 
     n = infer_args.n_eval_data if infer_args.n_eval_data else len(dataset)
 
     for i in tqdm(range(0, n, infer_args.batch_size), desc=f"Inference Batch (Batch Size {infer_args.batch_size})"):
-        tripples = [dataset[i] for i in range(i, i + infer_args.batch_size)]
-        batch, rule_chains, _n_tokens = collator(tripples)
+        triples = [dataset[i] for i in range(i, i + infer_args.batch_size)]
+        batch, rule_chains, _n_tokens = collator(triples)
         result = generate_with_probabilities(model, batch["l_ids"], batch["r_ids"], vocab, data_args.max_len)
 
         p = Path(eval_folder / "viz/asts/")
         p.mkdir(parents=True, exist_ok=True)
-        batch_distance, batch_gen_tripples = infer.batch_process_result(
-            vocab, tripples, result.tokens.tolist(), result.token_probs.tolist(), rule_chains, p, i, infer_args.verbose
+        batch_distance, batch_gen_triples = infer.batch_process_result(
+            vocab, triples, result.tokens.tolist(), result.token_probs.tolist(), rule_chains, p, i, infer_args.verbose
         )
         distances.extend(batch_distance)
-        gen_tripples.extend(batch_gen_tripples)
+        gen_triples.extend(batch_gen_triples)
         del batch, result
 
-    return distances, gen_tripples
+    return distances, gen_triples
 
 
 if __name__ == "__main__":
@@ -128,7 +128,7 @@ if __name__ == "__main__":
     with open(Path(infer_args.folder) / "data_args.json", encoding="utf-8") as f:
         data_args = DataArguments.from_json(f.read())
     assert isinstance(data_args, DataArguments)
-    dataset = TrippleDataSet(data_args, False)
+    dataset = TripleDataSet(data_args)
 
     world_size = torch.cuda.device_count()
 
