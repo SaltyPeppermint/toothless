@@ -37,13 +37,6 @@ class Triple:
     tgt_str: str
     r_ids: Tensor
     r_str: str
-    rules_chain: list[str]
-    l_anc: Tensor | None = None
-    l_sib: Tensor | None = None
-    tgt_anc: Tensor | None = None
-    tgt_sib: Tensor | None = None
-    r_anc: Tensor | None = None
-    r_sib: Tensor | None = None
 
 
 class TripleDataSet(Dataset[Triple]):
@@ -95,7 +88,7 @@ class TripleDataSet(Dataset[Triple]):
         tgt_ids = self._pyrec_to_tensor(tgt_tree)
         r_ids = self._pyrec_to_tensor(r_tree)
 
-        return Triple(l_ids, s["left"], tgt_ids, s["middle"], r_ids, s["right"], s["rules"])
+        return Triple(l_ids, s["left"], tgt_ids, s["middle"], r_ids, s["right"])
 
     def _pyrec_to_tensor(self, tree_data: TreeData) -> Tensor:
         return torch.tensor(
@@ -118,7 +111,7 @@ class TripleDataSet(Dataset[Triple]):
                 metadata = json.load(p)
 
             json_files = list(self.sample_cache.glob("*.json"))
-            if len(json_files) == metadata["n_samples"] and self.sample_distance == metadata["sample_distance"]:
+            if len(json_files) == metadata["cache_files"] and self.sample_distance == metadata["sample_distance"]:
                 print("JSON Cache Usable!")
                 return _min_none(self.sample_limit, len(json_files))
 
@@ -128,7 +121,6 @@ class TripleDataSet(Dataset[Triple]):
 
         raw_data = pl.read_parquet(self.raw_path)
         expr_chains = raw_data.get_column("expr_chain").to_list()
-        rules_chains = raw_data.get_column("rules_chain").to_list()
 
         index_triples = [self._pick_fixed_distance_indices(len(chain) - 1) for chain in expr_chains]
         length = sum([len(chain_pairs) for chain_pairs in index_triples])
@@ -136,13 +128,12 @@ class TripleDataSet(Dataset[Triple]):
 
         samples = []
         with tqdm(total=length, desc="Creating triples...") as pbar:
-            for expr_chain, rules_chain, index_triple in zip(expr_chains, rules_chains, index_triples):
+            for expr_chain, index_triple in zip(expr_chains, index_triples):
                 for left_idx, middle_idx, right_idx in index_triple:
                     sample = {
                         "left": str(expr_chain[left_idx]),
                         "middle": str(expr_chain[middle_idx]),
                         "right": str(expr_chain[right_idx]),
-                        "rules": rules_chain[left_idx : right_idx + 1],
                     }
 
                     samples.append(sample)
@@ -150,11 +141,12 @@ class TripleDataSet(Dataset[Triple]):
 
         print(f"Total samples: {len(samples)} saved to disk")
         with open(self.sample_cache_metadata_path, mode="w", encoding="utf-8") as p:
-            json.dump({"n_samples": len(samples), "sample_distance": self.sample_distance}, p)
+            json.dump({"cache_files": len(samples) // CACHE_BATCH_SIZE + 1, "sample_distance": self.sample_distance}, p)
 
-        for i, sample_batch in enumerate(tqdm(_chunks(samples, CACHE_BATCH_SIZE), desc="Saving to cache...")):
+        for i, j in enumerate(tqdm(range(0, len(samples), CACHE_BATCH_SIZE), desc="Saving to cache...")):
             with open(self.sample_cache / f"{i}.json", mode="w", encoding="utf-8") as p:
-                json.dump(sample_batch, p)
+                batch_to_save = samples[j : j + CACHE_BATCH_SIZE]
+                json.dump(batch_to_save, p)
 
         print("Data processed!")
 
