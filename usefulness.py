@@ -49,7 +49,6 @@ def check_tuple(sample: InferResult) -> dict[str, dict]:
     right = rise.RecExpr(sample.right)
 
     tuple_report = eqsat_check(left, right, "baseline")
-    tuple_report |= eqsat_rules_check(left, right, sample.rules_chain, "rules_chain")
     tuple_report |= eqsat_guide_check(left, right, rise.RecExpr(sample.middle), "middle")
     tuple_report |= eqsat_guide_check(left, right, rise.RecExpr(sample.generated), "generated")
 
@@ -75,14 +74,9 @@ if __name__ == "__main__":
             reports = json.load(f)
 
     max_nodes = []
-    stop_reasons = {
-        "baseline": defaultdict(int),
-        "middle": defaultdict(int),
-        "generated": defaultdict(int),
-        "rules_chain": defaultdict(int),
-    }
+    stop_reasons = {"baseline": defaultdict(int), "middle": defaultdict(int), "generated": defaultdict(int)}
     reached_after_guide = {"middle": 0, "generated": 0}
-    guide_reduced_mem = {"middle": 0, "generated": 0, "rules_chain": 0}
+    guide_reduced_mem = {"middle": 0, "generated": 0}
 
     for report in reports:
         max_node = {}
@@ -100,13 +94,6 @@ if __name__ == "__main__":
             reached_after_guide["middle"] += 1
             if max_node["middle"] < max_node["baseline"]:
                 guide_reduced_mem["middle"] += 1
-
-        max_node["rules_chain"] = report["rules_chain"]["report"]["egraph_nodes"]
-        sr = list(report["rules_chain"]["report"]["stop_reason"])[0]
-        stop_reasons["rules_chain"][sr] += 1
-
-        if max_node["rules_chain"] < max_node["baseline"]:
-            guide_reduced_mem["rules_chain"] += 1
 
         max_node["generated"] = report["generated"]["report"]["egraph_nodes"]
         sr = list(report["generated"]["report"]["stop_reason"])[0]
@@ -139,8 +126,6 @@ if __name__ == "__main__":
     with open(USEFULNESS_PATH / "average_mem.json", mode="w", encoding="utf-8") as f:
         json.dump(average_mem, f)
 
-    # print("---\nMAX NODE COUNT")
-    # print(max_nodes)
     print("---\nSTOP REASONS")
     print(stop_reasons)
     print("---\nREACHED AFTER GUIDE")

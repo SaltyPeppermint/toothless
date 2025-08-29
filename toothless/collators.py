@@ -18,19 +18,17 @@ class DictCollator:
         self.max_len = max_len
         self.vocab = vocab
 
-    def __call__(self, triples: Sequence[Triple]) -> tuple[dict[str, Tensor], list[list[str]], int]:
+    def __call__(self, triples: Sequence[Triple]) -> tuple[dict[str, Tensor], int]:
         assert type(triples[0]) is Triple
 
         l_batch = []
         r_batch = []
         tgt_batch = []
-        rules_chains = []
 
         for triple in triples:
             l_batch.append(triple.l_ids)
             r_batch.append(triple.r_ids)
             tgt_batch.append(triple.tgt_ids)
-            rules_chains.append(triple.rules_chain)
 
             assert max(len(triple.l_ids), len(triple.r_ids), len(triple.tgt_ids)) <= self.max_len
 
@@ -40,7 +38,7 @@ class DictCollator:
             "r_ids": torch.nested.nested_tensor(r_batch, layout=torch.jagged).to_padded_tensor(self.pad_id),
         }
 
-        return batch, rules_chains, sum([len(seq) for seq in tgt_batch])
+        return batch, sum([len(seq) for seq in tgt_batch])
 
     def _pyrec_to_tensor(self, expr: rise.RecExpr) -> Tensor:
         tree_data = expr.to_data()

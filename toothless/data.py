@@ -1,5 +1,5 @@
-import shutil
 import json
+import pickle
 from pathlib import Path
 from dataclasses import dataclass
 
@@ -7,14 +7,12 @@ import torch
 from torch import Tensor
 from torch.utils.data import Dataset
 
-import polars as pl
 from tqdm.auto import tqdm
 
 from eggshell import rise, TreeData  # type: ignore
 
 from .args import DataArguments
 from .vocab import BOS_TOKEN, EOS_TOKEN, MASK_TOKEN, PAD_TOKEN, UNK_TOKEN, SimpleVocab
-from . import loading
 
 
 # from tokenizers import Tokenizer
@@ -27,6 +25,25 @@ from . import loading
 # from tokenizers.normalizers import Sequence as NormalizerSequence
 # import matplotlib.pyplot as plt
 CACHE_BATCH_SIZE = 10000
+
+
+@dataclass
+class TripleFilePointer:
+    midpoint_id: int
+    batch_id: int
+    index_in_batch: int
+
+    def get_path(self, cache_path: Path) -> Path:
+        return cache_path / f"{self.midpoint_id}-{self.batch_id}.json"
+
+    def read(self, cache_path: Path) -> dict[str, str]:
+        with open(self.get_path(cache_path), mode="r", encoding="utf-8") as f:
+            file = json.load(f)
+        return {
+            "left": file["start_expr"],
+            "middle": file["midpoint"]["midpoint"]["expression"],
+            "right": file["midpoint"]["goals"][self.index_in_batch]["expression"],
+        }
 
 
 @dataclass
@@ -45,40 +62,51 @@ class TripleDataSet(Dataset[Triple]):
         :param k represents the max relative distance
         """
         self.json_root = Path(conf.data_path)
-        self.sample_distance = conf.sample_distance
         self.force_reload = conf.force_reload
-        self.sample_limit = conf.sample_limit
         torch.manual_seed(conf.rng_seed)
 
         self.cache = Path(conf.cache_dir) / Path(*self.json_root.parts[-2:])
         self.cache.mkdir(parents=True, exist_ok=True)
 
-        self.raw_path = self.cache / "df_raw.parquet"
+        self.index_cache = self.cache / "index_cache.pickle"
         self.vocab_path = self.cache / "vocab.json"
 
-        if conf.sample_cache_dir is None:
-            self.sample_cache = self.cache / "samples" / f"d{conf.sample_distance}"
-            self.sample_cache_metadata_path = self.cache / "samples" / f"d{conf.sample_distance}_cache_metadata.json"
-        else:
-            self.sample_cache = Path(conf.sample_cache_dir) / f"d{conf.sample_distance}"
-            self.sample_cache_metadata_path = (
-                Path(conf.sample_cache_dir) / f"d{conf.sample_distance}_cache_metadata.json"
-            )
-        self.sample_cache.mkdir(parents=True, exist_ok=True)
-
-        self._process_raw()
         self.vocab = self._build_vocab()
-        self.len = self._process()
+        self.sample_pointers = self._iterate_samples()
 
-    def __len__(self) -> int:
-        return self.len
+    def _build_vocab(self) -> SimpleVocab:
+        normal_tokens = rise.operators() + ["[constant]", "[variable]"]
+        vocab = SimpleVocab(PAD_TOKEN, UNK_TOKEN, MASK_TOKEN, BOS_TOKEN, EOS_TOKEN, normal_tokens)
+        vocab.save(self.vocab_path)
+        return vocab
+
+    def _iterate_samples(self) -> list[TripleFilePointer]:
+        print(self.json_root)
+
+        if not self.force_reload and self.index_cache.is_file():
+            with open(self.index_cache, mode="rb") as f:
+                pointers = pickle.load(f)
+            return pointers
+
+        json_files = list(self.json_root.glob("*.json"))
+        json_files.sort()
+
+        pointers = []
+
+        for batch_file in tqdm(json_files, desc="Enumerating tripples"):
+            midpoint_id, batch_id = batch_file.stem.split("-", 1)
+            with open(batch_file, mode="r", encoding="utf-8") as f:
+                file = json.load(f)
+                for i in range(len(file["midpoint"]["goals"])):
+                    pointers.append(TripleFilePointer(int(midpoint_id), int(batch_id), i))
+
+        with open(self.index_cache, mode="wb") as f:
+            pickle.dump(pointers, f)
+
+        return pointers
 
     def __getitem__(self, idx: int) -> Triple:
-        file_id = idx // CACHE_BATCH_SIZE
-        with open(self.sample_cache / f"{file_id}.json", encoding="utf-8") as f:
-            sample_batch = json.load(f)
-
-        s = sample_batch[idx % CACHE_BATCH_SIZE]
+        s = self.sample_pointers[idx].read(self.json_root)
 
         l_tree = rise.RecExpr(s["left"]).to_data()
         tgt_tree = rise.RecExpr(s["middle"]).to_data()
@@ -98,88 +126,8 @@ class TripleDataSet(Dataset[Triple]):
             dtype=torch.long,
         )
 
-    def _process_raw(self):
-        if not self.force_reload and self.raw_path.is_file():
-            return
-
-        df = loading.load_df(self.json_root)
-        df.write_parquet(self.raw_path)
-
-    def _process(self) -> int:
-        if not self.force_reload and self.sample_cache_metadata_path.is_file():  # and self.zipped_samples.is_file():
-            with open(self.sample_cache_metadata_path, encoding="utf-8") as p:
-                metadata = json.load(p)
-
-            json_files = list(self.sample_cache.glob("*.json"))
-            if len(json_files) == metadata["cache_files"] and self.sample_distance == metadata["sample_distance"]:
-                print("JSON Cache Usable!")
-                return _min_none(self.sample_limit, len(json_files))
-
-        print("JSON Cache *not* usable!")
-        shutil.rmtree(self.sample_cache)
-        self.sample_cache.mkdir()
-
-        raw_data = pl.read_parquet(self.raw_path)
-        expr_chains = raw_data.get_column("expr_chain").to_list()
-
-        index_triples = [self._pick_fixed_distance_indices(len(chain) - 1) for chain in expr_chains]
-        length = sum([len(chain_pairs) for chain_pairs in index_triples])
-        print(f"Total triples: {length}")
-
-        samples = []
-        with tqdm(total=length, desc="Creating triples...") as pbar:
-            for expr_chain, index_triple in zip(expr_chains, index_triples):
-                for left_idx, middle_idx, right_idx in index_triple:
-                    sample = {
-                        "left": str(expr_chain[left_idx]),
-                        "middle": str(expr_chain[middle_idx]),
-                        "right": str(expr_chain[right_idx]),
-                    }
-
-                    samples.append(sample)
-                    pbar.update()
-
-        print(f"Total samples: {len(samples)} saved to disk")
-        with open(self.sample_cache_metadata_path, mode="w", encoding="utf-8") as p:
-            json.dump({"cache_files": len(samples) // CACHE_BATCH_SIZE + 1, "sample_distance": self.sample_distance}, p)
-
-        for i, j in enumerate(tqdm(range(0, len(samples), CACHE_BATCH_SIZE), desc="Saving to cache...")):
-            with open(self.sample_cache / f"{i}.json", mode="w", encoding="utf-8") as p:
-                batch_to_save = samples[j : j + CACHE_BATCH_SIZE]
-                json.dump(batch_to_save, p)
-
-        print("Data processed!")
-
-        return _min_none(self.sample_limit, len(samples))
-
-    def _build_vocab(self) -> SimpleVocab:
-        normal_tokens = rise.operators() + ["[constant]", "[variable]"]
-        vocab = SimpleVocab(PAD_TOKEN, UNK_TOKEN, MASK_TOKEN, BOS_TOKEN, EOS_TOKEN, normal_tokens)
-        vocab.save(self.vocab_path)
-        return vocab
-
-    def _pick_fixed_distance_indices(self, max_index: int) -> set[tuple[int, int, int]]:
-        s = set()
-        for start in range(0, max_index - self.sample_distance):
-            end = start + self.sample_distance
-            mid = start + (self.sample_distance // 2)
-            s.add((start, mid, end))
-        return s
-
-    def _pick_recursive_indices(self, max_index: int) -> set[tuple[int, int, int]]:
-        def rec(start: int, end: int, acc: set[tuple[int, int, int]], min_distance):
-            distance = end - start
-            if distance < min_distance:
-                return
-            else:
-                midpoint = start + (distance // 2)
-                acc.add((start, midpoint, end))
-                rec(start, midpoint, acc, min_distance)
-                rec(midpoint, end, acc, min_distance)
-
-        acc = set()
-        rec(0, max_index, acc, self.sample_distance)
-        return acc
+    def __len__(self) -> int:
+        return len(self.sample_pointers)
 
 
 def split_off_special(partial_tok: list[str], vocab: SimpleVocab) -> list[str]:
@@ -188,19 +136,3 @@ def split_off_special(partial_tok: list[str], vocab: SimpleVocab) -> list[str]:
         if j in vocab.special_tokens:
             return partial_tok[:i]
     return partial_tok
-
-
-def _chunks(lst: list[dict], n: int):
-    """Yield successive n-sized chunks from lst."""
-    for i in range(0, len(lst), n):
-        yield lst[i : i + n]
-
-
-def _min_none(a: None | int, b: None | int) -> int:
-    match (a, b):
-        case (None, None):
-            raise ValueError((a, b))
-        case (None, x) | (x, None):
-            return x
-        case (x, y):
-            return min(x, y)

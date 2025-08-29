@@ -1,5 +1,4 @@
 from dataclasses import dataclass, field
-from typing import Optional
 
 from dataclass_wizard import JSONWizard
 
@@ -13,6 +12,7 @@ class ModelArguments(JSONWizard):
     dim_feed_forward: int = field(default=3072, metadata={"help": "Feed forward dimension size."})
     dropout: float = field(default=0.1)
     n_heads: int = field(default=12)
+    bf16: bool = field(default=True)
 
 
 @dataclass
@@ -21,33 +21,25 @@ class DataArguments(JSONWizard):
     cache_dir: str = field(default="cache")
     split_size: float = field(default=0.9, metadata={"help": "Train/Test split ratio."})
     rng_seed: int = field(default=42)
-    sample_distance: int = field(
-        default=8, metadata={"help": "Minimum distance when splitting the explanation chains recursively."}
-    )
     max_len: int = field(default=192)
     force_reload: bool = field(default=False)
-    sample_limit: int | None = field(default=None)
-    sample_cache_dir: str | None = field(default=None)
 
 
 @dataclass
 class TrainingArguments(JSONWizard):
     epochs: int = field(default=4)
-    eval_each_epoch: bool = field(default=True)
-    save_model_end: bool = field(default=True)
-    tmax: int = field(default=2)
     batch_size: int = field(default=16)
     learning_rate: float = field(default=1e-5)
-    min_lr: float = field(default=1e-6)
-    warmup_steps: int = field(default=1000)
     weight_decay: float = field(default=0.1)
     adam_beta1: float = field(default=0.9)
     adam_beta2: float = field(default=0.95)
+    warmup_steps: int = field(default=1000)
+    min_lr: float = field(default=1e-6)
+    eval_each_epoch: bool = field(default=True)
+    save_model_end: bool = field(default=True)
     logging_steps: int = field(default=1)
-    warmup_ratio: Optional[float] = field(default=0.01)
-    bf16: bool = field(default=True)
-    trace: bool = field(default=False)
     run_log_dir: str | None = field(default=None)
+    trace: bool = field(default=False)
 
 
 @dataclass

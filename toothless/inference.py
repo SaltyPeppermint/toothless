@@ -17,7 +17,6 @@ class InferResult(JSONWizard):
     right: str
     middle: str
     generated: str
-    rules_chain: list[str]
 
 
 def batch_process_result(
@@ -25,14 +24,13 @@ def batch_process_result(
     triples: list[Triple],
     batch_ids: list[list[int]],
     batch_probs: list[list[float]],
-    rule_chains: list[list[str]],
     path: Path,
     id_offset: int,
     verbose: bool,
 ) -> tuple[list[FirstErrorDistance], list[InferResult]]:
     batch_distances = []
     batch_gen_triples = []
-    for i, (triple, ids, token_probs, rule_chain) in enumerate(zip(triples, batch_ids, batch_probs, rule_chains)):
+    for i, (triple, ids, token_probs) in enumerate(zip(triples, batch_ids, batch_probs)):
         sample_id = i + id_offset
 
         rise.RecExpr(triple.l_str).to_dot(f"{sample_id} left", str(path / f"{sample_id}_left"))
@@ -67,7 +65,7 @@ def batch_process_result(
                 marked_ids=distance.miss_ids(),
                 transparent=True,
             )
-            batch_gen_triples.append(InferResult(triple.l_str, triple.r_str, triple.tgt_str, str(lowered), rule_chain))
+            batch_gen_triples.append(InferResult(triple.l_str, triple.r_str, triple.tgt_str, str(lowered)))
 
             if verbose:
                 rank0print("GENERATED:", "green")

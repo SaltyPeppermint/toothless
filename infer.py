@@ -108,13 +108,13 @@ def _batch_infer(
 
     for i in tqdm(range(0, n, infer_args.batch_size), desc=f"Inference Batch (Batch Size {infer_args.batch_size})"):
         triples = [dataset[i] for i in range(i, i + infer_args.batch_size)]
-        batch, rule_chains, _n_tokens = collator(triples)
+        batch, _n_tokens = collator(triples)
         result = generate_with_probabilities(model, batch["l_ids"], batch["r_ids"], vocab, data_args.max_len)
 
         p = Path(eval_folder / "viz/asts/")
         p.mkdir(parents=True, exist_ok=True)
         batch_distance, batch_gen_triples = infer.batch_process_result(
-            vocab, triples, result.tokens.tolist(), result.token_probs.tolist(), rule_chains, p, i, infer_args.verbose
+            vocab, triples, result.tokens.tolist(), result.token_probs.tolist(), p, i, infer_args.verbose
         )
         distances.extend(batch_distance)
         gen_triples.extend(batch_gen_triples)
