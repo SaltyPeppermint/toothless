@@ -31,7 +31,7 @@ singularity exec --nv --bind /beegfs:/mnt /scratch/heinimann/container.sif \
 
 singularity exec --nv --bind /beegfs:/mnt /scratch/heinimann/container.sif \
     /venv/bin/python3 /tmp/toothless/train.py \
-    --data-path "/mnt/scratch/heinimann/data/start_goal_with_expl/start_and_goal-2025-01-29-b33b4ba4-ee88-48b5-981b-c2b809d6504f/0" \
+    --data-path "/mnt/scratch/heinimann/data/generated_samples/rise/start_and_goal-2025-08-27T13:10:58.282370017+02:00/0" \
     --cache-dir "/mnt/scratch/heinimann/cache" \
     --sample-cache-dir "/tmp/sample_cache" \
     --output-dir "/mnt/home/users/h/heinimann/models" \

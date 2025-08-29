@@ -9,6 +9,6 @@ uv run train.py \
     --data.batch-size 256 \
     --data.sample-distance 16 \
     --data.sample-limit 1000000 \
-    --data.data-path "data/start_goal_with_expl/start_and_goal-2025-01-29-b33b4ba4-ee88-48b5-981b-c2b809d6504f/0" \
+    --data.data-path "data/generated_samples/rise/start_and_goal-2025-08-27T13:10:58.282370017+02:00/0" \
 
 #torchrun --nproc_per_node 1 --nnodes 1 --node_rank 0 --master_addr localhost --master_port 6601
