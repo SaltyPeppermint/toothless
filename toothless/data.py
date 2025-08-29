@@ -1,5 +1,4 @@
 import json
-import pickle
 from pathlib import Path
 from dataclasses import dataclass
 
@@ -83,11 +82,6 @@ class TripleDataSet(Dataset[Triple]):
     def _iterate_samples(self) -> list[TripleFilePointer]:
         print(self.json_root)
 
-        if not self.force_reload and self.index_cache.is_file():
-            with open(self.index_cache, mode="rb") as f:
-                pointers = pickle.load(f)
-            return pointers
-
         json_files = list(self.json_root.glob("*.json"))
         json_files.sort()
 
@@ -99,9 +93,6 @@ class TripleDataSet(Dataset[Triple]):
                 file = json.load(f)
                 for i in range(len(file["midpoint"]["goals"])):
                     pointers.append(TripleFilePointer(int(midpoint_id), int(batch_id), i))
-
-        with open(self.index_cache, mode="wb") as f:
-            pickle.dump(pointers, f)
 
         return pointers
 
