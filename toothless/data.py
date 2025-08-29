@@ -1,6 +1,7 @@
 import json
 from pathlib import Path
 from dataclasses import dataclass
+from functools import cmp_to_key
 
 import torch
 from torch import Tensor
@@ -27,22 +28,18 @@ CACHE_BATCH_SIZE = 10000
 
 
 @dataclass
-class TripleFilePointer:
-    midpoint_id: int
-    batch_id: int
-    index_in_batch: int
+class SampleStore:
+    starts: list[str]
+    guides: list[str]
+    targets: list[str]
+    index_tripples: list[tuple[int, int, int]]
 
-    def get_path(self, cache_path: Path) -> Path:
-        return cache_path / f"{self.midpoint_id}-{self.batch_id}.json"
+    def __len__(self):
+        return len(self.index_tripples)
 
-    def read(self, cache_path: Path) -> dict[str, str]:
-        with open(self.get_path(cache_path), mode="r", encoding="utf-8") as f:
-            file = json.load(f)
-        return {
-            "left": file["start_expr"],
-            "middle": file["midpoint"]["midpoint"]["expression"],
-            "right": file["midpoint"]["goals"][self.index_in_batch]["expression"],
-        }
+    def __getitem__(self, idx: int) -> tuple[str, str, str]:
+        s_idx, g_idx, t_idx = self.index_tripples[idx]
+        return self.starts[s_idx], self.guides[g_idx], self.targets[t_idx]
 
 
 @dataclass
@@ -71,7 +68,7 @@ class TripleDataSet(Dataset[Triple]):
         self.vocab_path = self.cache / "vocab.json"
 
         self.vocab = self._build_vocab()
-        self.sample_pointers = self._iterate_samples()
+        self.sample_store = self._iterate_samples()
 
     def _build_vocab(self) -> SimpleVocab:
         normal_tokens = rise.operators() + ["[constant]", "[variable]"]
@@ -79,35 +76,48 @@ class TripleDataSet(Dataset[Triple]):
         vocab.save(self.vocab_path)
         return vocab
 
-    def _iterate_samples(self) -> list[TripleFilePointer]:
+    def _iterate_samples(self) -> SampleStore:
         print(self.json_root)
 
         json_files = list(self.json_root.glob("*.json"))
-        json_files.sort()
+        json_files.sort(key=cmp_to_key(path_cmp))
+
+        with open(json_files[0], mode="r", encoding="utf-8") as f:
+            file = json.load(f)
+            starts = [file["start_expr"]]
+
+        guides = []
+        targets = []
 
         pointers = []
 
         for batch_file in tqdm(json_files, desc="Enumerating tripples"):
-            midpoint_id, batch_id = batch_file.stem.split("-", 1)
+            midpoint_id, _ = batch_file.stem.split("-", 1)
+
             with open(batch_file, mode="r", encoding="utf-8") as f:
                 file = json.load(f)
-                for i in range(len(file["midpoint"]["goals"])):
-                    pointers.append(TripleFilePointer(int(midpoint_id), int(batch_id), i))
+                if len(guides) < int(midpoint_id):
+                    guides.append(file["midpoint"]["midpoint"]["expression"])
+                for goal in file["midpoint"]["goals"]:
+                    targets.append(goal)
+                    pointers.append(
+                        (len(starts) - 1, len(guides) - 1, len(targets) - 1),
+                    )
 
-        return pointers
+        return SampleStore(starts, guides, targets, pointers)
 
     def __getitem__(self, idx: int) -> Triple:
-        s = self.sample_pointers[idx].read(self.json_root)
+        left, middle, right = self.sample_store[idx]
 
-        l_tree = rise.RecExpr(s["left"]).to_data()
-        tgt_tree = rise.RecExpr(s["middle"]).to_data()
-        r_tree = rise.RecExpr(s["right"]).to_data()
+        l_tree = rise.RecExpr(left).to_data()
+        tgt_tree = rise.RecExpr(middle).to_data()
+        r_tree = rise.RecExpr(right).to_data()
 
         l_ids = self._pyrec_to_tensor(l_tree)
         tgt_ids = self._pyrec_to_tensor(tgt_tree)
         r_ids = self._pyrec_to_tensor(r_tree)
 
-        return Triple(l_ids, s["left"], tgt_ids, s["middle"], r_ids, s["right"])
+        return Triple(l_ids, left, tgt_ids, middle, r_ids, right)
 
     def _pyrec_to_tensor(self, tree_data: TreeData) -> Tensor:
         return torch.tensor(
@@ -118,7 +128,16 @@ class TripleDataSet(Dataset[Triple]):
         )
 
     def __len__(self) -> int:
-        return len(self.sample_pointers)
+        return len(self.sample_store)
+
+
+def path_cmp(a: Path, b: Path) -> int:
+    midpoint_id_a, batch_id_a = a.stem.split("-", 1)
+    midpoint_id_b, batch_id_b = b.stem.split("-", 1)
+
+    if int(midpoint_id_a) == int(midpoint_id_b):
+        return int(batch_id_a) - int(batch_id_b)
+    return int(midpoint_id_a) - int(midpoint_id_b)
 
 
 def split_off_special(partial_tok: list[str], vocab: SimpleVocab) -> list[str]:
