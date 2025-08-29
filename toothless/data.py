@@ -7,7 +7,9 @@ import torch
 from torch import Tensor
 from torch.utils.data import Dataset
 
+import diskcache as dc
 from tqdm.auto import tqdm
+
 
 from eggshell import rise, TreeData  # type: ignore
 
@@ -24,22 +26,6 @@ from .vocab import BOS_TOKEN, EOS_TOKEN, MASK_TOKEN, PAD_TOKEN, UNK_TOKEN, Simpl
 # from tokenizers.normalizers import Strip
 # from tokenizers.normalizers import Sequence as NormalizerSequence
 # import matplotlib.pyplot as plt
-CACHE_BATCH_SIZE = 10000
-
-
-@dataclass
-class SampleStore:
-    starts: list[str]
-    guides: list[str]
-    targets: list[str]
-    index_tripples: list[tuple[int, int, int]]
-
-    def __len__(self):
-        return len(self.index_tripples)
-
-    def __getitem__(self, idx: int) -> tuple[str, str, str]:
-        s_idx, g_idx, t_idx = self.index_tripples[idx]
-        return self.starts[s_idx], self.guides[g_idx], self.targets[t_idx]
 
 
 @dataclass
@@ -63,12 +49,13 @@ class TripleDataSet(Dataset[Triple]):
 
         self.cache = Path(conf.cache_dir) / Path(*self.json_root.parts[-2:])
         self.cache.mkdir(parents=True, exist_ok=True)
+        self.sample_cache = dc.Cache(self.cache / "sample_cache")
 
         self.index_cache = self.cache / "index_cache.pickle"
         self.vocab_path = self.cache / "vocab.json"
 
         self.vocab = self._build_vocab()
-        self.sample_store = self._iterate_samples()
+        self.len = self._iterate_samples()
 
     def _build_vocab(self) -> SimpleVocab:
         normal_tokens = rise.operators() + ["[constant]", "[variable]"]
@@ -76,7 +63,7 @@ class TripleDataSet(Dataset[Triple]):
         vocab.save(self.vocab_path)
         return vocab
 
-    def _iterate_samples(self) -> SampleStore:
+    def _iterate_samples(self) -> int:
         print(self.json_root)
 
         json_files = list(self.json_root.glob("*.json"))
@@ -84,40 +71,36 @@ class TripleDataSet(Dataset[Triple]):
 
         with open(json_files[0], mode="r", encoding="utf-8") as f:
             file = json.load(f)
-            starts = [file["start_expr"]]
+            start = file["start_expr"]
 
-        guides = []
-        targets = []
-
-        pointers = []
+        i = 0
 
         for batch_file in tqdm(json_files, desc="Enumerating tripples"):
-            midpoint_id, _ = batch_file.stem.split("-", 1)
-
             with open(batch_file, mode="r", encoding="utf-8") as f:
                 file = json.load(f)
-                if len(guides) < int(midpoint_id):
-                    guides.append(file["midpoint"]["midpoint"]["expression"])
-                for goal in file["midpoint"]["goals"]:
-                    targets.append(goal)
-                    pointers.append(
-                        (len(starts) - 1, len(guides) - 1, len(targets) - 1),
-                    )
+                guide = file["midpoint"]["midpoint"]["expression"]
+                for target in file["midpoint"]["goals"]:
+                    self.sample_cache[i] = {"start": start, "guide": guide, "target": target}
 
-        return SampleStore(starts, guides, targets, pointers)
+        return i
+
+    def __len__(self):
+        return self.len
 
     def __getitem__(self, idx: int) -> Triple:
-        left, middle, right = self.sample_store[idx]
+        s = self.sample_cache[idx]
 
-        l_tree = rise.RecExpr(left).to_data()
-        tgt_tree = rise.RecExpr(middle).to_data()
-        r_tree = rise.RecExpr(right).to_data()
+        assert type(s) is dict[str, str]
+
+        l_tree = rise.RecExpr(s["start"]).to_data()
+        tgt_tree = rise.RecExpr(s["guide"]).to_data()
+        r_tree = rise.RecExpr(s["target"]).to_data()
 
         l_ids = self._pyrec_to_tensor(l_tree)
         tgt_ids = self._pyrec_to_tensor(tgt_tree)
         r_ids = self._pyrec_to_tensor(r_tree)
 
-        return Triple(l_ids, left, tgt_ids, middle, r_ids, right)
+        return Triple(l_ids, s["left"], tgt_ids, s["guide"], r_ids, s["target"])
 
     def _pyrec_to_tensor(self, tree_data: TreeData) -> Tensor:
         return torch.tensor(
@@ -126,9 +109,6 @@ class TripleDataSet(Dataset[Triple]):
             + [self.vocab.eos_token_id],
             dtype=torch.long,
         )
-
-    def __len__(self) -> int:
-        return len(self.sample_store)
 
 
 def path_cmp(a: Path, b: Path) -> int:
