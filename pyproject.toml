@@ -9,16 +9,16 @@ dependencies = [
     "tensorboard>=2",
     "torch>=2",
     "tqdm>=4",
-    "scikit-learn>=1.5.2",
-    "polars>=1.21.0",
-    "python-dotenv>=1.0.1",
-    "torch-tb-profiler>=0.4.3",
-    "standard-imghdr>=3.13.0",
-    "prettytable>=3.16.0",
-    "dataclass-wizard>=0.35.0",
-    "termcolor>=3.1.0",
-    "tyro>=0.9.26",
-    "plotly>=6.2.0",
+    "scikit-learn>=1.5",
+    "polars>=1",
+    "python-dotenv>=1",
+    "torch-tb-profiler>=0.4",
+    "standard-imghdr>=3",
+    "prettytable>=3",
+    "dataclass-wizard>=0.35",
+    "termcolor>=3",
+    "tyro>=0.9",
+    "plotly>=6",
     "eggshell",
 ]
 # "transformers>=4.48.2",
@@ -29,7 +29,8 @@ dependencies = [
 line-length = 120
 
 [tool.uv.sources]
-eggshell = { path = "cache/eggshell-0.0.1-cp312-abi3-macosx_11_0_arm64.whl" }
+eggshell = [
+  { path = "cache/eggshell-0.0.1-cp312-abi3-manylinux_2_39_x86_64.whl", marker = "sys_platform == 'linux'"},
+  { path = "cache/eggshell-0.0.1-cp312-abi3-macosx_11_0_arm64.whl", marker = "sys_platform == 'darwin'"},
+]
 
-[dependency-groups]
-dev = []
