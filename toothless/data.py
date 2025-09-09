@@ -7,7 +7,7 @@ from torch import Tensor
 from torch.utils.data import Dataset
 
 from tqdm.auto import tqdm
-
+import polars as pl
 
 from eggshell import rise, TreeData  # type: ignore
 
@@ -24,6 +24,7 @@ from .vocab import BOS_TOKEN, EOS_TOKEN, MASK_TOKEN, PAD_TOKEN, UNK_TOKEN, Simpl
 # from tokenizers.normalizers import Strip
 # from tokenizers.normalizers import Sequence as NormalizerSequence
 # import matplotlib.pyplot as plt
+SCHEMA = {"from": pl.UInt64, "to": pl.UInt64, "path": pl.String}
 
 
 @dataclass
@@ -48,8 +49,8 @@ class TripleDataSet(Dataset[Triple]):
         self.cache = Path(conf.cache_dir) / Path(*self.json_root.parts[-2:])
         self.cache.mkdir(parents=True, exist_ok=True)
 
-        self.range_to_file_cache = self.cache / "range_to_file.json"
-        self.len, self.range_to_file = self._iterate_samples()
+        self.index_table_cache_path = self.cache / "index_table_cache.csv"
+        self.index_table = self._iterate_samples()
 
         self.vocab_path = self.cache / "vocab.json"
         self.vocab = self._build_vocab()
@@ -60,42 +61,45 @@ class TripleDataSet(Dataset[Triple]):
         vocab.save(self.vocab_path)
         return vocab
 
-    def _iterate_samples(self) -> tuple[int, dict[tuple[int, int], Path]]:
-        if self.range_to_file_cache.is_file():
-            with open(self.range_to_file_cache, mode="r", encoding="utf-8") as f:
-                return json.load(f)
+    def _iterate_samples(self) -> pl.DataFrame:
+        if self.index_table_cache_path.is_file():
+            return pl.read_csv(self.index_table_cache_path, schema=SCHEMA)
 
         json_files = list(self.json_root.glob("*.json"))
         json_files.sort()
 
-        range_to_file = {}
+        entries = []
         i = 0
+
         for batch_file in tqdm(json_files, desc="Enumerating tripples"):
             with open(batch_file, mode="r", encoding="utf-8") as f:
                 file = json.load(f)
             j = i + len(file["midpoint"]["goals"])
-            range_to_file[(i, j)] = batch_file
-            i = j + 1
+            entries.append([i, j, str(batch_file)])
 
-        with open(self.range_to_file_cache, mode="w", encoding="utf-8") as f:
-            json.dump((i, range_to_file), f)
+            i = j
+        df = pl.DataFrame(entries, schema=SCHEMA, orient="row")
+        df.write_csv(self.index_table_cache_path)
 
-        return i, range_to_file
-
-    def __len__(self):
-        return self.len
+        return df
 
     def load_str_triple(self, idx: int) -> tuple[str, str, str]:
-        for (lower, upper), p in self.range_to_file.items():
-            if lower <= idx < upper:
-                with open(p, mode="r", encoding="utf-8") as f:
-                    file = json.load(f)
-                start = file["start_expr"]
-                guide = file["midpoint"]["midpoint"]["expression"]
-                target = file["midpoint"]["goals"][idx - lower]["expression"]
-                return start, guide, target
+        result = self.index_table.filter((pl.col("from") <= idx) & (idx < pl.col("to")))
 
-        raise ValueError(f"{idx} Not found")
+        with open(str(result["path"][0]), mode="r", encoding="utf-8") as f:
+            file = json.load(f)
+        start = file["start_expr"]
+        guide = file["midpoint"]["midpoint"]["expression"]
+        target = file["midpoint"]["goals"][idx - result["from"][0]]["expression"]
+        return start, guide, target
+
+    def _pyrec_to_tensor(self, tree_data: TreeData) -> Tensor:
+        return torch.tensor(
+            [self.vocab.bos_token_id]
+            + [self.vocab.token2id(node.name) for node in tree_data.nodes()]
+            + [self.vocab.eos_token_id],
+            dtype=torch.long,
+        )
 
     def __getitem__(self, idx: int) -> Triple:
         left, middle, right = self.load_str_triple(idx)
@@ -110,22 +114,8 @@ class TripleDataSet(Dataset[Triple]):
 
         return Triple(l_ids, left, tgt_ids, middle, r_ids, right)
 
-    def _pyrec_to_tensor(self, tree_data: TreeData) -> Tensor:
-        return torch.tensor(
-            [self.vocab.bos_token_id]
-            + [self.vocab.token2id(node.name) for node in tree_data.nodes()]
-            + [self.vocab.eos_token_id],
-            dtype=torch.long,
-        )
-
-
-def path_cmp(a: Path, b: Path) -> int:
-    midpoint_id_a, batch_id_a = a.stem.split("-", 1)
-    midpoint_id_b, batch_id_b = b.stem.split("-", 1)
-
-    if int(midpoint_id_a) == int(midpoint_id_b):
-        return int(batch_id_a) - int(batch_id_b)
-    return int(midpoint_id_a) - int(midpoint_id_b)
+    def __len__(self):
+        return self.index_table["to"].max()
 
 
 def split_off_special(partial_tok: list[str], vocab: SimpleVocab) -> list[str]:
