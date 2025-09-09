@@ -24,14 +24,7 @@ from .vocab import BOS_TOKEN, EOS_TOKEN, MASK_TOKEN, PAD_TOKEN, UNK_TOKEN, Simpl
 # from tokenizers.normalizers import Strip
 # from tokenizers.normalizers import Sequence as NormalizerSequence
 # import matplotlib.pyplot as plt
-SCHEMA = {
-    "from": pl.UInt64,
-    "to": pl.UInt64,
-    "path": pl.String,
-    "start": pl.String,
-    "guide": pl.String,
-    "targets": pl.List(pl.String),
-}
+SCHEMA = {"from": pl.UInt64, "to": pl.UInt64, "path": pl.String}
 
 
 @dataclass
@@ -56,8 +49,8 @@ class TripleDataSet(Dataset[Triple]):
         self.cache = Path(conf.cache_dir) / Path(*self.json_root.parts[-2:])
         self.cache.mkdir(parents=True, exist_ok=True)
 
-        self.sample_cache_path = self.cache / "sample_cache.ndjson"
-        self.samples = self._iterate_samples()
+        self.index_table_cache_path = self.cache / "index_table_cache.csv"
+        self.index_table = self._iterate_samples()
 
         self.n_samples = conf.n_samples
 
@@ -70,9 +63,9 @@ class TripleDataSet(Dataset[Triple]):
         vocab.save(self.vocab_path)
         return vocab
 
-    def _iterate_samples(self) -> pl.LazyFrame:
-        if self.sample_cache_path.is_file():
-            return pl.scan_ndjson(self.sample_cache_path, schema=SCHEMA)
+    def _iterate_samples(self) -> pl.DataFrame:
+        if self.index_table_cache_path.is_file():
+            return pl.read_csv(self.index_table_cache_path, schema=SCHEMA)
 
         json_files = list(self.json_root.glob("*.json"))
         json_files.sort()
@@ -83,25 +76,23 @@ class TripleDataSet(Dataset[Triple]):
         for batch_file in tqdm(json_files, desc="Enumerating tripples"):
             with open(batch_file, mode="r", encoding="utf-8") as f:
                 file = json.load(f)
-            start = file["start_expr"]
-            guide = file["midpoint"]["midpoint"]["expression"]
-            targets = [x["expression"] for x in file["midpoint"]["goals"]]
             j = i + len(file["midpoint"]["goals"])
-
-            entries.append([i, j, str(batch_file), start, guide, targets])
+            entries.append([i, j, str(batch_file)])
 
             i = j
-        df = pl.LazyFrame(entries, schema=SCHEMA, orient="row")
-        df.sink_ndjson(self.sample_cache_path)
+        df = pl.DataFrame(entries, schema=SCHEMA, orient="row")
+        df.write_csv(self.index_table_cache_path)
 
         return df
 
     def load_str_triple(self, idx: int) -> tuple[str, str, str]:
-        result = self.samples.filter((pl.col("from") <= idx) & (idx < pl.col("to"))).collect()
+        result = self.index_table.filter((pl.col("from") <= idx) & (idx < pl.col("to"))).row(0, named=True)
 
-        start = result["start"][0]
-        guide = result["guide"][0]
-        target = result["targets"][0][idx - result["from"][0]]
+        with open(str(result["path"]), mode="r", encoding="utf-8") as f:
+            file = json.load(f)
+        start = file["start_expr"]
+        guide = file["midpoint"]["midpoint"]["expression"]
+        target = file["midpoint"]["goals"][idx - result["from"]]["expression"]
         return start, guide, target
 
     def _pyrec_to_tensor(self, tree_data: TreeData) -> Tensor:
@@ -126,7 +117,7 @@ class TripleDataSet(Dataset[Triple]):
         return Triple(l_ids, left, tgt_ids, middle, r_ids, right)
 
     def __len__(self):
-        total_samples = self.samples.select("to").max().collect()
+        total_samples = self.index_table["to"].max()
         if self.n_samples is not None:
             return min(total_samples, self.n_samples)  # pyright: ignore[reportArgumentType]
         return total_samples
