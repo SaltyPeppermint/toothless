@@ -52,6 +52,8 @@ class TripleDataSet(Dataset[Triple]):
         self.index_table_cache_path = self.cache / "index_table_cache.csv"
         self.index_table = self._iterate_samples()
 
+        self.n_samples = conf.n_samples
+
         self.vocab_path = self.cache / "vocab.json"
         self.vocab = self._build_vocab()
 
@@ -115,7 +117,10 @@ class TripleDataSet(Dataset[Triple]):
         return Triple(l_ids, left, tgt_ids, middle, r_ids, right)
 
     def __len__(self):
-        return self.index_table["to"].max()
+        total_samples = self.index_table["to"].max()
+        if self.n_samples is not None:
+            min(total_samples, self.n_samples)  # pyright: ignore[reportArgumentType]
+        return total_samples
 
 
 def split_off_special(partial_tok: list[str], vocab: SimpleVocab) -> list[str]:

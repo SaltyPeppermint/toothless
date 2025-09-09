@@ -160,7 +160,7 @@ def profil_model(rank: int, model: FSDP, dataloader: DataLoader[Triple], criteri
     dl_iter = iter(dataloader)
 
     for batch_idx in tqdm(range(2), desc="Profiling... "):
-        batch, _, _ = next(dl_iter)
+        batch, _ = next(dl_iter)
 
         # Move batch to device
         tgt_ids, l_ids, r_ids = batch["tgt_ids"].to(rank), batch["l_ids"].to(rank), batch["r_ids"].to(rank)
@@ -197,7 +197,7 @@ def train(
     model.train()
     ddp_loss = torch.zeros(2).to(rank)
 
-    for batch_idx, (batch, _, num_tokens) in enumerate(
+    for batch_idx, (batch, num_tokens) in enumerate(
         tqdm(dataloader, desc=f"Training Epoch {epoch + 1}/{train_args.epochs}")
     ):
         # Move batch to device
@@ -253,7 +253,7 @@ def evalulate(
 ) -> float:
     model.eval()
     ddp_loss = torch.zeros(2).to(rank)
-    for batch, _, _ in dataloader:
+    for batch, _ in dataloader:
         # Move batch to device
         tgt_ids, l_ids, r_ids = batch["tgt_ids"].to(rank), batch["l_ids"].to(rank), batch["r_ids"].to(rank)
 

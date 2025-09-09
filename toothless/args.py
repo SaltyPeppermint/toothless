@@ -21,7 +21,8 @@ class DataArguments(JSONWizard):
     cache_dir: str = field(default="cache")
     split_size: float = field(default=0.9, metadata={"help": "Train/Test split ratio."})
     rng_seed: int = field(default=42)
-    max_len: int = field(default=192)
+    max_len: int = field(default=256)
+    n_samples: int | None = field(default=None)
     force_reload: bool = field(default=False)
 
 

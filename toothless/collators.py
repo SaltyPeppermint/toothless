@@ -30,6 +30,11 @@ class DictCollator:
             r_batch.append(triple.r_ids)
             tgt_batch.append(triple.tgt_ids)
 
+            if max(len(triple.l_ids), len(triple.r_ids), len(triple.tgt_ids)) > self.max_len:
+                print(self.max_len)
+                print(len(triple.l_ids))
+                print(len(triple.r_ids))
+                print(len(triple.tgt_ids))
             assert max(len(triple.l_ids), len(triple.r_ids), len(triple.tgt_ids)) <= self.max_len
 
         batch = {
