@@ -33,6 +33,7 @@ def fsdp_main(
     model_args: ModelArguments,
     train_args: TrainingArguments,
     data_args: DataArguments,
+    verbose: bool,
     save_folder: Path,
 ):
     setup_process_group(rank, world_size)
@@ -64,7 +65,8 @@ def fsdp_main(
         writer.add_graph(model, example_batch)
 
     table, total_params = count_parameters(model)
-    rank0print(table)
+    if verbose:
+        rank0print(table)
     rank0print(f"Total Parameters: {total_params}")
 
     # FSDP model and Mixed Precision Config
@@ -292,5 +294,10 @@ if __name__ == "__main__":
 
     world_size = torch.cuda.device_count()
 
-    mp.spawn(fsdp_main, args=(world_size, args.model, args.train, args.data, save_folder), nprocs=world_size, join=True)
+    mp.spawn(
+        fsdp_main,
+        args=(world_size, args.model, args.train, args.data, args.verbose, save_folder),
+        nprocs=world_size,
+        join=True,
+    )
     print("DONE")

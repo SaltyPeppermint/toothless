@@ -119,7 +119,7 @@ class TripleDataSet(Dataset[Triple]):
     def __len__(self):
         total_samples = self.index_table["to"].max()
         if self.n_samples is not None:
-            min(total_samples, self.n_samples)  # pyright: ignore[reportArgumentType]
+            return min(total_samples, self.n_samples)  # pyright: ignore[reportArgumentType]
         return total_samples
 
 

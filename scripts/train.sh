@@ -8,6 +8,7 @@ uv run train.py \
     --model.head-dim 64 \
     --model.output-dir "models" \
     --data.max-len 256 \
+    --data.n-samples 100000 \
     --data.data-path "data/generated_samples/rise/start_and_goal-2025-08-27T13:10:58.282370017+02:00/0" \
 
 #torchrun --nproc_per_node 1 --nnodes 1 --node_rank 0 --master_addr localhost --master_port 6601

@@ -48,6 +48,7 @@ class TrainRunArgs:
     train: TrainingArguments
     data: DataArguments
     model: ModelArguments
+    verbose: bool = field(default=False)
 
 
 @dataclass
