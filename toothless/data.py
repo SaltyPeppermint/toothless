@@ -1,3 +1,4 @@
+from hashlib import file_digest
 import json
 from pathlib import Path
 from dataclasses import dataclass
@@ -24,7 +25,7 @@ from .vocab import BOS_TOKEN, EOS_TOKEN, MASK_TOKEN, PAD_TOKEN, UNK_TOKEN, Simpl
 # from tokenizers.normalizers import Strip
 # from tokenizers.normalizers import Sequence as NormalizerSequence
 # import matplotlib.pyplot as plt
-SCHEMA = {"from": pl.UInt64, "to": pl.UInt64, "path": pl.String}
+SCHEMA = {"from": pl.UInt64, "to": pl.UInt64, "path": pl.String, "file_id": pl.UInt64}
 
 
 @dataclass
@@ -50,7 +51,7 @@ class TripleDataSet(Dataset[Triple]):
         self.cache.mkdir(parents=True, exist_ok=True)
 
         self.index_table_cache_path = self.cache / "index_table_cache.csv"
-        self.index_table = self._iterate_samples()
+        self.index_table, self.files = self._iterate_samples()
 
         self.n_samples = conf.n_samples
 
@@ -63,33 +64,43 @@ class TripleDataSet(Dataset[Triple]):
         vocab.save(self.vocab_path)
         return vocab
 
-    def _iterate_samples(self) -> pl.DataFrame:
-        if self.index_table_cache_path.is_file():
-            return pl.read_csv(self.index_table_cache_path, schema=SCHEMA)
-
+    def _iterate_samples(self) -> tuple[pl.DataFrame, list[dict]]:
         json_files = list(self.json_root.glob("*.json"))
         json_files.sort()
 
+        if self.index_table_cache_path.is_file():
+            files = []
+            for batch_file in tqdm(json_files, desc="Enumerating tripples"):
+                with open(batch_file, mode="r", encoding="utf-8") as f:
+                    file = json.load(f)
+                    files.append(file)
+
+            return pl.read_csv(self.index_table_cache_path, schema=SCHEMA), files
+
         entries = []
+        files = []
         i = 0
 
-        for batch_file in tqdm(json_files, desc="Enumerating tripples"):
+        for file_id, batch_file in enumerate(tqdm(json_files, desc="Enumerating tripples")):
             with open(batch_file, mode="r", encoding="utf-8") as f:
                 file = json.load(f)
             j = i + len(file["midpoint"]["goals"])
-            entries.append([i, j, str(batch_file)])
+
+            entries.append([i, j, str(batch_file), file_id])
+            files.append(file)
 
             i = j
         df = pl.DataFrame(entries, schema=SCHEMA, orient="row")
         df.write_csv(self.index_table_cache_path)
 
-        return df
+        return df, files
 
     def load_str_triple(self, idx: int) -> tuple[str, str, str]:
         result = self.index_table.filter((pl.col("from") <= idx) & (idx < pl.col("to")))
 
-        with open(str(result["path"][0]), mode="r", encoding="utf-8") as f:
-            file = json.load(f)
+        file = self.files[result["file_id"][0]]
+        # with open(str(result["path"][0]), mode="r", encoding="utf-8") as f:
+        #     file = json.load(f)
         start = file["start_expr"]
         guide = file["midpoint"]["midpoint"]["expression"]
         target = file["midpoint"]["goals"][idx - result["from"][0]]["expression"]
