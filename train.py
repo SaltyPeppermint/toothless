@@ -255,7 +255,7 @@ def evalulate(
 ) -> float:
     model.eval()
     ddp_loss = torch.zeros(2).to(rank)
-    for batch, _ in dataloader:
+    for batch, _ in tqdm(dataloader, desc=f"Evaluating Epoch {epoch + 1}/{max_epochs}"):
         # Move batch to device
         tgt_ids, l_ids, r_ids = batch["tgt_ids"].to(rank), batch["l_ids"].to(rank), batch["r_ids"].to(rank)
 
