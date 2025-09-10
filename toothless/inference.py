@@ -28,6 +28,8 @@ def batch_process_result(
     id_offset: int,
     verbose: bool,
 ) -> tuple[list[FirstErrorDistance], list[InferResult]]:
+    path = path.absolute()
+
     batch_distances = []
     batch_gen_triples = []
     for i, (triple, ids, token_probs) in enumerate(zip(triples, batch_ids, batch_probs)):
