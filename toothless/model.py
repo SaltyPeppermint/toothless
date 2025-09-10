@@ -13,7 +13,7 @@ from .vocab import SimpleVocab
 
 
 class DualTreeTransformer(nn.Module):
-    def __init__(self, conf: ModelArgs, src_vocab_size: int, tgt_vocab_size: int, pad_token_id: int, state_dict=None):
+    def __init__(self, conf: ModelArgs, src_vocab_size: int, tgt_vocab_size: int, pad_token_id: int):
         super(DualTreeTransformer, self).__init__()
 
         self.conf = conf
@@ -34,15 +34,12 @@ class DualTreeTransformer(nn.Module):
         self.output_proj = nn.Linear(conf.d_model, tgt_vocab_size)
         self.output_norm = nn.RMSNorm(conf.d_model)
 
-        if state_dict is None:
-            for p in self.parameters():
-                if p.dim() > 1:
-                    nn.init.xavier_uniform_(p)
-            nn.init.normal_(self.l_embedding.weight, mean=0.0, std=self.conf.d_model**-0.5)
-            nn.init.normal_(self.r_embedding.weight, mean=0.0, std=self.conf.d_model**-0.5)
-            nn.init.normal_(self.tgt_embedding.weight, mean=0.0, std=self.conf.d_model**-0.5)
-        else:
-            self.load_state_dict(state_dict)
+        for p in self.parameters():
+            if p.dim() > 1:
+                nn.init.xavier_uniform_(p)
+        nn.init.normal_(self.l_embedding.weight, mean=0.0, std=self.conf.d_model**-0.5)
+        nn.init.normal_(self.r_embedding.weight, mean=0.0, std=self.conf.d_model**-0.5)
+        nn.init.normal_(self.tgt_embedding.weight, mean=0.0, std=self.conf.d_model**-0.5)
 
     @torch.compile(fullgraph=True)
     def l_encode(self, l_ids: Tensor, l_mask: Tensor):

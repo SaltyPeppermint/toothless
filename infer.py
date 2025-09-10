@@ -4,6 +4,8 @@ import torch
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP, MixedPrecision, ShardingStrategy
 import torch.multiprocessing as mp
 from torch.utils.data import Subset
+import torch.distributed.checkpoint as dcp
+import torch.distributed.checkpoint.state_dict as dcps
 
 import tyro
 from tqdm.auto import tqdm
@@ -38,9 +40,8 @@ def fsdp_main(rank: int, world_size: int, infer_args: InferArgs, dataset: Triple
     eval_folder.mkdir(exist_ok=True, parents=True)
 
     # Construct Base Model
-    weights = torch.load(infer_args.folder + f"/weights/tree_transformer{infer_args.model_suffix}.pt")
 
-    model = DualTreeTransformer(model_args, len(vocab), len(vocab), dataset.vocab.pad_token_id, state_dict=weights)
+    model = DualTreeTransformer(model_args, len(vocab), len(vocab), dataset.vocab.pad_token_id)
     rank0print("Base model ready")
 
     # FSDP model and Mixed Precision Config
@@ -48,6 +49,13 @@ def fsdp_main(rank: int, world_size: int, infer_args: InferArgs, dataset: Triple
     sharding_strategy = ShardingStrategy.FULL_SHARD if world_size > 1 else ShardingStrategy.NO_SHARD
 
     model = FSDP(model, sharding_strategy=sharding_strategy, mixed_precision=mixed_precision, device_id=rank)
+
+    state_dict = dcps.get_model_state_dict(model)
+    dcp.load(
+        state_dict=state_dict,
+        checkpoint_id=infer_args.folder + f"/weights/tree_transformer{infer_args.model_suffix}.pt",
+    )
+
     model.eval()
 
     table, total_params = count_parameters(model)
