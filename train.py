@@ -64,7 +64,7 @@ def fsdp_main(rank: int, world_size: int, args: FullArgs, save_folder: Path, sta
         sharding_strategy=sharding_strategy,
         mixed_precision=mixed_precision,
         device_id=rank,
-        use_orig_params=True,  # ALLOWS FULL GRAPH CAPTURE BUT WE DONT HAVE CHONKY GPU
+        use_orig_params=True,  # ALLOWS FULL GRAPH CAPTURE
     )
 
     # Define optimizer and loss function
@@ -121,7 +121,7 @@ def fsdp_main(rank: int, world_size: int, args: FullArgs, save_folder: Path, sta
 
         # use a barrier to make sure training is done on all ranks
         model_state_dict, _optimizer_state_dict = get_state_dict(model, optimizer)
-        _checkpoint_future = dcp.async_save(model_state_dict, checkpoint_id=save_folder / "weights" / f"{epoch}.pt")
+        _checkpoint_future = dcp.async_save(model_state_dict, checkpoint_id=save_folder / "weights" / f"{epoch}")
 
         # Optionally, evaluate the model on the validation set after each epoch
         if args.train.eval_each_epoch:
@@ -132,7 +132,7 @@ def fsdp_main(rank: int, world_size: int, args: FullArgs, save_folder: Path, sta
                 best_eval_loss = eval_loss
                 model_state_dict, _optimizer_state_dict = get_state_dict(model, optimizer)
                 _checkpoint_future = dcp.async_save(
-                    model_state_dict, checkpoint_id=save_folder / "weights" / "best_eval.pt"
+                    model_state_dict, checkpoint_id=save_folder / "weights" / "best_eval"
                 )
 
         cosine_scheduler.step()
@@ -145,7 +145,7 @@ def fsdp_main(rank: int, world_size: int, args: FullArgs, save_folder: Path, sta
     rank0print(f"CUDA event elapsed time: {init_start_event.elapsed_time(init_end_event) / 1000} sec")
 
     model_state_dict, _optimizer_state_dict = get_state_dict(model, optimizer)
-    _checkpoint_future = dcp.async_save(model_state_dict, checkpoint_id=save_folder / "weights" / "final.pt")
+    _checkpoint_future = dcp.async_save(model_state_dict, checkpoint_id=save_folder / "weights" / "final")
 
     cleanup_process_group()
 

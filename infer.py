@@ -48,13 +48,16 @@ def fsdp_main(rank: int, world_size: int, infer_args: InferArgs, dataset: Triple
     mixed_precision = MixedPrecision(param_dtype=torch.bfloat16, cast_forward_inputs=True) if infer_args.bf16 else None
     sharding_strategy = ShardingStrategy.FULL_SHARD if world_size > 1 else ShardingStrategy.NO_SHARD
 
-    model = FSDP(model, sharding_strategy=sharding_strategy, mixed_precision=mixed_precision, device_id=rank)
-
-    state_dict = dcps.get_model_state_dict(model)
-    dcp.load(
-        state_dict=state_dict,
-        checkpoint_id=infer_args.folder + f"/weights/tree_transformer{infer_args.model_suffix}.pt",
+    model = FSDP(
+        model,
+        sharding_strategy=sharding_strategy,
+        mixed_precision=mixed_precision,
+        device_id=rank,
+        use_orig_params=True,  # ALLOWS FULL GRAPH CAPTURE
     )
+
+    model_state_dict = dcps.get_model_state_dict(model)
+    dcp.load(state_dict=model_state_dict, checkpoint_id=infer_args.folder + f"/weights/{infer_args.model_suffix}")
 
     model.eval()
 
