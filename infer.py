@@ -17,10 +17,10 @@ from toothless.collators import DictCollator
 from toothless.data import TripleDataSet, Triple
 from toothless.model import DualTreeTransformer, generate_with_probabilities
 from toothless.utils import count_parameters
-from toothless.args import DataArguments, InferenceArguments, ModelArguments
+from toothless.args import DataArgs, InferArgs, ModelArgs
 
 
-def fsdp_main(rank: int, world_size: int, infer_args: InferenceArguments, dataset: TripleDataSet):
+def fsdp_main(rank: int, world_size: int, infer_args: InferArgs, dataset: TripleDataSet):
     setup_process_group(rank, world_size)
     rank0print("Distributed Network ready")
     torch.cuda.set_device(rank)
@@ -28,11 +28,11 @@ def fsdp_main(rank: int, world_size: int, infer_args: InferenceArguments, datase
     # Load Data
     vocab = SimpleVocab.load(Path(infer_args.folder) / "vocab.json")
     with open(Path(infer_args.folder) / "data_args.json", encoding="utf-8") as f:
-        data_args = DataArguments.from_json(f.read())
+        data_args = DataArgs.from_json(f.read())
     with open(Path(infer_args.folder) / "model_args.json", encoding="utf-8") as f:
-        model_args = ModelArguments.from_json(f.read())
-    assert isinstance(model_args, ModelArguments)
-    assert isinstance(data_args, DataArguments)
+        model_args = ModelArgs.from_json(f.read())
+    assert isinstance(model_args, ModelArgs)
+    assert isinstance(data_args, DataArgs)
 
     eval_folder = Path(infer_args.folder) / "eval"
     eval_folder.mkdir(exist_ok=True, parents=True)
@@ -84,8 +84,8 @@ def fsdp_main(rank: int, world_size: int, infer_args: InferenceArguments, datase
 
 
 def _batch_infer(
-    data_args: DataArguments,
-    infer_args: InferenceArguments,
+    data_args: DataArgs,
+    infer_args: InferArgs,
     vocab: SimpleVocab,
     model: FSDP,
     collator: DictCollator,
@@ -124,10 +124,10 @@ def _batch_infer(
 
 
 if __name__ == "__main__":
-    infer_args = tyro.cli(InferenceArguments)
+    infer_args = tyro.cli(InferArgs)
     with open(Path(infer_args.folder) / "data_args.json", encoding="utf-8") as f:
-        data_args = DataArguments.from_json(f.read())
-    assert isinstance(data_args, DataArguments)
+        data_args = DataArgs.from_json(f.read())
+    assert isinstance(data_args, DataArgs)
     dataset = TripleDataSet(data_args)
 
     world_size = torch.cuda.device_count()

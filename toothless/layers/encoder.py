@@ -3,11 +3,11 @@ from torch import nn, Tensor
 
 from .attention import PackedRoPEMHA
 from .swiglu import SwiGLUFFN
-from ..args import ModelArguments
+from ..args import ModelArgs
 
 
 class TransformerEncoderLayer(nn.Module):
-    def __init__(self, conf: ModelArguments, device: torch.device | None = None, dtype: torch.dtype | None = None):
+    def __init__(self, conf: ModelArgs, device: torch.device | None = None, dtype: torch.dtype | None = None):
         factory_kwargs = {"device": device, "dtype": dtype}
         super().__init__()
         self.self_attn = PackedRoPEMHA(

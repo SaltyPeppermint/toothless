@@ -8,7 +8,7 @@ from torch.utils.data import DataLoader
 from eggshell import rise  # type: ignore
 
 from .data import TripleDataSet, Triple
-from .args import DataArguments
+from .args import DataArgs
 from .vocab import SimpleVocab
 
 
@@ -61,7 +61,7 @@ def mk_loaders(
     world_size: int,
     dataset: TripleDataSet,
     collator: DictCollator,
-    data_args: DataArguments,
+    data_args: DataArgs,
     batch_size: int,
     shuffle: bool = True,
 ) -> tuple[DataLoader[Triple], DataLoader[Triple]]:

@@ -8,14 +8,12 @@ from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 
 from .layers.decoder import TransformerDecoderLayer
 from .layers.encoder import TransformerEncoderLayer
-from .args import ModelArguments
+from .args import ModelArgs
 from .vocab import SimpleVocab
 
 
 class DualTreeTransformer(nn.Module):
-    def __init__(
-        self, conf: ModelArguments, src_vocab_size: int, tgt_vocab_size: int, pad_token_id: int, state_dict=None
-    ):
+    def __init__(self, conf: ModelArgs, src_vocab_size: int, tgt_vocab_size: int, pad_token_id: int, state_dict=None):
         super(DualTreeTransformer, self).__init__()
 
         self.conf = conf

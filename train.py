@@ -24,33 +24,23 @@ from toothless.utils import cleanup_process_group, rank0print, setup_process_gro
 from toothless.data import TripleDataSet, Triple
 from toothless.model import DualTreeTransformer
 from toothless.utils import count_parameters
-from toothless.args import DataArguments, TrainingArguments, ModelArguments, TrainRunArgs
+from toothless.args import TrainArgs, FullArgs
 
 
-def fsdp_main(
-    rank: int,
-    world_size: int,
-    model_args: ModelArguments,
-    train_args: TrainingArguments,
-    data_args: DataArguments,
-    verbose: bool,
-    save_folder: Path,
-):
+def fsdp_main(rank: int, world_size: int, args: FullArgs, save_folder: Path, start_time_str: str):
     setup_process_group(rank, world_size)
     torch.cuda.set_device(rank)
 
-    writer = SummaryWriter(log_dir=train_args.run_log_dir) if rank == 0 else None
-
-    dataset = TripleDataSet(data_args)
+    dataset = TripleDataSet(args.data)
     if rank == 0:
         dataset.vocab.save(save_folder / "vocab.json")
     rank0print("Dataset ready")
 
     # Load Data
     vocab_size = len(dataset.vocab)
-    collator = DictCollator(dataset.vocab.pad_token_id, data_args.max_len, dataset.vocab)
+    collator = DictCollator(dataset.vocab.pad_token_id, args.data.max_len, dataset.vocab)
     train_dataloader, eval_dataloader = mk_loaders(
-        rank, world_size, dataset, collator, data_args, train_args.batch_size
+        rank, world_size, dataset, collator, args.data, args.train.batch_size
     )
     rank0print("DataLoaders ready")
 
@@ -58,19 +48,15 @@ def fsdp_main(
     init_start_event = torch.cuda.Event(enable_timing=True)
     init_end_event = torch.cuda.Event(enable_timing=True)
 
-    model = DualTreeTransformer(model_args, vocab_size, vocab_size, dataset.vocab.pad_token_id)
-
-    if writer and train_args.trace:
-        example_batch, _ = next(iter(copy.deepcopy(train_dataloader)))
-        writer.add_graph(model, example_batch)
+    model = DualTreeTransformer(args.model, vocab_size, vocab_size, dataset.vocab.pad_token_id)
 
     table, total_params = count_parameters(model)
-    if verbose:
+    if args.verbose:
         rank0print(table)
     rank0print(f"Total Parameters: {total_params}")
 
     # FSDP model and Mixed Precision Config
-    mixed_precision = MixedPrecision(param_dtype=torch.bfloat16) if model_args.bf16 else None
+    mixed_precision = MixedPrecision(param_dtype=torch.bfloat16) if args.model.bf16 else None
     sharding_strategy = ShardingStrategy.FULL_SHARD if world_size > 1 else ShardingStrategy.NO_SHARD
 
     model = FSDP(
@@ -84,21 +70,21 @@ def fsdp_main(
     # Define optimizer and loss function
     optimizer = optim.AdamW(
         model.parameters(),
-        lr=torch.tensor(train_args.learning_rate),
-        betas=(train_args.adam_beta1, train_args.adam_beta2),
-        weight_decay=train_args.weight_decay,
+        lr=torch.tensor(args.train.learning_rate),
+        betas=(args.train.adam_beta1, args.train.adam_beta2),
+        weight_decay=args.train.weight_decay,
     )
-    total_steps = train_args.epochs * len(train_dataloader)
+    total_steps = args.train.epochs * len(train_dataloader)
     warmup_scheduler = LinearLR(
         optimizer,
         start_factor=0.01,  # Start from 1% of max_lr
         end_factor=1.0,
-        total_iters=train_args.warmup_steps,
+        total_iters=args.train.warmup_steps,
     )
     cosine_scheduler = CosineAnnealingLR(
         optimizer,
-        T_max=total_steps - train_args.warmup_steps,  # Cosine After Warmup
-        eta_min=train_args.min_lr,
+        T_max=total_steps - args.train.warmup_steps,  # Cosine After Warmup
+        eta_min=args.train.min_lr,
     )
 
     criterion = CrossEntropyLoss(ignore_index=dataset.vocab.pad_token_id, label_smoothing=0.1)
@@ -107,12 +93,19 @@ def fsdp_main(
     if rank == 0:
         (save_folder / "weights").mkdir(exist_ok=True, parents=True)
 
+    # Writer
+    writer = SummaryWriter(log_dir=Path("runs") / start_time_str) if rank == 0 else None
+
+    if writer and args.train.trace:
+        example_batch, _ = next(iter(copy.deepcopy(train_dataloader)))
+        writer.add_graph(model, example_batch)
+
     rank0print("Starting training!")
     init_start_event.record(torch.cuda.current_stream())
 
     # profil_model(rank, model, copy.deepcopy(train_dataloader), criterion)
 
-    for epoch in range(train_args.epochs):
+    for epoch in range(args.train.epochs):
         train(
             rank,
             model,
@@ -122,7 +115,7 @@ def fsdp_main(
             warmup_scheduler,
             cosine_scheduler,
             epoch,
-            train_args,
+            args.train,
             writer,
         )
 
@@ -131,9 +124,9 @@ def fsdp_main(
         _checkpoint_future = dcp.async_save(model_state_dict, checkpoint_id=save_folder / "weights" / f"{epoch}.pt")
 
         # Optionally, evaluate the model on the validation set after each epoch
-        if train_args.eval_each_epoch:
+        if args.train.eval_each_epoch:
             eval_loss = evalulate(
-                rank, model, copy.deepcopy(eval_dataloader), criterion, epoch, train_args.epochs, writer
+                rank, model, copy.deepcopy(eval_dataloader), criterion, epoch, args.train.epochs, writer
             )
             if eval_loss < best_eval_loss:
                 best_eval_loss = eval_loss
@@ -193,7 +186,7 @@ def train(
     warmup_scheduler: LinearLR,
     cosine_scheduler: CosineAnnealingLR,
     epoch: int,
-    train_args: TrainingArguments,
+    train_args: TrainArgs,
     writer: SummaryWriter | None = None,
 ):
     model.train()
@@ -280,11 +273,16 @@ def evalulate(
 
 
 if __name__ == "__main__":
-    args = tyro.cli(TrainRunArgs)
+    args = tyro.cli(FullArgs)
 
     start_time = datetime.now()
-    save_folder = Path(args.model.output_dir) / start_time.strftime("%y-%m-%d-%H:%M:%S")
+
+    world_size = torch.cuda.device_count()
+
+    start_time_str = start_time.strftime("%y-%m-%d-%H:%M:%S")
+    save_folder = Path(args.model.output_dir) / start_time_str
     save_folder.mkdir(exist_ok=True, parents=True)
+
     with open(save_folder / "model_args.json", mode="w", encoding="utf-8") as f:
         f.write(args.model.to_json())
     with open(save_folder / "data_args.json", mode="w", encoding="utf-8") as f:
@@ -292,12 +290,7 @@ if __name__ == "__main__":
     with open(save_folder / "train_args.json", mode="w", encoding="utf-8") as f:
         f.write(args.train.to_json())
 
-    world_size = torch.cuda.device_count()
+    mp.spawn(fsdp_main, args=(world_size, args, save_folder, start_time_str), nprocs=world_size, join=True)
 
-    mp.spawn(
-        fsdp_main,
-        args=(world_size, args.model, args.train, args.data, args.verbose, save_folder),
-        nprocs=world_size,
-        join=True,
-    )
+    (save_folder / "FINISHED").touch()
     print("DONE")

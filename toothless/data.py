@@ -11,7 +11,7 @@ import polars as pl
 
 from eggshell import rise, TreeData  # type: ignore
 
-from .args import DataArguments
+from .args import DataArgs
 from .vocab import BOS_TOKEN, EOS_TOKEN, MASK_TOKEN, PAD_TOKEN, UNK_TOKEN, SimpleVocab
 
 
@@ -38,7 +38,7 @@ class Triple:
 
 
 class TripleDataSet(Dataset[Triple]):
-    def __init__(self, conf: DataArguments):
+    def __init__(self, conf: DataArgs):
         """
         :param k represents the max relative distance
         """
@@ -116,11 +116,11 @@ class TripleDataSet(Dataset[Triple]):
 
         return Triple(l_ids, left, tgt_ids, middle, r_ids, right)
 
-    def __len__(self):
+    def __len__(self) -> int:
         total_samples = self.index_table["to"].max()
         if self.n_samples is not None:
             return min(total_samples, self.n_samples)  # pyright: ignore[reportArgumentType]
-        return total_samples
+        return total_samples  # type: ignore
 
 
 def split_off_special(partial_tok: list[str], vocab: SimpleVocab) -> list[str]:

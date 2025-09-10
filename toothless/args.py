@@ -4,7 +4,7 @@ from dataclass_wizard import JSONWizard
 
 
 @dataclass
-class ModelArguments(JSONWizard):
+class ModelArgs(JSONWizard):
     output_dir: str = field(default="model")
     d_model: int = field(default=768, metadata={"help": "Hidden state dimension size."})
     num_layers: int = field(default=12)
@@ -16,7 +16,7 @@ class ModelArguments(JSONWizard):
 
 
 @dataclass
-class DataArguments(JSONWizard):
+class DataArgs(JSONWizard):
     data_path: str = field(metadata={"help": "Path to the training data."})
     cache_dir: str = field(default="cache")
     split_size: float = field(default=0.9, metadata={"help": "Train/Test split ratio."})
@@ -27,7 +27,7 @@ class DataArguments(JSONWizard):
 
 
 @dataclass
-class TrainingArguments(JSONWizard):
+class TrainArgs(JSONWizard):
     epochs: int = field(default=4)
     batch_size: int = field(default=16)
     learning_rate: float = field(default=1e-5)
@@ -44,15 +44,15 @@ class TrainingArguments(JSONWizard):
 
 
 @dataclass
-class TrainRunArgs:
-    train: TrainingArguments
-    data: DataArguments
-    model: ModelArguments
+class FullArgs(JSONWizard):
+    train: TrainArgs
+    data: DataArgs
+    model: ModelArgs
     verbose: bool = field(default=False)
 
 
 @dataclass
-class InferenceArguments(JSONWizard):
+class InferArgs(JSONWizard):
     infer_data: str
     folder: str
     n_train_data: int | None
