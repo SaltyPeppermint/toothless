@@ -45,7 +45,7 @@ def batch_process_result(
             rank0print("----------")
             rank0print(f"Sample {sample_id}", "blue")
             rank0print("LEFT:", "green")
-            rank0print(triple.r_str)
+            rank0print(triple.l_str)
             rank0print("MIDDLE:", "green")
             rank0print(triple.tgt_str)
             rank0print("RIGHT:", "green")
