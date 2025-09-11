@@ -21,6 +21,8 @@ from toothless.model import DualTreeTransformer, generate_with_probabilities
 from toothless.utils import count_parameters
 from toothless.args import DataArgs, InferArgs, ModelArgs
 
+torch.set_float32_matmul_precision("high")
+
 
 def fsdp_main(rank: int, world_size: int, infer_args: InferArgs, dataset: TripleDataSet):
     setup_process_group(rank, world_size)
