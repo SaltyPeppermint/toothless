@@ -4,5 +4,5 @@ uv run infer.py \
     --model-suffix "0" \
     --n-train-data 4096 \
     --n-eval-data 4096 \
-    --batch-size 32
-#torchrun --nproc_per_node 1 --nnodes 1 --node_rank 0 --master_addr localhost --master_port 6601
+    --batch-size 32 \
+    --verbose

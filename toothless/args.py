@@ -59,5 +59,4 @@ class InferArgs(JSONWizard):
     n_eval_data: int | None
     batch_size: int
     model_suffix: str
-    bf16: bool = field(default=True)
     verbose: bool = field(default=False)

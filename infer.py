@@ -45,7 +45,7 @@ def fsdp_main(rank: int, world_size: int, infer_args: InferArgs, dataset: Triple
     rank0print("Base model ready")
 
     # FSDP model and Mixed Precision Config
-    mixed_precision = MixedPrecision(param_dtype=torch.bfloat16, cast_forward_inputs=True) if infer_args.bf16 else None
+    mixed_precision = MixedPrecision(param_dtype=torch.bfloat16) if model_args.bf16 else None
     sharding_strategy = ShardingStrategy.FULL_SHARD if world_size > 1 else ShardingStrategy.NO_SHARD
 
     model = FSDP(
