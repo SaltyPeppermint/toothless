@@ -2,13 +2,13 @@ from pathlib import Path
 from dataclasses import dataclass
 
 from dataclass_wizard import JSONWizard
+from tokenizers import Tokenizer
 
 from eggshell import FirstErrorDistance, EggshellException
 from eggshell import rise  # type: ignore
 
-from .vocab import SimpleVocab
 from .utils import rank0print
-from .data import split_off_special, Triple
+from .data import Triple
 
 
 @dataclass
@@ -20,7 +20,7 @@ class InferResult(JSONWizard):
 
 
 def batch_process_result(
-    vocab: SimpleVocab,
+    tokenizer: Tokenizer,
     triples: list[Triple],
     batch_ids: list[list[int]],
     batch_probs: list[list[float]],
@@ -51,12 +51,12 @@ def batch_process_result(
             rank0print("RIGHT:", "green")
             rank0print(triple.r_str)
 
-        raw_generated_tokens = [vocab.id2token(int(i)) for i in ids if i]
+        raw_generated_tokens = tokenizer.decode(ids, skip_special_tokens=False)
         if verbose:
             rank0print("RAW GENERATED TOKENS:", "yellow")
             rank0print(raw_generated_tokens, "yellow")
 
-        generated_tokens = split_off_special(raw_generated_tokens, vocab)
+        generated_tokens = tokenizer.decode(ids)
         try:
             generated = rise.GeneratedRecExpr(generated_tokens, token_probs=token_probs)
         except EggshellException as e:

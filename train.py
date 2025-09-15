@@ -23,22 +23,22 @@ from toothless.collators import DictCollator, mk_loaders
 from toothless.utils import cleanup_process_group, rank0print, setup_process_group
 from toothless.data import TripleDataSet, Triple
 from toothless.model import DualTreeTransformer
-from toothless.utils import count_parameters
+from toothless.utils import count_parameters, get_save_folder
 from toothless.args import TrainArgs, FullArgs
 
 
-def fsdp_main(rank: int, world_size: int, args: FullArgs, save_folder: Path, start_time_str: str):
+def fsdp_main(rank: int, world_size: int, args: FullArgs, dataset: TripleDataSet, start_time_str: str):
     setup_process_group(rank, world_size)
+    rank0print("Distributed Network ready")
     torch.cuda.set_device(rank)
 
-    dataset = TripleDataSet(args.data)
-    if rank == 0:
-        dataset.vocab.save(save_folder / "vocab.json")
-    rank0print("Dataset ready")
+    save_folder = get_save_folder(args.model, start_time_str)
+    pad_token_id = dataset.tokenizer.token_to_id("<PAD>")
+    assert pad_token_id == 0
 
     # Load Data
-    vocab_size = len(dataset.vocab)
-    collator = DictCollator(dataset.vocab.pad_token_id, args.data.max_len, dataset.vocab)
+    vocab_size = dataset.tokenizer.get_vocab_size()
+    collator = DictCollator(args.data.max_len, pad_token_id=pad_token_id)
     train_dataloader, eval_dataloader = mk_loaders(
         rank, world_size, dataset, collator, args.data, args.train.batch_size
     )
@@ -48,7 +48,7 @@ def fsdp_main(rank: int, world_size: int, args: FullArgs, save_folder: Path, sta
     init_start_event = torch.cuda.Event(enable_timing=True)
     init_end_event = torch.cuda.Event(enable_timing=True)
 
-    model = DualTreeTransformer(args.model, vocab_size, vocab_size, dataset.vocab.pad_token_id)
+    model = DualTreeTransformer(args.model, vocab_size, vocab_size, pad_token_id=pad_token_id)
 
     table, total_params = count_parameters(model)
     if args.verbose:
@@ -87,7 +87,8 @@ def fsdp_main(rank: int, world_size: int, args: FullArgs, save_folder: Path, sta
         eta_min=args.train.min_lr,
     )
 
-    criterion = CrossEntropyLoss(ignore_index=dataset.vocab.pad_token_id, label_smoothing=0.1)
+    # <PAD> is ignored
+    criterion = CrossEntropyLoss(ignore_index=0, label_smoothing=0.1)
 
     best_eval_loss = float("inf")
     if rank == 0:
@@ -280,7 +281,8 @@ if __name__ == "__main__":
     world_size = torch.cuda.device_count()
 
     start_time_str = start_time.strftime("%y-%m-%d-%H:%M:%S")
-    save_folder = Path(args.model.output_dir) / start_time_str
+
+    save_folder = get_save_folder(args.model, start_time_str)
     save_folder.mkdir(exist_ok=True, parents=True)
 
     with open(save_folder / "model_args.json", mode="w", encoding="utf-8") as f:
@@ -290,7 +292,10 @@ if __name__ == "__main__":
     with open(save_folder / "train_args.json", mode="w", encoding="utf-8") as f:
         f.write(args.train.to_json())
 
-    mp.spawn(fsdp_main, args=(world_size, args, save_folder, start_time_str), nprocs=world_size, join=True)
+    dataset = TripleDataSet(args.data)
+    print("Dataset ready")
+
+    mp.spawn(fsdp_main, args=(world_size, args, dataset, start_time_str), nprocs=world_size, join=True)
 
     (save_folder / "FINISHED").touch()
     print("DONE")

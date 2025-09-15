@@ -1,5 +1,6 @@
 import os
 import sys
+from pathlib import Path
 
 import torch
 import torch.distributed as dist
@@ -7,6 +8,12 @@ from torch import nn, Tensor
 
 from termcolor import cprint
 from prettytable import PrettyTable
+
+from toothless.args import ModelArgs
+
+
+def get_save_folder(model_args: ModelArgs, start_time_str: str) -> Path:
+    return Path(model_args.output_dir) / start_time_str
 
 
 def count_parameters(model: nn.Module) -> tuple[PrettyTable, int]:

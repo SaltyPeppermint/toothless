@@ -5,18 +5,15 @@ from torch import Tensor
 from torch.utils.data.distributed import DistributedSampler
 from torch.utils.data import DataLoader
 
-from eggshell import rise  # type: ignore
 
 from .data import TripleDataSet, Triple
 from .args import DataArgs
-from .vocab import SimpleVocab
 
 
 class DictCollator:
-    def __init__(self, pad_id: int, max_len: int, vocab: SimpleVocab):
-        self.pad_id = pad_id
+    def __init__(self, max_len: int, pad_token_id: int = 0):
+        self.pad_token_id = pad_token_id
         self.max_len = max_len
-        self.vocab = vocab
 
     def __call__(self, triples: Sequence[Triple]) -> tuple[dict[str, Tensor], int]:
         assert type(triples[0]) is Triple
@@ -33,22 +30,12 @@ class DictCollator:
             assert max(len(triple.l_ids), len(triple.r_ids), len(triple.tgt_ids)) <= self.max_len
 
         batch = {
-            "tgt_ids": torch.nested.nested_tensor(tgt_batch, layout=torch.jagged).to_padded_tensor(self.pad_id),
-            "l_ids": torch.nested.nested_tensor(l_batch, layout=torch.jagged).to_padded_tensor(self.pad_id),
-            "r_ids": torch.nested.nested_tensor(r_batch, layout=torch.jagged).to_padded_tensor(self.pad_id),
+            "tgt_ids": torch.nested.nested_tensor(tgt_batch, layout=torch.jagged).to_padded_tensor(self.pad_token_id),
+            "l_ids": torch.nested.nested_tensor(l_batch, layout=torch.jagged).to_padded_tensor(self.pad_token_id),
+            "r_ids": torch.nested.nested_tensor(r_batch, layout=torch.jagged).to_padded_tensor(self.pad_token_id),
         }
 
         return batch, sum([len(seq) for seq in tgt_batch])
-
-    def _pyrec_to_tensor(self, expr: rise.RecExpr) -> Tensor:
-        tree_data = expr.to_data()
-
-        return torch.tensor(
-            [self.vocab.bos_token_id]
-            + [self.vocab.token2id(node.name) for node in tree_data.nodes()]
-            + [self.vocab.eos_token_id],
-            dtype=torch.long,
-        )
 
 
 def mk_loaders(
@@ -71,7 +58,7 @@ def mk_loaders(
     train_sampler = DistributedSampler(train_dataset, rank=rank, num_replicas=world_size, shuffle=shuffle)
     eval_sampler = DistributedSampler(eval_dataset, rank=rank, num_replicas=world_size)
 
-    pad_id = dataset.vocab.pad_token_id
+    pad_id = dataset.tokenizer.token_to_id("<PAD>")
     assert pad_id == 0
 
     # Create the dataloaders

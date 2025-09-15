@@ -20,6 +20,7 @@ dependencies = [
     "tyro>=0.9",
     "plotly>=6",
     "eggshell",
+    "tokenizers>=0.22.0",
 ]
 # "transformers>=4.48.2",
 # "tokenizers>=0.21.0",

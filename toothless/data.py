@@ -3,37 +3,28 @@ from pathlib import Path
 from dataclasses import dataclass
 
 import torch
-from torch import Tensor
 from torch.utils.data import Dataset
 
 from tqdm.auto import tqdm
 import polars as pl
 
-from eggshell import rise, TreeData  # type: ignore
-
 from .args import DataArgs
-from .vocab import BOS_TOKEN, EOS_TOKEN, MASK_TOKEN, PAD_TOKEN, UNK_TOKEN, SimpleVocab
 
-
-# from tokenizers import Tokenizer
-# from tokenizers.models import BPE
-# from tokenizers.normalizers import BertNormalizer
-# from tokenizers.trainers import BpeTrainer
-# from tokenizers.pre_tokenizers import Sequence as PreTokenizerSequence
-# from tokenizers.pre_tokenizers import Split
-# from tokenizers.normalizers import Strip
-# from tokenizers.normalizers import Sequence as NormalizerSequence
 # import matplotlib.pyplot as plt
+from tokenizers import models, normalizers, pre_tokenizers, processors, trainers, Tokenizer
+import tokenizers
+
+
 SCHEMA = {"from": pl.UInt64, "to": pl.UInt64, "path": pl.String}
 
 
 @dataclass
 class Triple:
-    l_ids: Tensor
+    l_ids: list[int]
     l_str: str
-    tgt_ids: Tensor
+    tgt_ids: list[int]
     tgt_str: str
-    r_ids: Tensor
+    r_ids: list[int]
     r_str: str
 
 
@@ -55,13 +46,7 @@ class TripleDataSet(Dataset[Triple]):
         self.n_samples = conf.n_samples
 
         self.vocab_path = self.cache / "vocab.json"
-        self.vocab = self._build_vocab()
-
-    def _build_vocab(self) -> SimpleVocab:
-        normal_tokens = rise.operators() + ["[constant]", "[variable]"]
-        vocab = SimpleVocab(PAD_TOKEN, UNK_TOKEN, MASK_TOKEN, BOS_TOKEN, EOS_TOKEN, normal_tokens)
-        vocab.save(self.vocab_path)
-        return vocab
+        self.tokenizer = self._build_vocab(self.vocab_path, self.index_table, conf.tokenizer_samples)
 
     def _iterate_samples(self) -> pl.DataFrame:
         if self.index_table_cache_path.is_file():
@@ -85,7 +70,7 @@ class TripleDataSet(Dataset[Triple]):
 
         return df
 
-    def load_str_triple(self, idx: int) -> tuple[str, str, str]:
+    def _load_str_triple(self, idx: int) -> tuple[str, str, str]:
         result = self.index_table.filter((pl.col("from") <= idx) & (idx < pl.col("to"))).row(0, named=True)
 
         with open(str(result["path"]), mode="r", encoding="utf-8") as f:
@@ -95,24 +80,38 @@ class TripleDataSet(Dataset[Triple]):
         target = file["midpoint"]["goals"][idx - result["from"]]["expression"]
         return start, guide, target
 
-    def _pyrec_to_tensor(self, tree_data: TreeData) -> Tensor:
-        return torch.tensor(
-            [self.vocab.bos_token_id]
-            + [self.vocab.token2id(node.name) for node in tree_data.nodes()]
-            + [self.vocab.eos_token_id],
-            dtype=torch.long,
+    def _build_vocab(self, vocab_path: Path, index_table: pl.DataFrame, n_samples: int) -> Tokenizer:
+        if self.vocab_path.is_file():
+            return Tokenizer.from_file(str(self.vocab_path))
+
+        tokenizer = Tokenizer(models.BPE())
+
+        tokenizer.normalizer = normalizers.Sequence(
+            [normalizers.NFKC(), normalizers.Replace(tokenizers.Regex(r"mf(i|u)\d*"), "[var]")]  # pyright: ignore[reportCallIssue, reportAttributeAccessIssue]
         )
+        tokenizer.pre_tokenizer = pre_tokenizers.Sequence(
+            [
+                pre_tokenizers.WhitespaceSplit(),
+                pre_tokenizers.Split(")", behavior="isolated"),
+                pre_tokenizers.Split("(", behavior="isolated"),
+            ]
+        )  # pyright: ignore[reportAttributeAccessIssue]
+        tokenizer.post_processor = processors.TemplateProcessing(
+            single="<CLS> $A <SEP>", pair="<CLS> $A <SEP> $B:1 <SEP>:1", special_tokens=[("<CLS>", 1), ("<SEP>", 2)]
+        )  # pyright: ignore[reportAttributeAccessIssue]
+
+        trainer = trainers.BpeTrainer(vocab_size=25000, special_tokens=["<PAD>", "<CLS>", "<SEP>"])  # pyright: ignore[reportCallIssue]
+
+        tokenizer.train_from_iterator(get_training_corpus(index_table, n_samples), trainer=trainer, length=n_samples)
+        tokenizer.save(str(vocab_path))
+        return tokenizer
 
     def __getitem__(self, idx: int) -> Triple:
-        left, middle, right = self.load_str_triple(idx)
+        left, middle, right = self._load_str_triple(idx)
 
-        l_tree = rise.RecExpr(left).to_data()
-        tgt_tree = rise.RecExpr(middle).to_data()
-        r_tree = rise.RecExpr(right).to_data()
-
-        l_ids = self._pyrec_to_tensor(l_tree)
-        tgt_ids = self._pyrec_to_tensor(tgt_tree)
-        r_ids = self._pyrec_to_tensor(r_tree)
+        l_ids = self.tokenizer.encode(left).ids
+        tgt_ids = self.tokenizer.encode(middle).ids
+        r_ids = self.tokenizer.encode(right).ids
 
         return Triple(l_ids, left, tgt_ids, middle, r_ids, right)
 
@@ -123,9 +122,19 @@ class TripleDataSet(Dataset[Triple]):
         return total_samples  # type: ignore
 
 
-def split_off_special(partial_tok: list[str], vocab: SimpleVocab) -> list[str]:
-    partial_tok = partial_tok[1:]
-    for i, j in enumerate(partial_tok):
-        if j in vocab.special_tokens:
-            return partial_tok[:i]
-    return partial_tok
+def get_training_corpus(index_table: pl.DataFrame, n_samples: int):
+    i = 0
+    for entry in index_table.iter_rows(named=True):
+        if i > n_samples:
+            break
+        with open(str(entry["path"]), mode="r", encoding="utf-8") as f:
+            file = json.load(f)
+        if i == 0:
+            i += 1
+            yield file["start_expr"]
+
+        i += 1
+        yield file["midpoint"]["midpoint"]["expression"]
+        for goal in file["midpoint"]["goals"]:
+            i += 1
+            yield goal["expression"]

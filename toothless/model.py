@@ -6,14 +6,15 @@ from torch import Tensor
 from torch import nn
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 
+from tokenizers import Tokenizer
+
 from .layers.decoder import TransformerDecoderLayer
 from .layers.encoder import TransformerEncoderLayer
 from .args import ModelArgs
-from .vocab import SimpleVocab
 
 
 class DualTreeTransformer(nn.Module):
-    def __init__(self, conf: ModelArgs, src_vocab_size: int, tgt_vocab_size: int, pad_token_id: int):
+    def __init__(self, conf: ModelArgs, src_vocab_size: int, tgt_vocab_size: int, pad_token_id: int = 0):
         super(DualTreeTransformer, self).__init__()
 
         self.conf = conf
@@ -88,11 +89,7 @@ class DualTreeTransformer(nn.Module):
         return self.decode(tgt_ids, l_mem, r_mem, tgt_mask, l_mask, r_mask)
 
 
-def create_padding_mask(
-    input_ids: Tensor,
-    pad_token_id: int = 0,
-    device: torch.device | None = None,
-) -> Tensor:
+def create_padding_mask(input_ids: Tensor, pad_token_id: int = 0, device: torch.device | None = None) -> Tensor:
     """
     Creates a padding mask for attention mechanisms.
     """
@@ -139,7 +136,7 @@ def generate_with_probabilities(
     model: DualTreeTransformer | FSDP,
     l_batch: Tensor,
     r_batch: Tensor,
-    vocab: SimpleVocab,
+    tokenizer: Tokenizer,
     max_len: int,
     temperature: float = 0.0,
     top_k: int | None = None,
@@ -165,15 +162,15 @@ def generate_with_probabilities(
     device = next(model.parameters()).device
     batch_size = l_batch.shape[0]
 
-    pad_token = vocab.pad_token_id
-    start_token = vocab.bos_token_id
-    end_token = vocab.eos_token_id
+    pad_token = tokenizer.token_to_id("<PAD>")
+    start_token = tokenizer.token_to_id("<CLS>")
+    end_token = tokenizer.token_to_id("<SEP>")
 
     l_batch = l_batch.to(device)
-    l_mask = create_padding_mask(l_batch, pad_token_id=pad_token)
+    l_mask = create_padding_mask(l_batch)
 
     r_batch = r_batch.to(device)
-    r_mask = create_padding_mask(r_batch, pad_token_id=pad_token)
+    r_mask = create_padding_mask(r_batch)
 
     # Encode sources once
     with torch.no_grad():
@@ -270,7 +267,7 @@ def beam_search_with_probabilities(
     model: DualTreeTransformer | FSDP,
     l_batch: Tensor,
     r_batch: Tensor,
-    vocab: SimpleVocab,
+    tokenizer: Tokenizer,
     max_len: int,
     beam_size: int = 3,
     length_penalty: float = 1.0,
@@ -294,9 +291,9 @@ def beam_search_with_probabilities(
     device = next(model.parameters()).device
     batch_size = l_batch.shape[0]
 
-    pad_token = vocab.pad_token_id
-    start_token = vocab.bos_token_id
-    end_token = vocab.eos_token_id
+    pad_token = tokenizer.token_to_id("<PAD>")
+    start_token = tokenizer.token_to_id("<CLS>")
+    end_token = tokenizer.token_to_id("<SEP>")
 
     l_batch = l_batch.to(device)
     l_mask = create_padding_mask(l_batch, pad_token_id=pad_token)

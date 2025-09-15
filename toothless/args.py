@@ -23,6 +23,7 @@ class DataArgs(JSONWizard):
     rng_seed: int = field(default=42)
     max_len: int = field(default=256)
     n_samples: int | None = field(default=None)
+    tokenizer_samples: int = field(default=1_000_000)
     force_reload: bool = field(default=False)
 
 
