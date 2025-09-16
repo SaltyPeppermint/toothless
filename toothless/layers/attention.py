@@ -185,6 +185,8 @@ class PackedRoPEMHA(nn.Module):
         key = key.transpose(1, 2)
         # [batch, kv_seq_len, n_heads, head_dim] -> [batch, n_heads, kv_seq_len, head_dim]
         value = value.transpose(1, 2)
+        # Attention needs to be unsqueezed to be broadcastable
+        attn_mask = attn_mask.unsqueeze(1).unsqueeze(2)
 
         # Step 5. Run SDPA
         # [batch, n_heads, q_seq_len, head_dim]

@@ -2,7 +2,7 @@ uv run train.py \
     --train.save-model-end \
     --train.logging-steps 1 \
     --train.epochs 1 \
-    --train.batch-size 256 \
+    --train.batch-size 64 \
     --train.warmup-steps 64 \
     --model.num-layers 12 \
     --model.head-dim 64 \
