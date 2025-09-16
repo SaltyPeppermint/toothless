@@ -37,14 +37,14 @@ class TransformerDecoderLayer(nn.Module):
         tgt = tgt + attn_out
 
         # Left Memory attention
-        normed_memory = self.l_cross_attn_norm(l_mem)
-        normed_tgt = self.l_cross_attn_norm(tgt)
-        l_cross_attn_out = self.l_cross_attn(normed_tgt, normed_memory, normed_memory, l_mask)
+        normed_l_memory = self.l_cross_attn_norm(l_mem)
+        normed_l_tgt = self.l_cross_attn_norm(tgt)
+        l_cross_attn_out = self.l_cross_attn(normed_l_tgt, normed_l_memory, normed_l_memory, l_mask)
 
         # Right Memory attention
-        normed_memory = self.r_cross_attn_norm(r_mem)
-        normed_tgt = self.r_cross_attn_norm(tgt)
-        r_cross_attn_out = self.l_cross_attn(normed_tgt, normed_memory, normed_memory, r_mask)
+        normed_r_memory = self.r_cross_attn_norm(r_mem)
+        normed_r_tgt = self.r_cross_attn_norm(tgt)
+        r_cross_attn_out = self.r_cross_attn(normed_r_tgt, normed_r_memory, normed_r_memory, r_mask)
 
         tgt = tgt + l_cross_attn_out + r_cross_attn_out
 
