@@ -14,10 +14,16 @@ from .args import DataArgs
 class TripleCollator:
     def __init__(self, max_len: int, tokenizer: Tokenizer):
         assert tokenizer.token_to_id("[PAD]") == 0
+        assert tokenizer.token_to_id("[SEP]") == 2
         tokenizer.enable_padding(length=max_len)
         self.max_len = max_len
         self.tokenizer = tokenizer
 
+    def __call__(self, triples: Sequence[Triple]) -> tuple[dict[str, Tensor], int]:
+        raise NotImplementedError
+
+
+class TripleDualCollator(TripleCollator):
     def __call__(self, triples: Sequence[Triple]) -> tuple[dict[str, Tensor], int]:
         assert type(triples[0]) is Triple
 
@@ -31,11 +37,29 @@ class TripleCollator:
 
         batch = {
             "start": torch.tensor([i.ids for i in start], dtype=torch.long),
-            "start_mask": torch.tensor([i.attention_mask for i in guide], dtype=torch.bool),
+            "start_mask": torch.tensor([i.attention_mask for i in start], dtype=torch.bool),
             "guide": torch.tensor([i.ids for i in guide], dtype=torch.long),
             "guide_mask": torch.tensor([i.attention_mask for i in guide], dtype=torch.bool),
             "target": torch.tensor([i.ids for i in target], dtype=torch.long),
-            "target_mask": torch.tensor([i.attention_mask for i in guide], dtype=torch.bool),
+            "target_mask": torch.tensor([i.attention_mask for i in target], dtype=torch.bool),
+        }
+
+        return batch, sum([len(seq.ids) for seq in target])
+
+
+class TripleDecoderOnlyCollator(TripleCollator):
+    def __call__(self, triples: Sequence[Triple]) -> tuple[dict[str, Tensor], int]:
+        assert type(triples[0]) is Triple
+
+        target = self.tokenizer.encode_batch([t.start + " [SEP] " + t.target + " [SEP] " + t.guide for t in triples])
+
+        for t in target:
+            if len(t.ids) > self.max_len:
+                raise ValueError(t)
+
+        batch = {
+            "tgt": torch.tensor([t.ids for t in target], dtype=torch.long),
+            "mask": torch.tensor([t.attention_mask for t in target], dtype=torch.bool),
         }
 
         return batch, sum([len(seq.ids) for seq in target])

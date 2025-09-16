@@ -20,11 +20,11 @@ from tokenizers import Tokenizer
 from tqdm.auto import tqdm
 import tyro
 
-from toothless.collators import TripleCollator, mk_loaders
+from toothless.collators import TripleDualCollator, mk_loaders
 from toothless.utils import cleanup_process_group, rank0print, setup_process_group
 from toothless.data import TripleDataSet, Triple
 from toothless.tokenizer import build_tokenizer
-from toothless.model import DualTreeTransformer
+from toothless.model import DualTransformer
 from toothless.utils import count_parameters, get_save_folder
 from toothless.args import TrainArgs, FullArgs
 
@@ -40,7 +40,7 @@ def fsdp_main(
 
     # Load Data
     vocab_size = tokenizer.get_vocab_size()
-    collator = TripleCollator(args.data.max_len, tokenizer)
+    collator = TripleDualCollator(args.data.max_len, tokenizer)
     train_dataloader, eval_dataloader = mk_loaders(
         rank, world_size, dataset, collator, args.data, args.train.batch_size
     )
@@ -50,7 +50,7 @@ def fsdp_main(
     init_start_event = torch.cuda.Event(enable_timing=True)
     init_end_event = torch.cuda.Event(enable_timing=True)
 
-    model = DualTreeTransformer(args.model, vocab_size, vocab_size)
+    model = DualTransformer(args.model, vocab_size, vocab_size)
 
     table, total_params = count_parameters(model)
     if args.verbose:

@@ -16,9 +16,9 @@ from eggshell import FirstErrorDistance
 
 import toothless.inference as infer
 from toothless.utils import count_parameters, cleanup_process_group, rank0print, setup_process_group
-from toothless.collators import TripleCollator
+from toothless.collators import TripleDualCollator
 from toothless.data import TripleDataSet, Triple
-from toothless.model import DualTreeTransformer, generate_with_probabilities
+from toothless.model import DualTransformer
 from toothless.args import DataArgs, InferArgs, ModelArgs
 
 torch.set_float32_matmul_precision("high")
@@ -43,7 +43,7 @@ def fsdp_main(rank: int, world_size: int, infer_args: InferArgs, dataset: Triple
 
     # Construct Base Model
 
-    model = DualTreeTransformer(model_args, vocab_size, vocab_size)
+    model = DualTransformer(model_args, vocab_size, vocab_size)
     rank0print("Base model ready")
 
     # FSDP model and Mixed Precision Config
@@ -71,7 +71,7 @@ def fsdp_main(rank: int, world_size: int, infer_args: InferArgs, dataset: Triple
 
     rank0print("FSDP Model/Generator loaded to GPU and ready")
 
-    collator = TripleCollator(data_args.max_len, tokenizer)
+    collator = TripleDualCollator(data_args.max_len, tokenizer)
 
     # Running inference on dataset samples
     train_dataset, eval_dataset = torch.utils.data.random_split(
@@ -102,7 +102,7 @@ def _batch_infer(
     infer_args: InferArgs,
     tokenizer: Tokenizer,
     model: FSDP,
-    collator: TripleCollator,
+    collator: TripleDualCollator,
     dataset: Subset[Triple],
     ds_name: str,
     eval_folder: Path,
@@ -123,7 +123,7 @@ def _batch_infer(
     for i in tqdm(range(0, n, infer_args.batch_size), desc=f"Inference Batch (Batch Size {infer_args.batch_size})"):
         triples = [dataset[i] for i in range(i, i + infer_args.batch_size)]
         batch, _n_tokens = collator(triples)
-        result = generate_with_probabilities(model, batch["start"], batch["target"], tokenizer, data_args.max_len)
+        result = infer.generate_with_probabilities(model, batch["start"], batch["target"], tokenizer, data_args.max_len)
 
         p = Path(eval_folder / "viz/asts/")
         p.mkdir(parents=True, exist_ok=True)
