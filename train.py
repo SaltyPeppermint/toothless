@@ -16,22 +16,18 @@ from torch.utils.tensorboard.writer import SummaryWriter
 from torch.profiler import profile, ProfilerActivity
 from torch.distributed.checkpoint.state_dict import get_state_dict
 
-from tokenizers import Tokenizer
 from tqdm.auto import tqdm
 import tyro
 
 from toothless.collators import TripleDualCollator, mk_loaders
 from toothless.utils import cleanup_process_group, rank0print, setup_process_group
 from toothless.data import TripleDataSet, Triple
-from toothless.tokenizer import build_tokenizer
 from toothless.model import DualTransformer
 from toothless.utils import count_parameters, get_save_folder
 from toothless.args import TrainArgs, FullArgs
 
 
-def fsdp_main(
-    rank: int, world_size: int, args: FullArgs, dataset: TripleDataSet, tokenizer: Tokenizer, start_time_str: str
-):
+def fsdp_main(rank: int, world_size: int, args: FullArgs, dataset: TripleDataSet, start_time_str: str):
     setup_process_group(rank, world_size)
     rank0print("Distributed Network ready")
     torch.cuda.set_device(rank)
@@ -39,8 +35,8 @@ def fsdp_main(
     save_folder = get_save_folder(args.model, start_time_str)
 
     # Load Data
-    vocab_size = tokenizer.get_vocab_size()
-    collator = TripleDualCollator(args.data.max_len, tokenizer)
+    vocab_size = dataset.tokenizer.get_vocab_size()
+    collator = TripleDualCollator()
     train_dataloader, eval_dataloader = mk_loaders(
         rank, world_size, dataset, collator, args.data, args.train.batch_size
     )
@@ -158,26 +154,16 @@ def profil_model(rank: int, model: FSDP, dataloader: DataLoader[Triple], criteri
     dl_iter = iter(dataloader)
 
     for batch_idx in tqdm(range(2), desc="Profiling... "):
-        batch, _ = next(dl_iter)
+        batch = next(dl_iter)
 
         # Move batch to device
-        l_ids, tgt_ids, r_ids = batch["start"].to(rank), batch["guide"].to(rank), batch["target"].to(rank)
-        l_mask, tgt_mask, r_mask = (
-            batch["start_mask"].to(rank),
-            batch["guide_mask"].to(rank),
-            batch["target_mask"].to(rank),
-        )
-
-        # Create input and target for teacher forcing
-        tgt_input = tgt_ids[:, :-1]  # All tokens except last
-        tgt_mask = tgt_mask[:, :-1]
-        tgt_output = tgt_ids[:, 1:]  # All tokens except first (shifted by 1)
+        b = {k: v.to(rank) for k, v in batch.items()}
 
         # Forward pass
         with profile(activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA], record_shapes=True) as prof:
-            _ = model(tgt_input, tgt_mask, l_ids, l_mask, r_ids, r_mask)
-            logits = model(tgt_input, tgt_mask, l_ids, l_mask, r_ids, r_mask)
-            loss = criterion(logits.reshape(-1, logits.shape[-1]), tgt_output.reshape(-1))
+            _ = model(b["tgt_ids"], b["tgt_mask"], b["l_ids"], b["l_mask"], b["r_ids"], b["r_mask"])
+            logits = model(b["tgt_ids"], b["tgt_mask"], b["l_ids"], b["l_mask"], b["r_ids"], b["r_mask"])
+            loss = criterion(logits.reshape(-1, logits.shape[-1]), b["labels"].reshape(-1))
 
             # Backwards pass
             loss.backward()
@@ -200,24 +186,13 @@ def train(
     model.train()
     ddp_loss = torch.zeros(2).to(rank)
 
-    for batch_idx, (batch, num_tokens) in enumerate(
-        tqdm(dataloader, desc=f"Training Epoch {epoch + 1}/{train_args.epochs}")
-    ):
-        l_ids, tgt_ids, r_ids = batch["start"].to(rank), batch["guide"].to(rank), batch["target"].to(rank)
-        l_mask, tgt_mask, r_mask = (
-            batch["start_mask"].to(rank),
-            batch["guide_mask"].to(rank),
-            batch["target_mask"].to(rank),
-        )
-
-        # Create input and target for teacher forcing
-        tgt_input = tgt_ids[:, :-1]  # All tokens except last
-        tgt_mask = tgt_mask[:, :-1]
-        tgt_output = tgt_ids[:, 1:]  # All tokens except first (shifted by 1)
+    for batch_idx, batch in enumerate(tqdm(dataloader, desc=f"Training Epoch {epoch + 1}/{train_args.epochs}")):
+        num_tokens = sum([len(seq) for seq in batch["labels"]])
+        b = {k: v.to(rank) for k, v in batch.items()}
 
         # Forward pass
-        logits = model(tgt_input, tgt_mask, l_ids, l_mask, r_ids, r_mask)
-        loss = criterion(logits.reshape(-1, logits.shape[-1]), tgt_output.reshape(-1))
+        logits = model(b["tgt_ids"], b["tgt_mask"], b["l_ids"], b["l_mask"], b["r_ids"], b["r_mask"])
+        loss = criterion(logits.reshape(-1, logits.shape[-1]), b["labels"].reshape(-1))
 
         # Backwards pass
         loss.backward()
@@ -261,24 +236,14 @@ def evalulate(
 ) -> float:
     model.eval()
     ddp_loss = torch.zeros(2).to(rank)
-    for batch, _ in tqdm(dataloader, desc=f"Evaluating Epoch {epoch + 1}/{max_epochs}"):
+    for batch in tqdm(dataloader, desc=f"Evaluating Epoch {epoch + 1}/{max_epochs}"):
         # Move batch to device
-        l_ids, tgt_ids, r_ids = batch["start"].to(rank), batch["guide"].to(rank), batch["target"].to(rank)
-        l_mask, tgt_mask, r_mask = (
-            batch["start_mask"].to(rank),
-            batch["guide_mask"].to(rank),
-            batch["target_mask"].to(rank),
-        )
-
-        # Create input and target for teacher forcing
-        tgt_input = tgt_ids[:, :-1]  # All tokens except last
-        tgt_mask = tgt_mask[:, :-1]
-        tgt_output = tgt_ids[:, 1:]  # All tokens except first (shifted by 1)
+        b = {k: v.to(rank) for k, v in batch.items()}
 
         # Forward pass
         with torch.no_grad():
-            logits = model(tgt_input, tgt_mask, l_ids, l_mask, r_ids, r_mask)
-            loss = criterion(logits.reshape(-1, logits.shape[-1]), tgt_output.reshape(-1))
+            logits = model(b["tgt_ids"], b["tgt_mask"], b["l_ids"], b["l_mask"], b["r_ids"], b["r_mask"])
+            loss = criterion(logits.reshape(-1, logits.shape[-1]), b["labels"].reshape(-1))
             ddp_loss[0] += loss
             ddp_loss[1] += len(batch)
 
@@ -310,13 +275,12 @@ if __name__ == "__main__":
 
     dataset = TripleDataSet(args.data)
     print("Dataset ready")
-    tokenizer = build_tokenizer(dataset, args.data.tokenizer_samples)
-    tokenizer.save(str(save_folder / "tokenizer.json"))
+    dataset.tokenizer.save(str(save_folder / "tokenizer.json"))
     print("Tokenizer ready")
 
     world_size = torch.cuda.device_count()
 
-    mp.spawn(fsdp_main, args=(world_size, args, dataset, tokenizer, start_time_str), nprocs=world_size, join=True)
+    mp.spawn(fsdp_main, args=(world_size, args, dataset, start_time_str), nprocs=world_size, join=True)
 
     (save_folder / "FINISHED").touch()
     print("DONE")

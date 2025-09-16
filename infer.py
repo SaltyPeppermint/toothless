@@ -24,13 +24,13 @@ from toothless.args import DataArgs, InferArgs, ModelArgs
 torch.set_float32_matmul_precision("high")
 
 
-def fsdp_main(rank: int, world_size: int, infer_args: InferArgs, dataset: TripleDataSet, tokenizer: Tokenizer):
+def fsdp_main(rank: int, world_size: int, infer_args: InferArgs, dataset: TripleDataSet):
     setup_process_group(rank, world_size)
     rank0print("Distributed Network ready")
     torch.cuda.set_device(rank)
 
     # Load Data
-    vocab_size = tokenizer.get_vocab_size()
+    vocab_size = dataset.tokenizer.get_vocab_size()
     with open(Path(infer_args.folder) / "data_args.json", encoding="utf-8") as f:
         data_args = DataArgs.from_json(f.read())
     with open(Path(infer_args.folder) / "model_args.json", encoding="utf-8") as f:
@@ -71,7 +71,7 @@ def fsdp_main(rank: int, world_size: int, infer_args: InferArgs, dataset: Triple
 
     rank0print("FSDP Model/Generator loaded to GPU and ready")
 
-    collator = TripleDualCollator(data_args.max_len, tokenizer)
+    collator = TripleDualCollator()
 
     # Running inference on dataset samples
     train_dataset, eval_dataset = torch.utils.data.random_split(
@@ -79,7 +79,7 @@ def fsdp_main(rank: int, world_size: int, infer_args: InferArgs, dataset: Triple
     )
 
     train_distances, train_gen_triples = _batch_infer(
-        data_args, infer_args, tokenizer, model, collator, train_dataset, "train", eval_folder
+        data_args, infer_args, dataset.tokenizer, model, collator, train_dataset, "train", eval_folder
     )
     with open(eval_folder / "train_gen_triples_vanilla.json", mode="w", encoding="utf-8") as f:
         f.write(infer.InferResult.list_to_json(train_gen_triples))
@@ -87,7 +87,7 @@ def fsdp_main(rank: int, world_size: int, infer_args: InferArgs, dataset: Triple
     infer.print_distance(train_distances, "TRAIN")
 
     eval_distances, eval_gen_triples = _batch_infer(
-        data_args, infer_args, tokenizer, model, collator, eval_dataset, "eval", eval_folder
+        data_args, infer_args, dataset.tokenizer, model, collator, eval_dataset, "eval", eval_folder
     )
     with open(eval_folder / "eval_gen_triples_vanilla.json", mode="w", encoding="utf-8") as f:
         f.write(infer.InferResult.list_to_json(eval_gen_triples))
@@ -122,7 +122,7 @@ def _batch_infer(
 
     for i in tqdm(range(0, n, infer_args.batch_size), desc=f"Inference Batch (Batch Size {infer_args.batch_size})"):
         triples = [dataset[i] for i in range(i, i + infer_args.batch_size)]
-        batch, _n_tokens = collator(triples)
+        batch = collator(triples)
         result = infer.generate_with_probabilities(model, batch["start"], batch["target"], tokenizer, data_args.max_len)
 
         p = Path(eval_folder / "viz/asts/")
@@ -145,10 +145,8 @@ if __name__ == "__main__":
 
     dataset = TripleDataSet(data_args)
     print("Dataset ready")
-    tokenizer = Tokenizer.from_file(str(Path(infer_args.folder) / "tokenizer.json"))
-    print("Tokenizer ready")
 
     world_size = torch.cuda.device_count()
 
-    mp.spawn(fsdp_main, args=(world_size, infer_args, dataset, tokenizer), nprocs=world_size, join=True)
+    mp.spawn(fsdp_main, args=(world_size, infer_args, dataset), nprocs=world_size, join=True)
     print("DONE")
