@@ -26,10 +26,7 @@ class TripleCollator:
 
         for s, g, t in zip(start, guide, target):
             if max(len(s.ids), len(g.ids), len(t.ids)) > self.max_len:
-                print(s)
-                print(g)
-                print(t)
-                raise ValueError("too long")
+                raise ValueError(s, g, t)
 
         batch = {
             "start": torch.tensor([i.ids for i in start], dtype=torch.long),
