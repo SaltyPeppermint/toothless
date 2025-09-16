@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from dataclass_wizard import JSONWizard
 from tokenizers import Tokenizer
 
-from eggshell import FirstErrorDistance, EggshellException
+from eggshell import FirstErrorDistance  # , EggshellException
 from eggshell import rise  # type: ignore
 
 from .utils import rank0print
@@ -56,43 +56,43 @@ def batch_process_result(
             rank0print("RAW GENERATED TOKENS:", "yellow")
             rank0print(raw_generated_tokens, "yellow")
 
-        generated_tokens = tokenizer.decode(ids)
-        try:
-            generated = rise.GeneratedRecExpr(generated_tokens, token_probs=token_probs)
-        except EggshellException as e:
-            rank0print("COULD NOT PROPERLY PARSE GENERATED GUIDE.", "red")
-            rank0print(e, "red")
-            continue
+        # generated_tokens = tokenizer.decode(ids)
+        # try:
+        #     generated = rise.RecExpr(generated_tokens)
+        # except EggshellException as e:
+        #     rank0print("COULD NOT PROPERLY PARSE GENERATED GUIDE.", "red")
+        #     rank0print(e, "red")
+        #     continue
 
-        try:
-            lowered = generated.lower()
-        except EggshellException as e:
-            generated.to_dot(f"{sample_id} generated (damaged)", str(path / f"{sample_id}_generated"))  # type: ignore
-            generated.to_dot(
-                f"{sample_id} generated (damaged)", str(path / f"{sample_id}_generated_t"), transparent=True
-            )
-            rank0print("COULD NOT PROPERLY PARSE GENERATED GUIDE.", "red")
-            rank0print(e, "red")
-            if verbose:
-                rank0print("BEST ATTEMPT:", "red")
-                rank0print(generated)
-                rank0print(f"Used {generated.used_tokens} out of {len(generated_tokens)}", "red")
-            continue
+        # try:
+        #     lowered = generated.lower()
+        # except EggshellException as e:
+        #     generated.to_dot(f"{sample_id} generated (damaged)", str(path / f"{sample_id}_generated"))  # type: ignore
+        #     generated.to_dot(
+        #         f"{sample_id} generated (damaged)", str(path / f"{sample_id}_generated_t"), transparent=True
+        #     )
+        #     rank0print("COULD NOT PROPERLY PARSE GENERATED GUIDE.", "red")
+        #     rank0print(e, "red")
+        #     if verbose:
+        #         rank0print("BEST ATTEMPT:", "red")
+        #         rank0print(generated)
+        #         rank0print(f"Used {generated.used_tokens} out of {len(generated_tokens)}", "red")
+        #     continue
 
-        distance = rise.first_miss_distance(middle, generated)
-        batch_distances.append(distance)
-        lowered.to_dot(f"{sample_id} generated", str(path / f"{sample_id}_generated"), marked_ids=distance.miss_ids())
-        lowered.to_dot(
-            f"{sample_id} generated",
-            str(path / f"{sample_id}_generated_t"),
-            marked_ids=distance.miss_ids(),
-            transparent=True,
-        )
-        batch_gen_triples.append(InferResult(triple.start, triple.target, triple.guide, str(lowered)))
+        # distance = rise.first_miss_distance(middle, generated)
+        # batch_distances.append(distance)
+        # lowered.to_dot(f"{sample_id} generated", str(path / f"{sample_id}_generated"), marked_ids=distance.miss_ids())
+        # lowered.to_dot(
+        #     f"{sample_id} generated",
+        #     str(path / f"{sample_id}_generated_t"),
+        #     marked_ids=distance.miss_ids(),
+        #     transparent=True,
+        # )
+        # batch_gen_triples.append(InferResult(triple.start, triple.target, triple.guide, str(lowered)))
 
-        if verbose:
-            rank0print("GENERATED:", "green")
-            rank0print(lowered)
+        # if verbose:
+        #     rank0print("GENERATED:", "green")
+        #     rank0print(lowered)
 
     return batch_distances, batch_gen_triples
 

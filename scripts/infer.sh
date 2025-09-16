@@ -4,5 +4,5 @@ uv run infer.py \
     --model-suffix "0" \
     --n-train-data 4096 \
     --n-eval-data 4096 \
-    --batch-size 1024 \
+    --batch-size 8 \
     --verbose

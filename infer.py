@@ -15,11 +15,10 @@ from tokenizers import Tokenizer
 from eggshell import FirstErrorDistance
 
 import toothless.inference as infer
-from toothless.utils import cleanup_process_group, rank0print, setup_process_group
+from toothless.utils import count_parameters, cleanup_process_group, rank0print, setup_process_group
 from toothless.collators import TripleCollator
 from toothless.data import TripleDataSet, Triple
 from toothless.model import DualTreeTransformer, generate_with_probabilities
-from toothless.utils import count_parameters
 from toothless.args import DataArgs, InferArgs, ModelArgs
 
 torch.set_float32_matmul_precision("high")
@@ -61,6 +60,7 @@ def fsdp_main(rank: int, world_size: int, infer_args: InferArgs, dataset: Triple
 
     model_state_dict = dcps.get_model_state_dict(model)
     dcp.load(state_dict=model_state_dict, checkpoint_id=infer_args.folder + f"/weights/{infer_args.model_suffix}")
+    dcps.set_model_state_dict(model, model_state_dict)
 
     model.eval()
 
