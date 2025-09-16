@@ -18,7 +18,6 @@ import toothless.inference as infer
 from toothless.utils import cleanup_process_group, rank0print, setup_process_group
 from toothless.collators import TripleCollator
 from toothless.data import TripleDataSet, Triple
-from toothless.tokenizer import build_tokenizer
 from toothless.model import DualTreeTransformer, generate_with_probabilities
 from toothless.utils import count_parameters
 from toothless.args import DataArgs, InferArgs, ModelArgs
@@ -32,7 +31,7 @@ def fsdp_main(rank: int, world_size: int, infer_args: InferArgs, dataset: Triple
     torch.cuda.set_device(rank)
 
     # Load Data
-    vocab = Tokenizer.from_file(str(Path(infer_args.folder) / "vocab.json"))
+    vocab_size = tokenizer.get_vocab_size()
     with open(Path(infer_args.folder) / "data_args.json", encoding="utf-8") as f:
         data_args = DataArgs.from_json(f.read())
     with open(Path(infer_args.folder) / "model_args.json", encoding="utf-8") as f:
@@ -45,7 +44,7 @@ def fsdp_main(rank: int, world_size: int, infer_args: InferArgs, dataset: Triple
 
     # Construct Base Model
 
-    model = DualTreeTransformer(model_args, len(vocab), len(vocab))
+    model = DualTreeTransformer(model_args, vocab_size, vocab_size)
     rank0print("Base model ready")
 
     # FSDP model and Mixed Precision Config
@@ -124,7 +123,7 @@ def _batch_infer(
     for i in tqdm(range(0, n, infer_args.batch_size), desc=f"Inference Batch (Batch Size {infer_args.batch_size})"):
         triples = [dataset[i] for i in range(i, i + infer_args.batch_size)]
         batch, _n_tokens = collator(triples)
-        result = generate_with_probabilities(model, batch["l_ids"], batch["r_ids"], tokenizer, data_args.max_len)
+        result = generate_with_probabilities(model, batch["start"], batch["target"], tokenizer, data_args.max_len)
 
         p = Path(eval_folder / "viz/asts/")
         p.mkdir(parents=True, exist_ok=True)
@@ -146,10 +145,10 @@ if __name__ == "__main__":
 
     dataset = TripleDataSet(data_args)
     print("Dataset ready")
-    tokenizer = build_tokenizer(dataset, data_args.tokenizer_samples)
+    tokenizer = Tokenizer.from_file(str(Path(infer_args.folder) / "tokenizer.json"))
     print("Tokenizer ready")
 
     world_size = torch.cuda.device_count()
 
-    mp.spawn(fsdp_main, args=(world_size, infer_args, dataset), nprocs=world_size, join=True)
+    mp.spawn(fsdp_main, args=(world_size, infer_args, dataset, tokenizer), nprocs=world_size, join=True)
     print("DONE")

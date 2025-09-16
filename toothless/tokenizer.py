@@ -5,7 +5,7 @@ from .data import TripleDataSet
 
 
 def build_tokenizer(dataset: TripleDataSet, n_samples: int) -> Tokenizer:
-    vocab_path = dataset.cache / "vocab.json"
+    vocab_path = dataset.cache / "tokenizer.json"
     if vocab_path.is_file():
         return Tokenizer.from_file(str(vocab_path))
 

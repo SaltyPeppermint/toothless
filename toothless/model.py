@@ -138,9 +138,7 @@ def create_padding_mask(input_ids: Tensor, pad_token_id: int = 0, device: torch.
     if device is None:
         device = input_ids.device
 
-    mask = (input_ids == pad_token_id).unsqueeze(1).unsqueeze(2)
-
-    return mask.to(device)
+    return (input_ids == pad_token_id).to(device)
 
 
 def generate_with_probabilities(
@@ -158,8 +156,8 @@ def generate_with_probabilities(
 
     Args:
         model: The VanillaDualTreeTransformer model
-        l_batch: First source sequences [batch_size, seq_len]
-        r_batch: Second source sequences [batch_size, seq_len]
+        start_batch: First source sequences [batch_size, seq_len]
+        target_batch: Second source sequences [batch_size, seq_len]
         max_len: Maximum generation length
         vocab: The used vocabulary
         temperature: Sampling temperature (1.0 = no change, <1.0 = more conservative, >1.0 = more random, 0.0 = no randomness)
@@ -287,8 +285,8 @@ def beam_search_with_probabilities(
 
     Args:
         model: The VanillaDualTreeTransformer model
-        l_batch: First source sequences [batch_size, seq_len]
-        r_batch: Second source sequences [batch_size, seq_len]
+        start_batch: First source sequences [batch_size, seq_len]
+        target_batch: Second source sequences [batch_size, seq_len]
         vocab: The used vocabulary
         beam_size: Number of beams to keep
         max_len: Maximum generation length

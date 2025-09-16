@@ -311,6 +311,7 @@ if __name__ == "__main__":
     dataset = TripleDataSet(args.data)
     print("Dataset ready")
     tokenizer = build_tokenizer(dataset, args.data.tokenizer_samples)
+    tokenizer.save(str(save_folder / "tokenizer.json"))
     print("Tokenizer ready")
 
     world_size = torch.cuda.device_count()
