@@ -11,12 +11,14 @@ import tyro
 from tqdm.auto import tqdm
 from tokenizers import Tokenizer
 
+
 from eggshell import FirstErrorDistance
 
 import toothless.inference as infer
 from toothless.utils import cleanup_process_group, rank0print, setup_process_group
-from toothless.collators import DictCollator
+from toothless.collators import TripleCollator
 from toothless.data import TripleDataSet, Triple
+from toothless.tokenizer import build_tokenizer
 from toothless.model import DualTreeTransformer, generate_with_probabilities
 from toothless.utils import count_parameters
 from toothless.args import DataArgs, InferArgs, ModelArgs
@@ -24,13 +26,10 @@ from toothless.args import DataArgs, InferArgs, ModelArgs
 torch.set_float32_matmul_precision("high")
 
 
-def fsdp_main(rank: int, world_size: int, infer_args: InferArgs, dataset: TripleDataSet):
+def fsdp_main(rank: int, world_size: int, infer_args: InferArgs, dataset: TripleDataSet, tokenizer: Tokenizer):
     setup_process_group(rank, world_size)
     rank0print("Distributed Network ready")
     torch.cuda.set_device(rank)
-
-    pad_token_id = dataset.tokenizer.token_to_id("<PAD>")
-    assert pad_token_id == 0
 
     # Load Data
     vocab = Tokenizer.from_file(str(Path(infer_args.folder) / "vocab.json"))
@@ -46,7 +45,7 @@ def fsdp_main(rank: int, world_size: int, infer_args: InferArgs, dataset: Triple
 
     # Construct Base Model
 
-    model = DualTreeTransformer(model_args, len(vocab), len(vocab), pad_token_id=pad_token_id)
+    model = DualTreeTransformer(model_args, len(vocab), len(vocab))
     rank0print("Base model ready")
 
     # FSDP model and Mixed Precision Config
@@ -73,7 +72,7 @@ def fsdp_main(rank: int, world_size: int, infer_args: InferArgs, dataset: Triple
 
     rank0print("FSDP Model/Generator loaded to GPU and ready")
 
-    collator = DictCollator(data_args.max_len, pad_token_id=pad_token_id)
+    collator = TripleCollator(data_args.max_len, tokenizer)
 
     # Running inference on dataset samples
     train_dataset, eval_dataset = torch.utils.data.random_split(
@@ -81,7 +80,7 @@ def fsdp_main(rank: int, world_size: int, infer_args: InferArgs, dataset: Triple
     )
 
     train_distances, train_gen_triples = _batch_infer(
-        data_args, infer_args, dataset.tokenizer, model, collator, train_dataset, "train", eval_folder
+        data_args, infer_args, tokenizer, model, collator, train_dataset, "train", eval_folder
     )
     with open(eval_folder / "train_gen_triples_vanilla.json", mode="w", encoding="utf-8") as f:
         f.write(infer.InferResult.list_to_json(train_gen_triples))
@@ -89,7 +88,7 @@ def fsdp_main(rank: int, world_size: int, infer_args: InferArgs, dataset: Triple
     infer.print_distance(train_distances, "TRAIN")
 
     eval_distances, eval_gen_triples = _batch_infer(
-        data_args, infer_args, dataset.tokenizer, model, collator, eval_dataset, "eval", eval_folder
+        data_args, infer_args, tokenizer, model, collator, eval_dataset, "eval", eval_folder
     )
     with open(eval_folder / "eval_gen_triples_vanilla.json", mode="w", encoding="utf-8") as f:
         f.write(infer.InferResult.list_to_json(eval_gen_triples))
@@ -104,7 +103,7 @@ def _batch_infer(
     infer_args: InferArgs,
     tokenizer: Tokenizer,
     model: FSDP,
-    collator: DictCollator,
+    collator: TripleCollator,
     dataset: Subset[Triple],
     ds_name: str,
     eval_folder: Path,
@@ -144,8 +143,13 @@ if __name__ == "__main__":
     with open(Path(infer_args.folder) / "data_args.json", encoding="utf-8") as f:
         data_args = DataArgs.from_json(f.read())
     assert isinstance(data_args, DataArgs)
+
     dataset = TripleDataSet(data_args)
+    print("Dataset ready")
+    tokenizer = build_tokenizer(dataset, data_args.tokenizer_samples)
+    print("Tokenizer ready")
 
     world_size = torch.cuda.device_count()
 
     mp.spawn(fsdp_main, args=(world_size, infer_args, dataset), nprocs=world_size, join=True)
+    print("DONE")

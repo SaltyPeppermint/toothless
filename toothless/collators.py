@@ -5,44 +5,43 @@ from torch import Tensor
 from torch.utils.data.distributed import DistributedSampler
 from torch.utils.data import DataLoader
 
+from tokenizers import Tokenizer
 
 from .data import TripleDataSet, Triple
 from .args import DataArgs
 
 
-class DictCollator:
-    def __init__(self, max_len: int, pad_token_id: int = 0):
-        self.pad_token_id = pad_token_id
+class TripleCollator:
+    def __init__(self, max_len: int, tokenizer: Tokenizer):
+        assert tokenizer.token_to_id("[PAD]") == 0
         self.max_len = max_len
+        self.tokenizer = tokenizer
 
     def __call__(self, triples: Sequence[Triple]) -> tuple[dict[str, Tensor], int]:
         assert type(triples[0]) is Triple
 
-        l_batch = []
-        r_batch = []
-        tgt_batch = []
-
         for triple in triples:
-            l_batch.append(triple.l_ids)
-            r_batch.append(triple.r_ids)
-            tgt_batch.append(triple.tgt_ids)
+            assert max(len(triple.start), len(triple.guide), len(triple.target)) <= self.max_len
 
-            assert max(len(triple.l_ids), len(triple.r_ids), len(triple.tgt_ids)) <= self.max_len
+        start = self.tokenizer.encode_batch([t.start for t in triples])
+        guide = self.tokenizer.encode_batch([t.guide for t in triples])
+        target = self.tokenizer.encode_batch([t.target for t in triples])
 
         batch = {
-            "tgt_ids": torch.nested.nested_tensor(tgt_batch, layout=torch.jagged).to_padded_tensor(self.pad_token_id),
-            "l_ids": torch.nested.nested_tensor(l_batch, layout=torch.jagged).to_padded_tensor(self.pad_token_id),
-            "r_ids": torch.nested.nested_tensor(r_batch, layout=torch.jagged).to_padded_tensor(self.pad_token_id),
+            "start": torch.tensor([i.ids for i in start], dtype=torch.long),
+            "guide": torch.tensor([i.ids for i in guide], dtype=torch.long),
+            "guide_mask": torch.tensor([i.attention_mask for i in guide], dtype=torch.bool),
+            "target": torch.tensor([i.ids for i in target], dtype=torch.long),
         }
 
-        return batch, sum([len(seq) for seq in tgt_batch])
+        return batch, sum([len(seq.ids) for seq in target])
 
 
 def mk_loaders(
     rank: int,
     world_size: int,
     dataset: TripleDataSet,
-    collator: DictCollator,
+    collator: TripleCollator,
     data_args: DataArgs,
     batch_size: int,
     shuffle: bool = True,
@@ -57,9 +56,6 @@ def mk_loaders(
     # Create samplers
     train_sampler = DistributedSampler(train_dataset, rank=rank, num_replicas=world_size, shuffle=shuffle)
     eval_sampler = DistributedSampler(eval_dataset, rank=rank, num_replicas=world_size)
-
-    pad_id = dataset.tokenizer.token_to_id("<PAD>")
-    assert pad_id == 0
 
     # Create the dataloaders
     train_dataloader = DataLoader(

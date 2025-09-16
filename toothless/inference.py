@@ -35,21 +35,21 @@ def batch_process_result(
     for i, (triple, ids, token_probs) in enumerate(zip(triples, batch_ids, batch_probs)):
         sample_id = i + id_offset
 
-        rise.RecExpr(triple.l_str).to_dot(f"{sample_id} left", str(path / f"{sample_id}_left"))
-        middle = rise.RecExpr(triple.tgt_str)
+        rise.RecExpr(triple.start).to_dot(f"{sample_id} left", str(path / f"{sample_id}_left"))
+        middle = rise.RecExpr(triple.guide)
         middle.to_dot(f"{sample_id} middle", str(path / f"{sample_id}_middle"))
         middle.to_dot(f"{sample_id} middle", str(path / f"{sample_id}_middle_t"), transparent=True)
-        rise.RecExpr(triple.r_str).to_dot(f"{sample_id} right", str(path / f"{sample_id}_right"))
+        rise.RecExpr(triple.target).to_dot(f"{sample_id} right", str(path / f"{sample_id}_right"))
 
         if verbose:
             rank0print("----------")
             rank0print(f"Sample {sample_id}", "blue")
             rank0print("LEFT:", "green")
-            rank0print(triple.l_str)
+            rank0print(triple.start)
             rank0print("MIDDLE:", "green")
-            rank0print(triple.tgt_str)
+            rank0print(triple.guide)
             rank0print("RIGHT:", "green")
-            rank0print(triple.r_str)
+            rank0print(triple.target)
 
         raw_generated_tokens = tokenizer.decode(ids, skip_special_tokens=False)
         if verbose:
@@ -88,7 +88,7 @@ def batch_process_result(
             marked_ids=distance.miss_ids(),
             transparent=True,
         )
-        batch_gen_triples.append(InferResult(triple.l_str, triple.r_str, triple.tgt_str, str(lowered)))
+        batch_gen_triples.append(InferResult(triple.start, triple.target, triple.guide, str(lowered)))
 
         if verbose:
             rank0print("GENERATED:", "green")
