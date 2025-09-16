@@ -84,15 +84,18 @@ class DualTreeTransformer(nn.Module):
         return self.output_proj(self.output_norm(output))
 
     @torch.compile(fullgraph=True)
-    def forward(self, guide_ids: Tensor, start_ids: Tensor, target_ids: Tensor):
+    def forward(
+        self,
+        guide_ids: Tensor,
+        guide_mask: Tensor,
+        start_ids: Tensor,
+        start_mask: Tensor,
+        target_ids: Tensor,
+        target_mask: Tensor,
+    ):
         # Encode both source sequences
-        start_mask = create_padding_mask(start_ids, pad_token_id=self.pad_token_id)
         start_mem = self.start_encode(start_ids, start_mask)
-
-        target_mask = create_padding_mask(target_ids, pad_token_id=self.pad_token_id)
         target_mem = self.target_encode(target_ids, target_mask)
-
-        guide_mask = create_padding_mask(guide_ids, pad_token_id=self.pad_token_id)
         # Decode and project to vocabulary
         return self.decode(guide_ids, guide_mask, start_mem, start_mask, target_mem, target_mask)
 

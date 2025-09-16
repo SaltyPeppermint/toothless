@@ -14,6 +14,7 @@ from .args import DataArgs
 class TripleCollator:
     def __init__(self, max_len: int, tokenizer: Tokenizer):
         assert tokenizer.token_to_id("[PAD]") == 0
+        tokenizer.enable_padding(length=max_len)
         self.max_len = max_len
         self.tokenizer = tokenizer
 

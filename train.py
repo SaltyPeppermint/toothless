@@ -162,15 +162,21 @@ def profil_model(rank: int, model: FSDP, dataloader: DataLoader[Triple], criteri
 
         # Move batch to device
         l_ids, tgt_ids, r_ids = batch["start"].to(rank), batch["guide"].to(rank), batch["target"].to(rank)
+        l_mask, tgt_mask, r_mask = (
+            batch["start_mask"].to(rank),
+            batch["guide_mask"].to(rank),
+            batch["target_mask"].to(rank),
+        )
 
         # Create input and target for teacher forcing
         tgt_input = tgt_ids[:, :-1]  # All tokens except last
+        tgt_mask = tgt_mask[:, :-1]
         tgt_output = tgt_ids[:, 1:]  # All tokens except first (shifted by 1)
 
         # Forward pass
         with profile(activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA], record_shapes=True) as prof:
-            _ = model(tgt_input, l_ids, r_ids)
-            logits = model(tgt_input, l_ids, r_ids)
+            _ = model(tgt_input, tgt_mask, l_ids, l_mask, r_ids, r_mask)
+            logits = model(tgt_input, tgt_mask, l_ids, l_mask, r_ids, r_mask)
             loss = criterion(logits.reshape(-1, logits.shape[-1]), tgt_output.reshape(-1))
 
             # Backwards pass
@@ -197,15 +203,20 @@ def train(
     for batch_idx, (batch, num_tokens) in enumerate(
         tqdm(dataloader, desc=f"Training Epoch {epoch + 1}/{train_args.epochs}")
     ):
-        # Move batch to device
         l_ids, tgt_ids, r_ids = batch["start"].to(rank), batch["guide"].to(rank), batch["target"].to(rank)
+        l_mask, tgt_mask, r_mask = (
+            batch["start_mask"].to(rank),
+            batch["guide_mask"].to(rank),
+            batch["target_mask"].to(rank),
+        )
 
         # Create input and target for teacher forcing
         tgt_input = tgt_ids[:, :-1]  # All tokens except last
+        tgt_mask = tgt_mask[:, :-1]
         tgt_output = tgt_ids[:, 1:]  # All tokens except first (shifted by 1)
 
         # Forward pass
-        logits = model(tgt_input, l_ids, r_ids)
+        logits = model(tgt_input, tgt_mask, l_ids, l_mask, r_ids, r_mask)
         loss = criterion(logits.reshape(-1, logits.shape[-1]), tgt_output.reshape(-1))
 
         # Backwards pass
@@ -252,15 +263,21 @@ def evalulate(
     ddp_loss = torch.zeros(2).to(rank)
     for batch, _ in tqdm(dataloader, desc=f"Evaluating Epoch {epoch + 1}/{max_epochs}"):
         # Move batch to device
-        tgt_ids, l_ids, r_ids = batch["tgt_ids"].to(rank), batch["l_ids"].to(rank), batch["r_ids"].to(rank)
+        l_ids, tgt_ids, r_ids = batch["start"].to(rank), batch["guide"].to(rank), batch["target"].to(rank)
+        l_mask, tgt_mask, r_mask = (
+            batch["start_mask"].to(rank),
+            batch["guide_mask"].to(rank),
+            batch["target_mask"].to(rank),
+        )
 
         # Create input and target for teacher forcing
         tgt_input = tgt_ids[:, :-1]  # All tokens except last
+        tgt_mask = tgt_mask[:, :-1]
         tgt_output = tgt_ids[:, 1:]  # All tokens except first (shifted by 1)
 
         # Forward pass
         with torch.no_grad():
-            logits = model(tgt_input, l_ids, r_ids)
+            logits = model(tgt_input, tgt_mask, l_ids, l_mask, r_ids, r_mask)
             loss = criterion(logits.reshape(-1, logits.shape[-1]), tgt_output.reshape(-1))
             ddp_loss[0] += loss
             ddp_loss[1] += len(batch)

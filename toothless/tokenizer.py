@@ -28,6 +28,5 @@ def build_tokenizer(dataset: TripleDataSet, n_samples: int) -> Tokenizer:
     trainer = trainers.BpeTrainer(vocab_size=25000, special_tokens=["[PAD]", "[CLS]", "[SEP]"])  # pyright: ignore[reportCallIssue]
 
     tokenizer.train_from_iterator(dataset.get_tokenizer_training_corpus(n_samples), trainer=trainer, length=n_samples)
-    tokenizer.enable_padding()
     tokenizer.save(str(vocab_path))
     return tokenizer
