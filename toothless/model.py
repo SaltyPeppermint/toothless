@@ -42,27 +42,35 @@ class DualTreeTransformer(nn.Module):
         nn.init.normal_(self.tgt_embedding.weight, mean=0.0, std=self.conf.d_model**-0.5)
 
     @torch.compile(fullgraph=True)
-    def start_encode(self, start_ids: Tensor):
+    def start_encode(self, start_ids: Tensor, start_mask: Tensor):
         # Embeddings
         start_mem = self.l_embedding(start_ids) * math.sqrt(self.conf.d_model)
 
         # Compute each RoPE encoder layer
         for layer in self.start_encoder:
-            start_mem = layer(start_mem)
+            start_mem = layer(start_mem, start_mask)
         return start_mem
 
     @torch.compile(fullgraph=True)
-    def target_encode(self, target_ids: Tensor):
+    def target_encode(self, target_ids: Tensor, target_mask: Tensor):
         # Embeddings
         target_mem = self.target_embedding(target_ids) * math.sqrt(self.conf.d_model)
 
         # Compute each RoPE encoder layer
         for layer in self.target_encoder:
-            target_mem = layer(target_mem)
+            target_mem = layer(target_mem, target_mask)
         return target_mem
 
     @torch.compile(fullgraph=True)
-    def decode(self, guide_ids: Tensor, guide_mask: Tensor, start_mem: Tensor, target_mem: Tensor):
+    def decode(
+        self,
+        guide_ids: Tensor,
+        guide_mask: Tensor,
+        start_mem: Tensor,
+        start_mask: Tensor,
+        target_mem: Tensor,
+        target_mask: Tensor,
+    ):
         """Decode target sequence using fused encoder memories."""
 
         # Target embeddings
@@ -70,19 +78,27 @@ class DualTreeTransformer(nn.Module):
 
         # Compute each RoPE decoder layer
         for layer in self.decoder:
-            output = layer(output, start_mem, target_mem, guide_mask)
+            output = layer(output, guide_mask, start_mem, start_mask, target_mem, target_mask)
 
         return self.output_proj(self.output_norm(output))
 
     @torch.compile(fullgraph=True)
-    def forward(self, guide_ids: Tensor, guide_mask: Tensor, start_ids: Tensor, target_ids: Tensor):
+    def forward(
+        self,
+        guide_ids: Tensor,
+        guide_mask: Tensor,
+        start_ids: Tensor,
+        start_mask: Tensor,
+        target_ids: Tensor,
+        target_mask: Tensor,
+    ):
         # Encode both source sequences
-        start_mem = self.start_encode(start_ids)
+        start_mem = self.start_encode(start_ids, start_mask)
 
-        target_mem = self.target_encode(target_ids)
+        target_mem = self.target_encode(target_ids, target_mask)
 
         # Decode and project to vocabulary
-        return self.decode(guide_ids, guide_mask, start_mem, target_mem)
+        return self.decode(guide_ids, guide_mask, start_mem, start_mask, target_mem, target_mask)
 
 
 @dataclass
@@ -163,12 +179,14 @@ def generate_with_probabilities(
     end_token = tokenizer.token_to_id("[SEP]")
 
     start_batch = start_batch.to(device)
+    start_mask = create_padding_mask(start_batch, pad_token_id=pad_token)
     target_batch = target_batch.to(device)
+    target_mask = create_padding_mask(start_batch, pad_token_id=pad_token)
 
     # Encode sources once
     with torch.no_grad():
-        start_mem = model.start_encode(start_batch)
-        target_mem = model.target_encode(target_batch)
+        start_mem = model.start_encode(start_batch, start_mask)
+        target_mem = model.target_encode(target_batch, target_mask)
 
     # Initialize generation with all start tokens
     generated_tokens = torch.full((batch_size, 1), start_token, device=device, dtype=torch.long)
@@ -181,7 +199,7 @@ def generate_with_probabilities(
         with torch.no_grad():
             tgt_mask = create_padding_mask(generated_tokens, pad_token_id=pad_token)
             # Get logits for current sequence
-            logits = model.decode(generated_tokens, tgt_mask, start_mem, target_mem)
+            logits = model.decode(generated_tokens, tgt_mask, start_mem, start_mask, target_mem, target_mask)
 
             next_token_logits = logits[:, -1, :]  # Last position logits
 
@@ -258,8 +276,8 @@ def generate_with_probabilities(
 
 def beam_search_with_probabilities(
     model: DualTreeTransformer | FSDP,
-    l_batch: Tensor,
-    r_batch: Tensor,
+    start_batch: Tensor,
+    target_batch: Tensor,
     tokenizer: Tokenizer,
     max_len: int,
     beam_size: int = 3,
@@ -282,19 +300,21 @@ def beam_search_with_probabilities(
     """
     model.eval()
     device = next(model.parameters()).device
-    batch_size = l_batch.shape[0]
+    batch_size = start_batch.shape[0]
 
     pad_token = tokenizer.token_to_id("[PAD]")
     start_token = tokenizer.token_to_id("[CLS]")
     end_token = tokenizer.token_to_id("[SEP]")
 
-    l_batch = l_batch.to(device)
-    r_batch = r_batch.to(device)
+    start_batch = start_batch.to(device)
+    start_mask = create_padding_mask(start_batch, pad_token_id=pad_token)
+    target_batch = target_batch.to(device)
+    target_mask = create_padding_mask(start_batch, pad_token_id=pad_token)
 
     # Encode sources once
     with torch.no_grad():
-        start_mem = model.start_encode(l_batch)
-        target_mem = model.target_encode(r_batch)
+        start_mem = model.start_encode(start_batch, start_mask)
+        target_mem = model.target_encode(target_batch, target_mask)
 
     # Initialize beams for each batch element
     beams = torch.full((batch_size, beam_size, 1), start_token, device=device, dtype=torch.long)
@@ -320,7 +340,9 @@ def beam_search_with_probabilities(
 
         with torch.no_grad():
             tgt_mask = create_padding_mask(current_beams, pad_token_id=pad_token)
-            logits = model.decode(current_beams, tgt_mask, start_expanded_memory, target_expanded_memory)
+            logits = model.decode(
+                current_beams, tgt_mask, start_expanded_memory, start_mask, target_expanded_memory, target_mask
+            )
             log_probs = torch.log_softmax(logits[:, -1, :], dim=-1)
             probs = torch.softmax(logits[:, -1, :], dim=-1)
 

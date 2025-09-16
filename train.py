@@ -161,17 +161,19 @@ def profil_model(rank: int, model: FSDP, dataloader: DataLoader[Triple], criteri
         batch, _ = next(dl_iter)
 
         # Move batch to device
-        l_ids, r_ids = batch["start"].to(rank), batch["target"].to(rank)
-        tgt_ids, tgt_mask = batch["guide"].to(rank), batch["guide_mask"].to(rank)
+        l_ids, l_mask = (batch["start"].to(rank), batch["start_mask"].to(rank))
+        tgt_ids, tgt_mask = (batch["guide"].to(rank), batch["guide_mask"].to(rank))
+        r_ids, r_mask = (batch["target"].to(rank), batch["target_mask"].to(rank))
 
         # Create input and target for teacher forcing
         tgt_input = tgt_ids[:, :-1]  # All tokens except last
+        tgt_mask = tgt_mask[:, :-1]
         tgt_output = tgt_ids[:, 1:]  # All tokens except first (shifted by 1)
 
         # Forward pass
         with profile(activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA], record_shapes=True) as prof:
             _ = model(tgt_input, l_ids, r_ids)
-            logits = model(tgt_input, tgt_mask, l_ids, r_ids)
+            logits = model(tgt_input, tgt_mask, l_ids, l_mask, r_ids, r_mask)
             loss = criterion(logits.reshape(-1, logits.shape[-1]), tgt_output.reshape(-1))
 
             # Backwards pass
@@ -199,15 +201,17 @@ def train(
         tqdm(dataloader, desc=f"Training Epoch {epoch + 1}/{train_args.epochs}")
     ):
         # Move batch to device
-        l_ids, r_ids = batch["start"].to(rank), batch["target"].to(rank)
-        tgt_ids, tgt_mask = batch["guide"].to(rank), batch["guide_mask"].to(rank)
+        l_ids, l_mask = (batch["start"].to(rank), batch["start_mask"].to(rank))
+        tgt_ids, tgt_mask = (batch["guide"].to(rank), batch["guide_mask"].to(rank))
+        r_ids, r_mask = (batch["target"].to(rank), batch["target_mask"].to(rank))
 
         # Create input and target for teacher forcing
         tgt_input = tgt_ids[:, :-1]  # All tokens except last
+        tgt_mask = tgt_mask[:, :-1]
         tgt_output = tgt_ids[:, 1:]  # All tokens except first (shifted by 1)
 
         # Forward pass
-        logits = model(tgt_input, tgt_mask, l_ids, r_ids)
+        logits = model(tgt_input, tgt_mask, l_ids, l_mask, r_ids, r_mask)
         loss = criterion(logits.reshape(-1, logits.shape[-1]), tgt_output.reshape(-1))
 
         # Backwards pass

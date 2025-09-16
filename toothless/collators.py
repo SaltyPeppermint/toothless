@@ -20,18 +20,24 @@ class TripleCollator:
     def __call__(self, triples: Sequence[Triple]) -> tuple[dict[str, Tensor], int]:
         assert type(triples[0]) is Triple
 
-        for triple in triples:
-            assert max(len(triple.start), len(triple.guide), len(triple.target)) <= self.max_len
-
         start = self.tokenizer.encode_batch([t.start for t in triples])
         guide = self.tokenizer.encode_batch([t.guide for t in triples])
         target = self.tokenizer.encode_batch([t.target for t in triples])
 
+        for s, g, t in zip(start, guide, target):
+            if max(len(s.ids), len(g.ids), len(t.ids)) > self.max_len:
+                print(s)
+                print(g)
+                print(t)
+                raise ValueError("too long")
+
         batch = {
             "start": torch.tensor([i.ids for i in start], dtype=torch.long),
+            "start_mask": torch.tensor([i.attention_mask for i in guide], dtype=torch.bool),
             "guide": torch.tensor([i.ids for i in guide], dtype=torch.long),
             "guide_mask": torch.tensor([i.attention_mask for i in guide], dtype=torch.bool),
             "target": torch.tensor([i.ids for i in target], dtype=torch.long),
+            "target_mask": torch.tensor([i.attention_mask for i in guide], dtype=torch.bool),
         }
 
         return batch, sum([len(seq.ids) for seq in target])

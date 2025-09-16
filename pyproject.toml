@@ -5,22 +5,22 @@ description = "ML for EGraphs"
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
-    "matplotlib>=3",
-    "tensorboard>=2",
-    "torch>=2",
-    "tqdm>=4",
-    "scikit-learn>=1.5",
-    "polars>=1",
-    "python-dotenv>=1",
-    "torch-tb-profiler>=0.4",
-    "standard-imghdr>=3",
-    "prettytable>=3",
-    "dataclass-wizard>=0.35",
-    "termcolor>=3",
-    "tyro>=0.9",
-    "plotly>=6",
-    "eggshell",
-    "tokenizers>=0.22.0",
+  "matplotlib>=3",
+  "tensorboard>=2",
+  "torch>=2",
+  "tqdm>=4",
+  "scikit-learn>=1.5",
+  "polars>=1",
+  "python-dotenv>=1",
+  "torch-tb-profiler>=0.4",
+  "standard-imghdr>=3",
+  "prettytable>=3",
+  "dataclass-wizard>=0.35",
+  "termcolor>=3",
+  "tyro>=0.9",
+  "plotly>=6",
+  "eggshell",
+  "tokenizers>=0.22.0",
 ]
 # "transformers>=4.48.2",
 # "tokenizers>=0.21.0",
@@ -31,7 +31,6 @@ line-length = 120
 
 [tool.uv.sources]
 eggshell = [
-  { path = "cache/eggshell-0.0.1-cp312-abi3-manylinux_2_39_x86_64.whl", marker = "sys_platform == 'linux'"},
-  { path = "cache/eggshell-0.0.1-cp312-abi3-macosx_11_0_arm64.whl", marker = "sys_platform == 'darwin'"},
+  { path = "cache/eggshell-0.0.1-cp312-abi3-linux_x86_64.whl", marker = "sys_platform == 'linux'" },
+  { path = "cache/eggshell-0.0.1-cp312-abi3-macosx_11_0_arm64.whl", marker = "sys_platform == 'darwin'" },
 ]
-

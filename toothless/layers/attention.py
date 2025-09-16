@@ -112,6 +112,7 @@ class PackedRoPEMHA(nn.Module):
         head_dim: int,
         dropout: float = 0.0,
         bias: bool = True,
+        is_causal: bool = False,
         device: torch.device | None = None,
         dtype: torch.dtype | None = None,
     ):
@@ -120,6 +121,7 @@ class PackedRoPEMHA(nn.Module):
         self.n_heads = n_heads
         self.dropout = dropout
         self.bias = bias
+        self.is_causal = is_causal
         self.head_dim = head_dim
         self.total_head_dim = head_dim * n_heads
 
@@ -127,14 +129,7 @@ class PackedRoPEMHA(nn.Module):
         self.rope = RotaryPositionalEncoding(self.head_dim)
         self.out_proj = nn.Linear(self.total_head_dim, d_model, bias=bias, **factory_kwargs)
 
-    def forward(
-        self,
-        query: torch.Tensor,
-        key: torch.Tensor,
-        value: torch.Tensor,
-        padding_mask: Tensor,
-        is_causal: bool = False,
-    ) -> torch.Tensor:
+    def forward(self, query: torch.Tensor, key: torch.Tensor, value: torch.Tensor, attn_mask: Tensor) -> torch.Tensor:
         """
         Forward pass; runs the following process:
             1. Apply input projection
@@ -191,17 +186,10 @@ class PackedRoPEMHA(nn.Module):
         # [batch, kv_seq_len, n_heads, head_dim] -> [batch, n_heads, kv_seq_len, head_dim]
         value = value.transpose(1, 2)
 
-        if is_causal:
-            L, S = query.shape[-2], key.shape[-2]
-            causal_mask = torch.ones(L, S, dtype=torch.bool, device=padding_mask.device).tril(diagonal=0)
-            attn_mask = padding_mask | causal_mask
-        else:
-            attn_mask = padding_mask
-
         # Step 5. Run SDPA
         # [batch, n_heads, q_seq_len, head_dim]
         attn_output = F.scaled_dot_product_attention(
-            query, key, value, dropout_p=self.dropout, is_causal=is_causal, attn_mask=attn_mask
+            query, key, value, dropout_p=self.dropout, attn_mask=attn_mask, is_causal=self.is_causal
         )
         # [batch, n_heads, q_seq_len, head_dim] -> [batch, q_seq_len, n_heads, head_dim] -> [batch, q_seq_len, total_head_dim]
         attn_output = attn_output.transpose(1, 2).flatten(-2)

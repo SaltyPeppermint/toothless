@@ -21,7 +21,7 @@ class TransformerEncoderLayer(nn.Module):
     def forward(self, src: Tensor, padding_mask: Tensor):
         # Self-attention with residual connection
         normed_src = self.attn_norm(src)
-        self_attn_out = self.self_attn(normed_src, normed_src, normed_src, padding_mask, is_causal=False)
+        self_attn_out = self.self_attn(normed_src, normed_src, normed_src, padding_mask)
         src = src + self_attn_out
         # Feed forward with residual connection
         src = src + self.feed_forward(self.ff_norm(src))

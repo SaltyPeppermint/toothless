@@ -11,7 +11,7 @@ class TransformerDecoderLayer(nn.Module):
         factory_kwargs = {"device": device, "dtype": dtype}
         super().__init__()
         self.self_attn = PackedRoPEMHA(
-            conf.d_model, conf.n_heads, conf.head_dim, dropout=conf.dropout, **factory_kwargs
+            conf.d_model, conf.n_heads, conf.head_dim, dropout=conf.dropout, is_causal=True, **factory_kwargs
         )
         self.self_attn_norm = nn.RMSNorm(conf.d_model, **factory_kwargs)
 
@@ -29,28 +29,22 @@ class TransformerDecoderLayer(nn.Module):
         self.ff_norm = nn.RMSNorm(conf.d_model, **factory_kwargs)
 
     def forward(
-        self,
-        tgt: Tensor,
-        l_mem: Tensor,
-        r_mem: Tensor,
-        tgt_padding_mask: Tensor,
-        l_padding_mask: Tensor,
-        r_padding_mask: Tensor,
+        self, tgt: Tensor, tgt_mask: Tensor, l_mem: Tensor, l_mask: Tensor, r_mem: Tensor, r_mask: Tensor
     ) -> Tensor:
         # Self attention
         normed_tgt = self.self_attn_norm(tgt)
-        attn_out = self.self_attn(normed_tgt, normed_tgt, normed_tgt, tgt_padding_mask, is_causal=True)
+        attn_out = self.self_attn(normed_tgt, normed_tgt, normed_tgt, tgt_mask)
         tgt = tgt + attn_out
 
         # Left Memory attention
         normed_memory = self.l_cross_attn_norm(l_mem)
         normed_tgt = self.l_cross_attn_norm(tgt)
-        l_cross_attn_out = self.l_cross_attn(normed_tgt, normed_memory, normed_memory, l_padding_mask, is_causal=False)
+        l_cross_attn_out = self.l_cross_attn(normed_tgt, normed_memory, normed_memory, l_mask)
 
         # Right Memory attention
         normed_memory = self.r_cross_attn_norm(r_mem)
         normed_tgt = self.r_cross_attn_norm(tgt)
-        r_cross_attn_out = self.l_cross_attn(normed_tgt, normed_memory, normed_memory, r_padding_mask, is_causal=False)
+        r_cross_attn_out = self.l_cross_attn(normed_tgt, normed_memory, normed_memory, r_mask)
 
         tgt = tgt + l_cross_attn_out + r_cross_attn_out
 
