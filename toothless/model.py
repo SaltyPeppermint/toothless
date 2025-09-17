@@ -80,20 +80,14 @@ class DualTransformer(nn.Module):
         return self.output_proj(self.output_norm(output))
 
     @torch.compile(fullgraph=True)
-    def forward(
-        self,
-        guide_ids: Tensor,
-        guide_mask: Tensor,
-        start_ids: Tensor,
-        start_mask: Tensor,
-        target_ids: Tensor,
-        target_mask: Tensor,
-    ):
+    def forward(self, batch: dict[str, Tensor]):
         # Encode both source sequences
-        start_mem = self.start_encode(start_ids, start_mask)
-        target_mem = self.target_encode(target_ids, target_mask)
+        start_mem = self.start_encode(batch["start_ids"], batch["start_mask"])
+        target_mem = self.target_encode(batch["target_ids"], batch["target_mask"])
         # Decode and project to vocabulary
-        return self.decode(guide_ids, guide_mask, start_mem, start_mask, target_mem, target_mask)
+        return self.decode(
+            batch["guide_ids"], batch["guide_mask"], start_mem, batch["start_mask"], target_mem, batch["target_mask"]
+        )
 
 
 class DecoderOnly(nn.Module):

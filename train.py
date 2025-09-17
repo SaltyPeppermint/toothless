@@ -149,44 +149,40 @@ def fsdp_main(rank: int, world_size: int, args: FullArgs, dataset: TripleDataSet
     cleanup_process_group()
 
 
-def profil_model(rank: int, model: FSDP, dataloader: DataLoader[Triple], criterion: CrossEntropyLoss):
+def profil_model(
+    rank: int,
+    model: FSDP,
+    dataloader: DataLoader[Triple],
+    criterion: CrossEntropyLoss,
+    writer: SummaryWriter | None = None,
+):
     model.train()
     dl_iter = iter(dataloader)
+    batch = next(dl_iter)
 
-    for batch_idx in tqdm(range(2), desc="Profiling... "):
-        batch = next(dl_iter)
+    # Move batch to device
+    batch = {k: v.to(rank) for k, v in batch.items()}
 
-        # Move batch to device
-        b = {k: v.to(rank) for k, v in batch.items()}
+    if writer is not None:
+        writer.add_graph(model, batch)
 
-        # Forward pass
-        with profile(activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA], record_shapes=True) as prof:
-            _ = model(
-                b["guide_ids"],
-                b["guide_mask"],
-                b["start_ids"],
-                b["start_mask"],
-                b["target_ids"],
-                b["target_mask"],
-            )
-            logits = model(
-                b["guide_ids"],
-                b["guide_mask"],
-                b["start_ids"],
-                b["start_mask"],
-                b["target_ids"],
-                b["target_mask"],
-            )
-            # Teacher forcing and Flatten for cross entropy
-            shifted_logits = logits[:, :-1, :].reshape(-1, logits.shape[2])  # Remove last prediction
-            shifted_labels = b["guide_ids"][:, 1:].reshape(-1)  # Remove first token (BOS)
+    logits = model(batch)
+    # Teacher forcing and Flatten for cross entropy
+    shifted_logits = logits[:, :-1, :].reshape(-1, logits.shape[2])  # Remove last prediction
+    shifted_labels = batch["guide_ids"][:, 1:].reshape(-1)  # Remove first token (BOS)
+    loss = criterion(shifted_logits, shifted_labels)
+    loss.backward()
 
-            loss = criterion(shifted_logits, shifted_labels)
+    # Forward pass
+    with profile(activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA], record_shapes=True) as prof:
+        logits = model(batch)
+        # Teacher forcing and Flatten for cross entropy
+        shifted_logits = logits[:, :-1, :].reshape(-1, logits.shape[2])  # Remove last prediction
+        shifted_labels = batch["guide_ids"][:, 1:].reshape(-1)  # Remove first token (BOS)
+        loss = criterion(shifted_logits, shifted_labels)
+        loss.backward()
 
-            # Backwards pass
-            loss.backward()
-
-        prof.export_chrome_trace(f"trace{batch_idx}.json")
+        prof.export_chrome_trace("trace.json")
 
 
 def train(
@@ -206,21 +202,14 @@ def train(
 
     for batch_idx, batch in enumerate(tqdm(dataloader, desc=f"Training Epoch {epoch + 1}/{train_args.epochs}")):
         num_tokens = sum([len(seq) for seq in batch["guide_ids"]])
-        b = {k: v.to(rank) for k, v in batch.items()}
+        batch = {k: v.to(rank) for k, v in batch.items()}
 
         # Forward pass
-        logits = model(
-            b["guide_ids"],
-            b["guide_mask"],
-            b["start_ids"],
-            b["start_mask"],
-            b["target_ids"],
-            b["target_mask"],
-        )
+        logits = model(batch)
 
         # Teacher forcing and Flatten for cross entropy
         shifted_logits = logits[:, :-1, :].reshape(-1, logits.shape[2])  # Remove last prediction
-        shifted_labels = b["guide_ids"][:, 1:].reshape(-1)  # Remove first token (BOS)
+        shifted_labels = batch["guide_ids"][:, 1:].reshape(-1)  # Remove first token (BOS)
 
         loss = criterion(shifted_logits, shifted_labels)
 
@@ -268,22 +257,15 @@ def evalulate(
     ddp_loss = torch.zeros(2).to(rank)
     for batch in tqdm(dataloader, desc=f"Evaluating Epoch {epoch + 1}/{max_epochs}"):
         # Move batch to device
-        b = {k: v.to(rank) for k, v in batch.items()}
+        batch = {k: v.to(rank) for k, v in batch.items()}
 
         # Forward pass
         with torch.no_grad():
-            logits = model(
-                b["guide_ids"],
-                b["guide_mask"],
-                b["start_ids"],
-                b["start_mask"],
-                b["target_ids"],
-                b["target_mask"],
-            )
+            logits = model(batch)
 
             # Teacher forcing and Flatten for cross entropy
             shifted_logits = logits[:, :-1, :].reshape(-1, logits.shape[2])  # Remove last prediction
-            shifted_labels = b["guide_ids"][:, 1:].reshape(-1)  # Remove first token (BOS)
+            shifted_labels = batch["guide_ids"][:, 1:].reshape(-1)  # Remove first token (BOS)
 
             loss = criterion(shifted_logits, shifted_labels)
             ddp_loss[0] += loss
