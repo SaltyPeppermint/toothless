@@ -198,7 +198,7 @@ class PackedRoPEMHA(nn.Module):
             L, S = query.shape[-2], key.shape[-2]
             # Create ad-hoc causal mask
             causal_mask = torch.ones(L, S, dtype=torch.bool, device=padding_mask.device).tril()
-            attn_mask = padding_mask | causal_mask
+            attn_mask = padding_mask & causal_mask
         else:
             attn_mask = padding_mask
 
