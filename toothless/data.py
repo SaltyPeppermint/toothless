@@ -41,15 +41,17 @@ class TripleDataSet(Dataset[Triple]):
         self.n_samples = conf.n_samples
         self.max_len = conf.max_len
 
-        self.tokenizer = _build_tokenizer(self.index_table, self.cache, conf.tokenizer_samples)
+        self.tokenizer_path = self.cache / "tokenizer.json"
+        self.tokenizer = _build_tokenizer(self.index_table, self.tokenizer_path, conf.tokenizer_samples)
+        assert self.tokenizer.token_to_id("[PAD]") == 0
+        assert self.tokenizer.token_to_id("[CLS]") == 1
+        assert self.tokenizer.token_to_id("[SEP]") == 2
+        self.tokenizer.save(str(self.tokenizer_path))
 
         self.tokenizer.enable_padding(length=self.max_len)
         self.pad_token_id = self.tokenizer.token_to_id("[PAD]")
         self.bos_token_id = self.tokenizer.token_to_id("[CLS]")
         self.eos_token_id = self.tokenizer.token_to_id("[SEP]")
-        assert self.pad_token_id == 0
-        assert self.bos_token_id == 1
-        assert self.eos_token_id == 2
 
     def _iterate_samples(self) -> pl.DataFrame:
         if self.index_table_cache_path.is_file():
@@ -81,10 +83,6 @@ class TripleDataSet(Dataset[Triple]):
         if len(ids) > self.max_len:
             raise ValueError(f"Too long: {text}")
 
-        # Pad if too short
-        if len(ids) < self.max_len:
-            ids.extend([self.pad_token_id] * (self.max_len - len(ids)))
-
         # Create attention mask
         mask = [token_id != self.pad_token_id for token_id in ids]
 
@@ -99,28 +97,17 @@ class TripleDataSet(Dataset[Triple]):
         guide = file["midpoint"]["midpoint"]["expression"]
         target = file["midpoint"]["goals"][idx - result["from"]]["expression"]
 
-        l_ids, l_mask = self._prepare_sequence(start)
-        tgt_ids, _ = self._prepare_sequence(guide)
-        r_ids, r_mask = self._prepare_sequence(target)
-
-        decoder_input_ids = [self.bos_token_id] + tgt_ids[1:-1] if len(tgt_ids) > 1 else [self.bos_token_id]
-
-        # Ensure decoder input has correct length
-        if len(decoder_input_ids) < self.max_len:
-            decoder_input_ids.extend([self.pad_token_id] * (self.max_len - len(decoder_input_ids)))
-        elif len(decoder_input_ids) > self.max_len:
-            decoder_input_ids = decoder_input_ids[: self.max_len]
-
-        tgt_mask = [token_id != self.pad_token_id for token_id in decoder_input_ids]
+        start_ids, start_mask = self._prepare_sequence(start)
+        guide_ids, guide_mask = self._prepare_sequence(guide)
+        target_ids, target_mask = self._prepare_sequence(target)
 
         tensor_dict = {
-            "l_ids": torch.tensor(l_ids, dtype=torch.long),
-            "l_mask": torch.tensor(l_mask, dtype=torch.bool),
-            "r_ids": torch.tensor(r_ids, dtype=torch.long),
-            "r_mask": torch.tensor(r_mask, dtype=torch.bool),
-            "tgt_ids": torch.tensor(decoder_input_ids, dtype=torch.long),
-            "tgt_mask": torch.tensor(tgt_mask, dtype=torch.bool),
-            "labels": torch.tensor(tgt_ids, dtype=torch.long),
+            "start_ids": torch.tensor(start_ids, dtype=torch.long),
+            "start_mask": torch.tensor(start_mask, dtype=torch.bool),
+            "target_ids": torch.tensor(target_ids, dtype=torch.long),
+            "target_mask": torch.tensor(target_mask, dtype=torch.bool),
+            "guide_ids": torch.tensor(guide_ids, dtype=torch.long),
+            "guide_mask": torch.tensor(guide_mask, dtype=torch.bool),
         }
         return Triple(start, guide, target, tensor_dict)
 
@@ -149,8 +136,7 @@ def _get_tokenizer_training_corpus(index_table: pl.DataFrame, n_samples: int):
             yield goal["expression"]
 
 
-def _build_tokenizer(index_table: pl.DataFrame, cache: Path, n_samples: int) -> Tokenizer:
-    tokenizer_path = cache / "tokenizer.json"
+def _build_tokenizer(index_table: pl.DataFrame, tokenizer_path: Path, n_samples: int) -> Tokenizer:
     if tokenizer_path.is_file():
         return Tokenizer.from_file(str(tokenizer_path))
 
@@ -175,5 +161,5 @@ def _build_tokenizer(index_table: pl.DataFrame, cache: Path, n_samples: int) -> 
     tokenizer.train_from_iterator(
         _get_tokenizer_training_corpus(index_table, n_samples), trainer=trainer, length=n_samples
     )
-    tokenizer.save(str(tokenizer_path))
+
     return tokenizer

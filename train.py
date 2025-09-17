@@ -46,7 +46,7 @@ def fsdp_main(rank: int, world_size: int, args: FullArgs, dataset: TripleDataSet
     init_start_event = torch.cuda.Event(enable_timing=True)
     init_end_event = torch.cuda.Event(enable_timing=True)
 
-    model = DualTransformer(args.model, vocab_size, vocab_size)
+    model = DualTransformer(args.model, vocab_size)
 
     table, total_params = count_parameters(model)
     if args.verbose:
@@ -161,9 +161,27 @@ def profil_model(rank: int, model: FSDP, dataloader: DataLoader[Triple], criteri
 
         # Forward pass
         with profile(activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA], record_shapes=True) as prof:
-            _ = model(b["tgt_ids"], b["tgt_mask"], b["l_ids"], b["l_mask"], b["r_ids"], b["r_mask"])
-            logits = model(b["tgt_ids"], b["tgt_mask"], b["l_ids"], b["l_mask"], b["r_ids"], b["r_mask"])
-            loss = criterion(logits.reshape(-1, logits.shape[-1]), b["labels"].reshape(-1))
+            _ = model(
+                b["guide_ids"],
+                b["guide_mask"],
+                b["start_ids"],
+                b["start_mask"],
+                b["target_ids"],
+                b["target_mask"],
+            )
+            logits = model(
+                b["guide_ids"],
+                b["guide_mask"],
+                b["start_ids"],
+                b["start_mask"],
+                b["target_ids"],
+                b["target_mask"],
+            )
+            # Teacher forcing and Flatten for cross entropy
+            shifted_logits = logits[:, :-1, :].reshape(-1, logits.shape[2])  # Remove last prediction
+            shifted_labels = b["guide_ids"][:, 1:].reshape(-1)  # Remove first token (BOS)
+
+            loss = criterion(shifted_logits, shifted_labels)
 
             # Backwards pass
             loss.backward()
@@ -187,12 +205,24 @@ def train(
     ddp_loss = torch.zeros(2).to(rank)
 
     for batch_idx, batch in enumerate(tqdm(dataloader, desc=f"Training Epoch {epoch + 1}/{train_args.epochs}")):
-        num_tokens = sum([len(seq) for seq in batch["labels"]])
+        num_tokens = sum([len(seq) for seq in batch["guide_ids"]])
         b = {k: v.to(rank) for k, v in batch.items()}
 
         # Forward pass
-        logits = model(b["tgt_ids"], b["tgt_mask"], b["l_ids"], b["l_mask"], b["r_ids"], b["r_mask"])
-        loss = criterion(logits.reshape(-1, logits.shape[-1]), b["labels"].reshape(-1))
+        logits = model(
+            b["guide_ids"],
+            b["guide_mask"],
+            b["start_ids"],
+            b["start_mask"],
+            b["target_ids"],
+            b["target_mask"],
+        )
+
+        # Teacher forcing and Flatten for cross entropy
+        shifted_logits = logits[:, :-1, :].reshape(-1, logits.shape[2])  # Remove last prediction
+        shifted_labels = b["guide_ids"][:, 1:].reshape(-1)  # Remove first token (BOS)
+
+        loss = criterion(shifted_logits, shifted_labels)
 
         # Backwards pass
         loss.backward()
@@ -209,9 +239,9 @@ def train(
             last_lr = cosine_scheduler.get_last_lr()
 
         if writer is not None:
-            writer.add_scalar("Train Loss/batch", loss, batch_idx + epoch * len(dataloader))
-            writer.add_scalar("Train LR/batch", last_lr[-1], batch_idx + epoch * len(dataloader))
-            writer.add_scalar("Toks/in-batch", num_tokens, batch_idx + epoch * len(dataloader))
+            writer.add_scalar("Train/batch-loss", loss, batch_idx + epoch * len(dataloader))
+            writer.add_scalar("Train/batch-LR", last_lr[-1], batch_idx + epoch * len(dataloader))
+            writer.add_scalar("Train/batch-tokens", num_tokens, batch_idx + epoch * len(dataloader))
 
         # Record loss
         ddp_loss[0] += loss.item()
@@ -220,7 +250,7 @@ def train(
     dist.all_reduce(ddp_loss, op=dist.ReduceOp.SUM)
     train_loss = ddp_loss[0] / ddp_loss[1]
     if writer is not None:
-        writer.add_scalar("Train Loss/epoch", train_loss, epoch + 1)
+        writer.add_scalar("Train/epoch-loss", train_loss, epoch + 1)
 
     rank0print(f"Epoch: {epoch + 1}/{train_args.epochs} \tTrain Loss: {train_loss:.6f}")
 
@@ -242,15 +272,27 @@ def evalulate(
 
         # Forward pass
         with torch.no_grad():
-            logits = model(b["tgt_ids"], b["tgt_mask"], b["l_ids"], b["l_mask"], b["r_ids"], b["r_mask"])
-            loss = criterion(logits.reshape(-1, logits.shape[-1]), b["labels"].reshape(-1))
+            logits = model(
+                b["guide_ids"],
+                b["guide_mask"],
+                b["start_ids"],
+                b["start_mask"],
+                b["target_ids"],
+                b["target_mask"],
+            )
+
+            # Teacher forcing and Flatten for cross entropy
+            shifted_logits = logits[:, :-1, :].reshape(-1, logits.shape[2])  # Remove last prediction
+            shifted_labels = b["guide_ids"][:, 1:].reshape(-1)  # Remove first token (BOS)
+
+            loss = criterion(shifted_logits, shifted_labels)
             ddp_loss[0] += loss
             ddp_loss[1] += len(batch)
 
     dist.all_reduce(ddp_loss, op=dist.ReduceOp.SUM)
     eval_loss = ddp_loss[0] / ddp_loss[1]
     if writer is not None:
-        writer.add_scalar("Eval loss/epoch", eval_loss, epoch + 1)
+        writer.add_scalar("Eval/epoch-loss", eval_loss, epoch + 1)
 
     rank0print(f"Epoch: {epoch + 1}/{max_epochs} \tValidation loss: {eval_loss:.4f}")
     return float(eval_loss)

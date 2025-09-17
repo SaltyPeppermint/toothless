@@ -129,7 +129,9 @@ class PackedRoPEMHA(nn.Module):
         self.rope = RotaryPositionalEncoding(self.head_dim)
         self.out_proj = nn.Linear(self.total_head_dim, d_model, bias=bias, **factory_kwargs)
 
-    def forward(self, query: torch.Tensor, key: torch.Tensor, value: torch.Tensor, attn_mask: Tensor) -> torch.Tensor:
+    def forward(
+        self, query: torch.Tensor, key: torch.Tensor, value: torch.Tensor, padding_mask: Tensor
+    ) -> torch.Tensor:
         """
         Forward pass; runs the following process:
             1. Apply input projection
@@ -185,18 +187,28 @@ class PackedRoPEMHA(nn.Module):
         key = key.transpose(1, 2)
         # [batch, kv_seq_len, n_heads, head_dim] -> [batch, n_heads, kv_seq_len, head_dim]
         value = value.transpose(1, 2)
-        # Attention needs to be unsqueezed to be broadcastable
-        attn_mask = attn_mask.unsqueeze(1).unsqueeze(2)
 
-        # Step 5. Run SDPA
+        # Step 5: Fix the attention mask if we are causal, cause the sdpa errors according to the docs
+        # if we set causal and attn_mask
+
+        # Attention needs to be unsqueezed to be broadcastable
+        padding_mask = padding_mask.unsqueeze(1).unsqueeze(2)
+
+        if self.is_causal:
+            L, S = query.shape[-2], key.shape[-2]
+            # Create ad-hoc causal mask
+            causal_mask = torch.ones(L, S, dtype=torch.bool, device=padding_mask.device).tril()
+            attn_mask = padding_mask | causal_mask
+        else:
+            attn_mask = padding_mask
+
+        # Step 6. Run SDPA
         # [batch, n_heads, q_seq_len, head_dim]
-        attn_output = F.scaled_dot_product_attention(
-            query, key, value, dropout_p=self.dropout, attn_mask=attn_mask, is_causal=self.is_causal
-        )
+        attn_output = F.scaled_dot_product_attention(query, key, value, dropout_p=self.dropout, attn_mask=attn_mask)
         # [batch, n_heads, q_seq_len, head_dim] -> [batch, q_seq_len, n_heads, head_dim] -> [batch, q_seq_len, total_head_dim]
         attn_output = attn_output.transpose(1, 2).flatten(-2)
 
-        # Step 6. Apply output projection
+        # Step 7. Apply output projection
         # [batch, q_seq_len, total_head_dim] -> [batch, q_seq_len, d_model]
         attn_output = self.out_proj(attn_output)
 

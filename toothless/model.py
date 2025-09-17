@@ -10,15 +10,15 @@ from .args import ModelArgs
 
 
 class DualTransformer(nn.Module):
-    def __init__(self, conf: ModelArgs, src_vocab_size: int, tgt_vocab_size: int, pad_token_id: int = 0):
+    def __init__(self, conf: ModelArgs, vocab_size: int, pad_token_id: int = 0):
         super(DualTransformer, self).__init__()
 
-        self.conf = conf
+        self.d_model = conf.d_model
         self.pad_token_id = pad_token_id
 
-        self.l_embedding = nn.Embedding(src_vocab_size, conf.d_model)
-        self.target_embedding = nn.Embedding(src_vocab_size, conf.d_model)
-        self.tgt_embedding = nn.Embedding(tgt_vocab_size, conf.d_model)
+        self.l_embedding = nn.Embedding(vocab_size, conf.d_model)
+        self.target_embedding = nn.Embedding(vocab_size, conf.d_model)
+        self.tgt_embedding = nn.Embedding(vocab_size, conf.d_model)
 
         # Encoders
         self.start_encoder = nn.ModuleList([EncoderLayer(conf) for _ in range(conf.num_layers)])
@@ -28,20 +28,20 @@ class DualTransformer(nn.Module):
         self.decoder = nn.ModuleList([DualDecoderLayer(conf) for _ in range(conf.num_layers)])
 
         # Output projection
-        self.output_proj = nn.Linear(conf.d_model, tgt_vocab_size)
+        self.output_proj = nn.Linear(conf.d_model, vocab_size)
         self.output_norm = nn.RMSNorm(conf.d_model)
 
         for p in self.parameters():
             if p.dim() > 1:
                 nn.init.xavier_uniform_(p)
-        nn.init.normal_(self.l_embedding.weight, mean=0.0, std=self.conf.d_model**-0.5)
-        nn.init.normal_(self.target_embedding.weight, mean=0.0, std=self.conf.d_model**-0.5)
-        nn.init.normal_(self.tgt_embedding.weight, mean=0.0, std=self.conf.d_model**-0.5)
+        nn.init.normal_(self.l_embedding.weight, mean=0.0, std=conf.d_model**-0.5)
+        nn.init.normal_(self.target_embedding.weight, mean=0.0, std=conf.d_model**-0.5)
+        nn.init.normal_(self.tgt_embedding.weight, mean=0.0, std=conf.d_model**-0.5)
 
     @torch.compile(fullgraph=True)
     def start_encode(self, start_ids: Tensor, start_mask: Tensor):
         # Embeddings
-        start_mem = self.l_embedding(start_ids) * math.sqrt(self.conf.d_model)
+        start_mem = self.l_embedding(start_ids) * math.sqrt(self.d_model)
 
         # Compute each RoPE encoder layer
         for layer in self.start_encoder:
@@ -51,7 +51,7 @@ class DualTransformer(nn.Module):
     @torch.compile(fullgraph=True)
     def target_encode(self, target_ids: Tensor, target_mask: Tensor):
         # Embeddings
-        target_mem = self.target_embedding(target_ids) * math.sqrt(self.conf.d_model)
+        target_mem = self.target_embedding(target_ids) * math.sqrt(self.d_model)
 
         # Compute each RoPE encoder layer
         for layer in self.target_encoder:
@@ -71,7 +71,7 @@ class DualTransformer(nn.Module):
         """Decode target sequence using fused encoder memories."""
 
         # Target embeddings
-        output = self.tgt_embedding(guide_ids) * math.sqrt(self.conf.d_model)
+        output = self.tgt_embedding(guide_ids) * math.sqrt(self.d_model)
 
         # Compute each RoPE decoder layer
         for layer in self.decoder:
@@ -100,7 +100,7 @@ class DecoderOnly(nn.Module):
     def __init__(self, conf: ModelArgs, vocab_size: int, pad_token_id: int = 0):
         super(DecoderOnly, self).__init__()
 
-        self.conf = conf
+        self.d_model = conf.d_model
         self.pad_token_id = pad_token_id
 
         self.embedding = nn.Embedding(vocab_size, conf.d_model)
@@ -115,7 +115,7 @@ class DecoderOnly(nn.Module):
         for p in self.parameters():
             if p.dim() > 1:
                 nn.init.xavier_uniform_(p)
-        nn.init.normal_(self.embedding.weight, mean=0.0, std=self.conf.d_model**-0.5)
+        nn.init.normal_(self.embedding.weight, mean=0.0, std=conf.d_model**-0.5)
 
     @torch.compile(fullgraph=True)
     def forward(
@@ -125,7 +125,7 @@ class DecoderOnly(nn.Module):
     ):
         # Encode both source sequences
         # Target embeddings
-        output = self.embedding(tgt_ids) * math.sqrt(self.conf.d_model)
+        output = self.embedding(tgt_ids) * math.sqrt(self.d_model)
 
         # Compute each RoPE decoder layer
         for layer in self.decoder:

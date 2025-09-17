@@ -43,7 +43,7 @@ def fsdp_main(rank: int, world_size: int, infer_args: InferArgs, dataset: Triple
 
     # Construct Base Model
 
-    model = DualTransformer(model_args, vocab_size, vocab_size)
+    model = DualTransformer(model_args, vocab_size)
     rank0print("Base model ready")
 
     # FSDP model and Mixed Precision Config
@@ -123,7 +123,7 @@ def _batch_infer(
     for i in tqdm(range(0, n, infer_args.batch_size), desc=f"Inference Batch (Batch Size {infer_args.batch_size})"):
         triples = [dataset[i] for i in range(i, i + infer_args.batch_size)]
         batch = collator(triples)
-        result = infer.generate_with_probabilities(model, batch["start"], batch["target"], tokenizer, data_args.max_len)
+        result = infer.generate_with_probabilities(model, batch, data_args.max_len)
 
         p = Path(eval_folder / "viz/asts/")
         p.mkdir(parents=True, exist_ok=True)

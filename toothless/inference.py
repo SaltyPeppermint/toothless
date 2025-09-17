@@ -56,15 +56,16 @@ def create_padding_mask(input_ids: Tensor, pad_token_id: int = 0, device: torch.
     if device is None:
         device = input_ids.device
 
-    return (input_ids == pad_token_id).to(device)
+    return (input_ids != pad_token_id).to(device)
 
 
 def generate_with_probabilities(
     model: DualTransformer | FSDP,
-    start_batch: Tensor,
-    target_batch: Tensor,
-    tokenizer: Tokenizer,
+    batch: dict[str, Tensor],
     max_len: int,
+    pad_token: int = 0,
+    start_token: int = 1,
+    end_token: int = 2,
     temperature: float = 0.0,
     top_k: int | None = None,
     top_p: int | None = None,
@@ -74,10 +75,11 @@ def generate_with_probabilities(
 
     Args:
         model: The VanillaDualTreeTransformer model
-        start_batch: First source sequences [batch_size, seq_len]
-        target_batch: Second source sequences [batch_size, seq_len]
+        batch: Batch of source and target sequences and masks dict[str, [batch_size, seq_len]]
         max_len: Maximum generation length
-        vocab: The used vocabulary
+        pad_token:
+        start_token:
+        end_token:
         temperature: Sampling temperature (1.0 = no change, <1.0 = more conservative, >1.0 = more random, 0.0 = no randomness)
         top_k: Keep only top k tokens for sampling (None = no filtering)
         top_p: Nucleus sampling - keep tokens with cumulative probability <= top_p (None = no filtering)
@@ -87,21 +89,14 @@ def generate_with_probabilities(
     """
     model.eval()
     device = next(model.parameters()).device
-    batch_size = start_batch.shape[0]
+    batch_size = batch["start_ids"].shape[0]
 
-    pad_token = tokenizer.token_to_id("[PAD]")
-    start_token = tokenizer.token_to_id("[CLS]")
-    end_token = tokenizer.token_to_id("[SEP]")
-
-    start_batch = start_batch.to(device)
-    start_mask = create_padding_mask(start_batch, pad_token_id=pad_token)
-    target_batch = target_batch.to(device)
-    target_mask = create_padding_mask(start_batch, pad_token_id=pad_token)
+    batch = {k: v.to(device) for k, v in batch.items()}
 
     # Encode sources once
     with torch.no_grad():
-        start_mem = model.start_encode(start_batch, start_mask)
-        target_mem = model.target_encode(target_batch, target_mask)
+        start_mem = model.start_encode(batch["start_ids"], batch["start_mask"])
+        target_mem = model.target_encode(batch["target_ids"], batch["target_mask"])
 
     # Initialize generation with all start tokens
     generated_tokens = torch.full((batch_size, 1), start_token, device=device, dtype=torch.long)
@@ -114,7 +109,9 @@ def generate_with_probabilities(
         with torch.no_grad():
             tgt_mask = create_padding_mask(generated_tokens, pad_token_id=pad_token)
             # Get logits for current sequence
-            logits = model.decode(generated_tokens, tgt_mask, start_mem, start_mask, target_mem, target_mask)
+            logits = model.decode(
+                generated_tokens, tgt_mask, start_mem, batch["start_mask"], target_mem, batch["target_mask"]
+            )
 
             next_token_logits = logits[:, -1, :]  # Last position logits
 
@@ -191,8 +188,7 @@ def generate_with_probabilities(
 
 def beam_search_with_probabilities(
     model: DualTransformer | FSDP,
-    start_batch: Tensor,
-    target_batch: Tensor,
+    batch: dict[str, Tensor],
     tokenizer: Tokenizer,
     max_len: int,
     beam_size: int = 3,
@@ -215,21 +211,18 @@ def beam_search_with_probabilities(
     """
     model.eval()
     device = next(model.parameters()).device
-    batch_size = start_batch.shape[0]
+    batch_size = batch["start_ids"].shape[0]
+
+    batch = {k: v.to(device) for k, v in batch.items()}
 
     pad_token = tokenizer.token_to_id("[PAD]")
     start_token = tokenizer.token_to_id("[CLS]")
     end_token = tokenizer.token_to_id("[SEP]")
 
-    start_batch = start_batch.to(device)
-    start_mask = create_padding_mask(start_batch, pad_token_id=pad_token)
-    target_batch = target_batch.to(device)
-    target_mask = create_padding_mask(start_batch, pad_token_id=pad_token)
-
     # Encode sources once
     with torch.no_grad():
-        start_mem = model.start_encode(start_batch, start_mask)
-        target_mem = model.target_encode(target_batch, target_mask)
+        start_mem = model.start_encode(batch["start_ids"], batch["start_mask"])
+        target_mem = model.target_encode(batch["target_ids"], batch["target_mask"])
 
     # Initialize beams for each batch element
     beams = torch.full((batch_size, beam_size, 1), start_token, device=device, dtype=torch.long)
@@ -256,7 +249,12 @@ def beam_search_with_probabilities(
         with torch.no_grad():
             tgt_mask = create_padding_mask(current_beams, pad_token_id=pad_token)
             logits = model.decode(
-                current_beams, tgt_mask, start_expanded_memory, start_mask, target_expanded_memory, target_mask
+                current_beams,
+                tgt_mask,
+                start_expanded_memory,
+                batch["start_mask"],
+                target_expanded_memory,
+                batch["target_mask"],
             )
             log_probs = torch.log_softmax(logits[:, -1, :], dim=-1)
             probs = torch.softmax(logits[:, -1, :], dim=-1)
