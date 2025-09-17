@@ -98,8 +98,9 @@ class EncoderOnly(nn.Module):
         self.pad_token_id = pad_token_id
 
         self.embedding = nn.Embedding(vocab_size, conf.d_model)
+        self.part_embedding = nn.Embedding(3, conf.d_model)
 
-        # Decoder
+        # Encoder
         self.encoder = nn.ModuleList([EncoderLayer(conf) for _ in range(conf.num_layers)])
 
         # Output projection
@@ -110,14 +111,15 @@ class EncoderOnly(nn.Module):
             if p.dim() > 1:
                 nn.init.xavier_uniform_(p)
         nn.init.normal_(self.embedding.weight, mean=0.0, std=conf.d_model**-0.5)
+        nn.init.normal_(self.part_embedding.weight, mean=0.0, std=conf.d_model**-0.5)
 
     @torch.compile(fullgraph=True)
-    def forward(self, tgt_ids: Tensor, tgt_mask: Tensor):
-        # Encode both source sequences
+    def forward(self, tgt_ids: Tensor, part_ids: Tensor, tgt_mask: Tensor):
         # Target embeddings
         output = self.embedding(tgt_ids) * math.sqrt(self.d_model)
+        output = output + self.part_embedding(part_ids) * math.sqrt(self.d_model)
 
-        # Compute each RoPE decoder layer
+        # Compute each RoPE encoder layer
         for layer in self.encoder:
             output = layer(output, tgt_mask)
 
@@ -132,7 +134,6 @@ class DecoderOnly(nn.Module):
         self.pad_token_id = pad_token_id
 
         self.token_embedding = nn.Embedding(vocab_size, conf.d_model)
-        self.part_embedding = nn.Embedding(3, conf.d_model)
 
         # Decoder
         self.decoder = nn.ModuleList([DecoderLayer(conf) for _ in range(conf.num_layers)])
@@ -145,16 +146,11 @@ class DecoderOnly(nn.Module):
             if p.dim() > 1:
                 nn.init.xavier_uniform_(p)
         nn.init.normal_(self.token_embedding.weight, mean=0.0, std=conf.d_model**-0.5)
-        nn.init.normal_(self.part_embedding.weight, mean=0.0, std=conf.d_model**-0.5)
 
     @torch.compile(fullgraph=True)
-    def forward(self, tgt_ids: Tensor, part_ids: Tensor, tgt_mask: Tensor):
-        # Encode both source sequences
+    def forward(self, tgt_ids: Tensor, tgt_mask: Tensor):
         # Target embeddings
-
         output = self.token_embedding(tgt_ids) * math.sqrt(self.d_model)
-
-        output = output + self.part_embedding(part_ids) * math.sqrt(self.d_model)
 
         # Compute each RoPE decoder layer
         for layer in self.decoder:
