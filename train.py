@@ -36,7 +36,7 @@ def fsdp_main(rank: int, world_size: int, args: FullArgs, dataset: TripleDataSet
 
     # Load Data
     vocab_size = dataset.tokenizer.get_vocab_size()
-    collator = TripleDualCollator()
+    collator = TripleDualCollator(args.data.max_len)
     train_dataloader, eval_dataloader = mk_loaders(
         rank, world_size, dataset, collator, args.data, args.train.batch_size
     )

@@ -90,6 +90,40 @@ class DualTransformer(nn.Module):
         )
 
 
+class EncoderOnly(nn.Module):
+    def __init__(self, conf: ModelArgs, vocab_size: int, pad_token_id: int = 0):
+        super(EncoderOnly, self).__init__()
+
+        self.d_model = conf.d_model
+        self.pad_token_id = pad_token_id
+
+        self.embedding = nn.Embedding(vocab_size, conf.d_model)
+
+        # Decoder
+        self.encoder = nn.ModuleList([EncoderLayer(conf) for _ in range(conf.num_layers)])
+
+        # Output projection
+        self.output_proj = nn.Linear(conf.d_model, 1)
+        self.output_norm = nn.RMSNorm(conf.d_model)
+
+        for p in self.parameters():
+            if p.dim() > 1:
+                nn.init.xavier_uniform_(p)
+        nn.init.normal_(self.embedding.weight, mean=0.0, std=conf.d_model**-0.5)
+
+    @torch.compile(fullgraph=True)
+    def forward(self, tgt_ids: Tensor, tgt_mask: Tensor):
+        # Encode both source sequences
+        # Target embeddings
+        output = self.embedding(tgt_ids) * math.sqrt(self.d_model)
+
+        # Compute each RoPE decoder layer
+        for layer in self.encoder:
+            output = layer(output, tgt_mask)
+
+        return self.output_proj(self.output_norm(output))
+
+
 class DecoderOnly(nn.Module):
     def __init__(self, conf: ModelArgs, vocab_size: int, pad_token_id: int = 0):
         super(DecoderOnly, self).__init__()
@@ -97,7 +131,8 @@ class DecoderOnly(nn.Module):
         self.d_model = conf.d_model
         self.pad_token_id = pad_token_id
 
-        self.embedding = nn.Embedding(vocab_size, conf.d_model)
+        self.token_embedding = nn.Embedding(vocab_size, conf.d_model)
+        self.part_embedding = nn.Embedding(3, conf.d_model)
 
         # Decoder
         self.decoder = nn.ModuleList([DecoderLayer(conf) for _ in range(conf.num_layers)])
@@ -109,17 +144,17 @@ class DecoderOnly(nn.Module):
         for p in self.parameters():
             if p.dim() > 1:
                 nn.init.xavier_uniform_(p)
-        nn.init.normal_(self.embedding.weight, mean=0.0, std=conf.d_model**-0.5)
+        nn.init.normal_(self.token_embedding.weight, mean=0.0, std=conf.d_model**-0.5)
+        nn.init.normal_(self.part_embedding.weight, mean=0.0, std=conf.d_model**-0.5)
 
     @torch.compile(fullgraph=True)
-    def forward(
-        self,
-        tgt_ids: Tensor,
-        tgt_mask: Tensor,
-    ):
+    def forward(self, tgt_ids: Tensor, part_ids: Tensor, tgt_mask: Tensor):
         # Encode both source sequences
         # Target embeddings
-        output = self.embedding(tgt_ids) * math.sqrt(self.d_model)
+
+        output = self.token_embedding(tgt_ids) * math.sqrt(self.d_model)
+
+        output = output + self.part_embedding(part_ids) * math.sqrt(self.d_model)
 
         # Compute each RoPE decoder layer
         for layer in self.decoder:

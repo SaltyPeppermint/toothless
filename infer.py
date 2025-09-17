@@ -71,7 +71,7 @@ def fsdp_main(rank: int, world_size: int, infer_args: InferArgs, dataset: Triple
 
     rank0print("FSDP Model/Generator loaded to GPU and ready")
 
-    collator = TripleDualCollator()
+    collator = TripleDualCollator(data_args.max_len)
 
     # Running inference on dataset samples
     train_dataset, eval_dataset = torch.utils.data.random_split(

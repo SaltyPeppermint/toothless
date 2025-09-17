@@ -1,27 +1,96 @@
 from typing import Sequence
 
 import torch
+import torch.nn.functional as F
 from torch import Tensor
 from torch.utils.data.distributed import DistributedSampler
 from torch.utils.data import DataLoader
-
 
 from .data import TripleDataSet, Triple
 from .args import DataArgs
 
 
 class TripleCollator:
+    def __init__(self, target_length: int, pad_token_id: int = 0):
+        self.target_length = target_length
+        self.pad_token_id = pad_token_id
+
     def __call__(self, triples: Sequence[Triple]) -> dict[str, Tensor]:
         raise NotImplementedError
+
+    def pad_stack(self, tensor_list: list[Tensor]) -> tuple[Tensor, Tensor]:
+        padded_tensors = []
+        padding_masks = []
+
+        for tensor in tensor_list:
+            current_length = tensor.shape[0]
+
+            if current_length > self.target_length:
+                raise ValueError(f"Tensor length {current_length} exceeds target length {self.target_length}")
+
+            mask = torch.ones(self.target_length, dtype=torch.bool)
+            mask[current_length:] = False
+            padding_masks.append(mask)
+
+            pad_amount = self.target_length - current_length
+            padded_tensor = F.pad(tensor, (0, pad_amount), value=self.pad_token_id)
+            padded_tensors.append(padded_tensor)
+
+        # stacked_tensors = torch.stack(padded_tensors, dim=0)
+        # stacked_masks = stacked_tensors != self.pad_token_id
+        # Stack all padded tensors and masks
+        return torch.stack(padded_tensors, dim=0), torch.stack(padding_masks, dim=0)
 
 
 class TripleDualCollator(TripleCollator):
     def __call__(self, triples: Sequence[Triple]) -> dict[str, Tensor]:
-        # Use defaultdict to automatically create lists for each key
+        ds = [t.tensor_dict for t in triples]
+        start_ids, start_mask = self.pad_stack([d["start_ids"] for d in ds])
+        target_ids, target_mask = self.pad_stack([d["target_ids"] for d in ds])
+        guide_ids, guide_mask = self.pad_stack([d["guide_ids"] for d in ds])
 
-        stack_dicts = {key: torch.stack([d.tensor_dict[key] for d in triples]) for key in triples[0].tensor_dict.keys()}
+        return {
+            "start_ids": start_ids,
+            "start_mask": start_mask,
+            "target_ids": target_ids,
+            "target_mask": target_mask,
+            "guide_ids": guide_ids,
+            "guide_mask": guide_mask,
+        }
 
-        return stack_dicts
+
+class DecoderOnlyCollator(TripleCollator):
+    def __call__(self, triples: Sequence[Triple]) -> dict[str, Tensor]:
+        ds = [t.tensor_dict for t in triples]
+
+        tgt_ids, tgt_mask = self.pad_stack(
+            [torch.cat((d["start_ids"], d["target_ids"][1:], d["guide_ids"][1:])) for d in ds]
+        )
+
+        return {"tgt_ids": tgt_ids, "tgt_mask": tgt_mask}
+
+
+class EncoderOnlyCollator(TripleCollator):
+    def __call__(self, triples: Sequence[Triple]) -> dict[str, Tensor]:
+        ds = [t.tensor_dict for t in triples]
+
+        tgt_ids, tgt_mask = self.pad_stack(
+            [torch.cat((d["start_ids"], d["target_ids"][1:], d["guide_ids"][1:])) for d in ds]
+        )
+        pos_ids, _ = self.pad_stack(
+            [
+                torch.cat(
+                    (
+                        torch.full_like(d["start_ids"], 0)[1:],
+                        torch.full_like(d["target_ids"], 1)[1:],
+                        torch.full_like(d["guide_ids"], 2)[1:],
+                    )
+                )
+                for d in ds
+            ]
+        )
+
+        return {"tgt_ids": tgt_ids, "tgt_mask": tgt_mask, "pos_ids": pos_ids}
 
 
 def mk_loaders(
