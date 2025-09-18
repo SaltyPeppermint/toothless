@@ -44,10 +44,9 @@ class TripleCollator:
 
 class TripleDualCollator(TripleCollator):
     def __call__(self, triples: Sequence[Triple]) -> dict[str, Tensor]:
-        ds = [t.tensor_dict for t in triples]
-        start_ids, start_mask = self.pad_stack([d["start_ids"] for d in ds])
-        target_ids, target_mask = self.pad_stack([d["target_ids"] for d in ds])
-        guide_ids, guide_mask = self.pad_stack([d["guide_ids"] for d in ds])
+        start_ids, start_mask = self.pad_stack([t.start_ids for t in triples])
+        target_ids, target_mask = self.pad_stack([t.target_ids for t in triples])
+        guide_ids, guide_mask = self.pad_stack([t.guide_ids for t in triples])
 
         return {
             "start_ids": start_ids,
@@ -61,10 +60,8 @@ class TripleDualCollator(TripleCollator):
 
 class DecoderOnlyCollator(TripleCollator):
     def __call__(self, triples: Sequence[Triple]) -> dict[str, Tensor]:
-        ds = [t.tensor_dict for t in triples]
-
         tgt_ids, tgt_mask = self.pad_stack(
-            [torch.cat((d["start_ids"], d["target_ids"][1:], d["guide_ids"][1:])) for d in ds]
+            [torch.cat((t.start_ids, t.target_ids[1:], t.guide_ids[1:])) for t in triples]
         )
 
         return {"tgt_ids": tgt_ids, "tgt_mask": tgt_mask}
@@ -72,21 +69,19 @@ class DecoderOnlyCollator(TripleCollator):
 
 class EncoderOnlyCollator(TripleCollator):
     def __call__(self, triples: Sequence[Triple]) -> dict[str, Tensor]:
-        ds = [t.tensor_dict for t in triples]
-
         tgt_ids, tgt_mask = self.pad_stack(
-            [torch.cat((d["start_ids"], d["target_ids"][1:], d["guide_ids"][1:])) for d in ds]
+            [torch.cat((t.start_ids, t.target_ids[1:], t.guide_ids[1:])) for t in triples]
         )
         pos_ids, _ = self.pad_stack(
             [
                 torch.cat(
                     (
-                        torch.full_like(d["start_ids"], 0)[1:],
-                        torch.full_like(d["target_ids"], 1)[1:],
-                        torch.full_like(d["guide_ids"], 2)[1:],
+                        torch.full_like(t.start_ids, 0)[1:],
+                        torch.full_like(t.target_ids, 1)[1:],
+                        torch.full_like(t.guide_ids, 2)[1:],
                     )
                 )
-                for d in ds
+                for t in triples
             ]
         )
 

@@ -18,10 +18,9 @@ SCHEMA = {"from": pl.UInt64, "to": pl.UInt64, "path": pl.String}
 
 @dataclass
 class Triple:
-    start: str
-    guide: str
-    target: str
-    tensor_dict: dict[str, torch.Tensor]
+    start_ids: torch.Tensor
+    guide_ids: torch.Tensor
+    target_ids: torch.Tensor
 
 
 class TripleDataSet(Dataset[Triple]):
@@ -92,12 +91,11 @@ class TripleDataSet(Dataset[Triple]):
         guide = file["midpoint"]["midpoint"]["expression"]
         target = file["midpoint"]["goals"][idx - result["from"]]["expression"]
 
-        tensor_dict = {
-            "start_ids": torch.tensor(self._tokenize(start), dtype=torch.long),
-            "guide_ids": torch.tensor(self._tokenize(guide), dtype=torch.long),
-            "target_ids": torch.tensor(self._tokenize(target), dtype=torch.long),
-        }
-        return Triple(start, guide, target, tensor_dict)
+        return Triple(
+            torch.tensor(self._tokenize(start), dtype=torch.long),
+            torch.tensor(self._tokenize(guide), dtype=torch.long),
+            torch.tensor(self._tokenize(target), dtype=torch.long),
+        )
 
     def __len__(self) -> int:
         total_samples = self.index_table["to"].max()

@@ -12,7 +12,7 @@ from tqdm.auto import tqdm
 from tokenizers import Tokenizer
 
 
-from eggshell import FirstErrorDistance
+# from eggshell import FirstErrorDistance
 
 import toothless.inference as infer
 from toothless.utils import count_parameters, cleanup_process_group, rank0print, setup_process_group
@@ -78,21 +78,21 @@ def fsdp_main(rank: int, world_size: int, infer_args: InferArgs, dataset: Triple
         dataset, [data_args.split_size, 1 - data_args.split_size], torch.Generator().manual_seed(data_args.rng_seed)
     )
 
-    train_distances, train_gen_triples = _batch_infer(
+    train_gen_triples = _batch_infer(
         data_args, infer_args, dataset.tokenizer, model, collator, train_dataset, "train", eval_folder
     )
     with open(eval_folder / "train_gen_triples_vanilla.json", mode="w", encoding="utf-8") as f:
         f.write(infer.InferResult.list_to_json(train_gen_triples))
     del train_gen_triples
-    infer.print_distance(train_distances, "TRAIN")
+    # infer.print_distance(train_distances, "TRAIN")
 
-    eval_distances, eval_gen_triples = _batch_infer(
+    eval_gen_triples = _batch_infer(
         data_args, infer_args, dataset.tokenizer, model, collator, eval_dataset, "eval", eval_folder
     )
     with open(eval_folder / "eval_gen_triples_vanilla.json", mode="w", encoding="utf-8") as f:
         f.write(infer.InferResult.list_to_json(eval_gen_triples))
     del eval_gen_triples
-    infer.print_distance(eval_distances, "EVAL")
+    # infer.print_distance(eval_distances, "EVAL")
 
     cleanup_process_group()
 
@@ -106,7 +106,7 @@ def _batch_infer(
     dataset: Subset[Triple],
     ds_name: str,
     eval_folder: Path,
-) -> tuple[list[FirstErrorDistance], list[infer.InferResult]]:
+) -> list[infer.InferResult]:
     if ds_name == "eval":
         n = infer_args.n_eval_data if infer_args.n_eval_data else len(dataset)
     elif ds_name == "train":
@@ -115,7 +115,6 @@ def _batch_infer(
         raise ValueError("Unknown Dataset name")
 
     rank0print(f"\n=================\nRunning inference on {n} samples of {ds_name} dataset ...")
-    distances = []
     gen_triples = []
 
     n = infer_args.n_eval_data if infer_args.n_eval_data else len(dataset)
@@ -127,14 +126,13 @@ def _batch_infer(
 
         p = Path(eval_folder / "viz/asts/")
         p.mkdir(parents=True, exist_ok=True)
-        batch_distance, batch_gen_triples = infer.batch_process_result(
+        batch_gen_triples = infer.batch_process_result(
             tokenizer, triples, result.tokens.tolist(), result.token_probs.tolist(), p, i, infer_args.verbose
         )
-        distances.extend(batch_distance)
         gen_triples.extend(batch_gen_triples)
         del batch, result
 
-    return distances, gen_triples
+    return gen_triples
 
 
 if __name__ == "__main__":

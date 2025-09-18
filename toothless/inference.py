@@ -9,7 +9,7 @@ from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 from dataclass_wizard import JSONWizard
 from tokenizers import Tokenizer
 
-from eggshell import FirstErrorDistance  # , EggshellException
+from eggshell import FirstErrorDistance, EggshellException
 from eggshell import rise  # type: ignore
 
 from toothless.model import DualTransformer  # type: ignore
@@ -369,6 +369,8 @@ class InferResult(JSONWizard):
     right: str
     middle: str
     generated: str
+    tokens: list[int]
+    probs: list[float]
 
 
 def batch_process_result(
@@ -379,74 +381,54 @@ def batch_process_result(
     path: Path,
     id_offset: int,
     verbose: bool,
-) -> tuple[list[FirstErrorDistance], list[InferResult]]:
+) -> list[InferResult]:
     path = path.absolute()
 
-    batch_distances = []
     batch_gen_triples = []
     for i, (triple, ids, token_probs) in enumerate(zip(triples, batch_ids, batch_probs)):
         sample_id = i + id_offset
 
-        rise.RecExpr(triple.start).to_dot(f"{sample_id} left", str(path / f"{sample_id}_left"))
-        middle = rise.RecExpr(triple.guide)
-        middle.to_dot(f"{sample_id} middle", str(path / f"{sample_id}_middle"))
-        middle.to_dot(f"{sample_id} middle", str(path / f"{sample_id}_middle_t"), transparent=True)
-        rise.RecExpr(triple.target).to_dot(f"{sample_id} right", str(path / f"{sample_id}_right"))
+        start = rise.RecExpr(tokenizer.decode(triple.start_ids))
+        guide = rise.RecExpr(tokenizer.decode(triple.guide_ids))
+        target = rise.RecExpr(tokenizer.decode(triple.target_ids))
+
+        start.to_dot(f"{sample_id} left", str(path / f"{sample_id}_left"))
+        guide.to_dot(f"{sample_id} middle", str(path / f"{sample_id}_middle"))
+        guide.to_dot(f"{sample_id} middle", str(path / f"{sample_id}_middle_t"), transparent=True)
+        target.to_dot(f"{sample_id} right", str(path / f"{sample_id}_right"))
 
         if verbose:
             rank0print("----------")
             rank0print(f"Sample {sample_id}", "blue")
             rank0print("LEFT:", "green")
-            rank0print(triple.start)
+            rank0print(tokenizer.decode(triple.start_ids))
             rank0print("MIDDLE:", "green")
-            rank0print(triple.guide)
+            rank0print(tokenizer.decode(triple.guide_ids))
             rank0print("RIGHT:", "green")
-            rank0print(triple.target)
+            rank0print(tokenizer.decode(triple.target_ids))
 
         raw_generated_tokens = tokenizer.decode(ids, skip_special_tokens=False)
         if verbose:
             rank0print("RAW GENERATED TOKENS:", "yellow")
             rank0print(raw_generated_tokens, "yellow")
 
-        # generated_tokens = tokenizer.decode(ids)
-        # try:
-        #     generated = rise.RecExpr(generated_tokens)
-        # except EggshellException as e:
-        #     rank0print("COULD NOT PROPERLY PARSE GENERATED GUIDE.", "red")
-        #     rank0print(e, "red")
-        #     continue
+        generated_tokens = tokenizer.decode(ids).replace("[var]", "?")
+        try:
+            generated = rise.Guide(generated_tokens)
+        except EggshellException as e:
+            rank0print("COULD NOT PROPERLY PARSE GENERATED GUIDE.", "red")
+            rank0print(e, "red")
+            continue
 
-        # try:
-        #     lowered = generated.lower()
-        # except EggshellException as e:
-        #     generated.to_dot(f"{sample_id} generated (damaged)", str(path / f"{sample_id}_generated"))  # type: ignore
-        #     generated.to_dot(
-        #         f"{sample_id} generated (damaged)", str(path / f"{sample_id}_generated_t"), transparent=True
-        #     )
-        #     rank0print("COULD NOT PROPERLY PARSE GENERATED GUIDE.", "red")
-        #     rank0print(e, "red")
-        #     if verbose:
-        #         rank0print("BEST ATTEMPT:", "red")
-        #         rank0print(generated)
-        #         rank0print(f"Used {generated.used_tokens} out of {len(generated_tokens)}", "red")
-        #     continue
+        generated.to_dot(f"{sample_id} generated", str(path / f"{sample_id}_generated"))
+        generated.to_dot(f"{sample_id} generated", str(path / f"{sample_id}_generated_t"), transparent=True)
+        batch_gen_triples.append(InferResult(str(start), str(guide), str(target), str(generated), ids, token_probs))
 
-        # distance = rise.first_miss_distance(middle, generated)
-        # batch_distances.append(distance)
-        # lowered.to_dot(f"{sample_id} generated", str(path / f"{sample_id}_generated"), marked_ids=distance.miss_ids())
-        # lowered.to_dot(
-        #     f"{sample_id} generated",
-        #     str(path / f"{sample_id}_generated_t"),
-        #     marked_ids=distance.miss_ids(),
-        #     transparent=True,
-        # )
-        # batch_gen_triples.append(InferResult(triple.start, triple.target, triple.guide, str(lowered)))
+        if verbose:
+            rank0print("GENERATED:", "green")
+            rank0print(generated)
 
-        # if verbose:
-        #     rank0print("GENERATED:", "green")
-        #     rank0print(lowered)
-
-    return batch_distances, batch_gen_triples
+    return batch_gen_triples
 
 
 def print_distance(distances: list[FirstErrorDistance], ds_name: str):
