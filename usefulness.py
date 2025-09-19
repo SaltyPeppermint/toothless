@@ -55,9 +55,8 @@ def check_tuple(sample: InferResult) -> dict[str, dict]:
 if __name__ == "__main__":
     folder = Path("models") / str(sys.argv[1])
     eval_path = folder / "eval"
-    usefulness_path = eval_path / "usefulness"
-
     train_or_eval = str(sys.argv[2])
+    usefulness_path = eval_path / f"usefulness_{train_or_eval}"
 
     with open(eval_path / f"{str(train_or_eval)}_gen_triples.json", encoding="utf-8") as f:
         eval_tuples = InferResult.from_list(json.load(f))
@@ -66,16 +65,16 @@ if __name__ == "__main__":
 
     usefulness_path.mkdir(parents=True, exist_ok=True)
 
-    report_path = usefulness_path / "reports_usefulness.json"
+    report_path = usefulness_path / "reports.json"
 
     if not report_path.exists():
         reports = []
         for tuple in tqdm(eval_tuples[:n_samples], desc=f"Evaluating {n_samples} samples"):
             reports.append(check_tuple(tuple))
-        with open(usefulness_path / "reports_usefulness.json", mode="w", encoding="utf-8") as f:
+        with open(report_path, mode="w", encoding="utf-8") as f:
             json.dump(reports, f)
     else:
-        with open(usefulness_path / "reports_usefulness.json", encoding="utf-8") as f:
+        with open(report_path, encoding="utf-8") as f:
             reports = json.load(f)
 
     max_nodes = []
