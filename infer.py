@@ -12,8 +12,6 @@ from tqdm.auto import tqdm
 from tokenizers import Tokenizer
 
 
-# from eggshell import FirstErrorDistance
-
 import toothless.inference as infer
 from toothless.utils import count_parameters, cleanup_process_group, rank0print, setup_process_group
 from toothless.collators import TripleDualCollator
@@ -81,7 +79,7 @@ def fsdp_main(rank: int, world_size: int, infer_args: InferArgs, dataset: Triple
     train_gen_triples = _batch_infer(
         data_args, infer_args, dataset.tokenizer, model, collator, train_dataset, "train", eval_folder
     )
-    with open(eval_folder / "train_gen_triples_vanilla.json", mode="w", encoding="utf-8") as f:
+    with open(eval_folder / "train_gen_triples.json", mode="w", encoding="utf-8") as f:
         f.write(infer.InferResult.list_to_json(train_gen_triples))
     del train_gen_triples
     # infer.print_distance(train_distances, "TRAIN")
@@ -89,7 +87,7 @@ def fsdp_main(rank: int, world_size: int, infer_args: InferArgs, dataset: Triple
     eval_gen_triples = _batch_infer(
         data_args, infer_args, dataset.tokenizer, model, collator, eval_dataset, "eval", eval_folder
     )
-    with open(eval_folder / "eval_gen_triples_vanilla.json", mode="w", encoding="utf-8") as f:
+    with open(eval_folder / "eval_gen_triples.json", mode="w", encoding="utf-8") as f:
         f.write(infer.InferResult.list_to_json(eval_gen_triples))
     del eval_gen_triples
     # infer.print_distance(eval_distances, "EVAL")

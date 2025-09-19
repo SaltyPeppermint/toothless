@@ -1,4 +1,5 @@
 import json
+import sys
 from pathlib import Path
 from collections import defaultdict
 import statistics
@@ -15,11 +16,7 @@ TIME_LIMIT = 10.0
 BATCH_SIZE = 1
 WORKER_THREADS = 2
 
-MODEL_PATH = Path("models/25-08-05_13:25:52")
-EVAL_PATH = MODEL_PATH / "eval"
-USEFULNESS_PATH = EVAL_PATH / "usefulness"
-
-RUN_EQSAT = False
+MODEL_PATH = Path("25-08-05_13:25:52")
 
 
 def eqsat_check(left: rise.RecExpr, right: rise.RecExpr, name: str) -> dict[str, dict]:
@@ -56,21 +53,29 @@ def check_tuple(sample: InferResult) -> dict[str, dict]:
 
 
 if __name__ == "__main__":
-    with open(EVAL_PATH / "train_gen_triples.json", encoding="utf-8") as f:
+    folder = Path("models") / str(sys.argv[1])
+    eval_path = folder / "eval"
+    usefulness_path = eval_path / "usefulness"
+
+    train_or_eval = str(sys.argv[2])
+
+    with open(eval_path / f"{str(train_or_eval)}_gen_triples.json", encoding="utf-8") as f:
         eval_tuples = InferResult.from_list(json.load(f))
 
     n_samples = min(len(eval_tuples), MAX_SAMPLES)
 
-    USEFULNESS_PATH.mkdir(parents=True, exist_ok=True)
+    usefulness_path.mkdir(parents=True, exist_ok=True)
 
-    if RUN_EQSAT:
+    report_path = usefulness_path / "reports_usefulness.json"
+
+    if not report_path.exists():
         reports = []
         for tuple in tqdm(eval_tuples[:n_samples], desc=f"Evaluating {n_samples} samples"):
             reports.append(check_tuple(tuple))
-        with open(USEFULNESS_PATH / "reports_usefulness.json", mode="w", encoding="utf-8") as f:
+        with open(usefulness_path / "reports_usefulness.json", mode="w", encoding="utf-8") as f:
             json.dump(reports, f)
     else:
-        with open(USEFULNESS_PATH / "reports_usefulness.json", encoding="utf-8") as f:
+        with open(usefulness_path / "reports_usefulness.json", encoding="utf-8") as f:
             reports = json.load(f)
 
     max_nodes = []
@@ -109,21 +114,21 @@ if __name__ == "__main__":
 
     stop_reasons = {k: dict(v) for k, v in stop_reasons.items()}
 
-    with open(USEFULNESS_PATH / "node_counts.json", mode="w", encoding="utf-8") as f:
+    with open(usefulness_path / "node_counts.json", mode="w", encoding="utf-8") as f:
         json.dump(max_nodes, f)
 
-    with open(USEFULNESS_PATH / "stop_reasons.json", mode="w", encoding="utf-8") as f:
+    with open(usefulness_path / "stop_reasons.json", mode="w", encoding="utf-8") as f:
         json.dump(stop_reasons, f)
 
-    with open(USEFULNESS_PATH / "reached_after_guide.json", mode="w", encoding="utf-8") as f:
+    with open(usefulness_path / "reached_after_guide.json", mode="w", encoding="utf-8") as f:
         json.dump(reached_after_guide, f)
 
-    with open(USEFULNESS_PATH / "guide_reduced_mem.json", mode="w", encoding="utf-8") as f:
+    with open(usefulness_path / "guide_reduced_mem.json", mode="w", encoding="utf-8") as f:
         json.dump(guide_reduced_mem, f)
 
     average_mem = {k: statistics.fmean([d[k] for d in max_nodes]) for k in max_nodes[0]}
 
-    with open(USEFULNESS_PATH / "average_mem.json", mode="w", encoding="utf-8") as f:
+    with open(usefulness_path / "average_mem.json", mode="w", encoding="utf-8") as f:
         json.dump(average_mem, f)
 
     print("---\nSTOP REASONS")

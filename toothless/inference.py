@@ -9,10 +9,11 @@ from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 from dataclass_wizard import JSONWizard
 from tokenizers import Tokenizer
 
-from eggshell import FirstErrorDistance, EggshellException
+
+from eggshell import EggshellException  # type: ignore
 from eggshell import rise  # type: ignore
 
-from toothless.model import DualTransformer  # type: ignore
+from toothless.model import DualTransformer
 
 from .utils import rank0print
 from .data import Triple
@@ -388,9 +389,12 @@ def batch_process_result(
     for i, (triple, ids, token_probs) in enumerate(zip(triples, batch_ids, batch_probs)):
         sample_id = i + id_offset
 
-        start = rise.RecExpr(tokenizer.decode(triple.start_ids))
-        guide = rise.RecExpr(tokenizer.decode(triple.guide_ids))
-        target = rise.RecExpr(tokenizer.decode(triple.target_ids))
+        start_tokens = tokenizer.decode(triple.start_ids.tolist())
+        start = rise.RecExpr(start_tokens)
+        guide_tokens = tokenizer.decode(triple.guide_ids.tolist())
+        guide = rise.RecExpr(guide_tokens)
+        target_tokens = tokenizer.decode(triple.target_ids.tolist())
+        target = rise.RecExpr(target_tokens)
 
         start.to_dot(f"{sample_id} left", str(path / f"{sample_id}_left"))
         guide.to_dot(f"{sample_id} middle", str(path / f"{sample_id}_middle"))
@@ -401,11 +405,11 @@ def batch_process_result(
             rank0print("----------")
             rank0print(f"Sample {sample_id}", "blue")
             rank0print("LEFT:", "green")
-            rank0print(tokenizer.decode(triple.start_ids))
+            rank0print(start_tokens)
             rank0print("MIDDLE:", "green")
-            rank0print(tokenizer.decode(triple.guide_ids))
+            rank0print(guide_tokens)
             rank0print("RIGHT:", "green")
-            rank0print(tokenizer.decode(triple.target_ids))
+            rank0print(target_tokens)
 
         raw_generated_tokens = tokenizer.decode(ids, skip_special_tokens=False)
         if verbose:
@@ -431,20 +435,20 @@ def batch_process_result(
     return batch_gen_triples
 
 
-def print_distance(distances: list[FirstErrorDistance], ds_name: str):
-    rank0print(f"\n### AVERAGE DISTANCE IN {ds_name} DATASET ###", "yellow")
-    n_hits = sum([d.n_hits for d in distances])
-    rank0print(f"Hits: {n_hits}", "yellow")
-    n_misses = sum([d.n_misses for d in distances])
-    rank0print(f"Misses: {n_misses}", "yellow")
-    perfect_matches = sum([1 for d in distances if d.n_misses == 0])
-    rank0print(f"Perfect matches: {perfect_matches}", "yellow")
+# def print_distance(distances: list[FirstErrorDistance], ds_name: str):
+#     rank0print(f"\n### AVERAGE DISTANCE IN {ds_name} DATASET ###", "yellow")
+#     n_hits = sum([d.n_hits for d in distances])
+#     rank0print(f"Hits: {n_hits}", "yellow")
+#     n_misses = sum([d.n_misses for d in distances])
+#     rank0print(f"Misses: {n_misses}", "yellow")
+#     perfect_matches = sum([1 for d in distances if d.n_misses == 0])
+#     rank0print(f"Perfect matches: {perfect_matches}", "yellow")
 
-    avg_hit_prob = _avg_prob([d.hit_probabilities() for d in distances if d])
-    rank0print(f"Average Hit Probability: {avg_hit_prob}", "yellow")
-    avg_miss_prob = _avg_prob([d.miss_probabilities() for d in distances if d])
-    rank0print(f"Average Miss Probability: {avg_miss_prob}", "yellow")
-    rank0print("\n")
+#     avg_hit_prob = _avg_prob([d.hit_probabilities() for d in distances if d])
+#     rank0print(f"Average Hit Probability: {avg_hit_prob}", "yellow")
+#     avg_miss_prob = _avg_prob([d.miss_probabilities() for d in distances if d])
+#     rank0print(f"Average Miss Probability: {avg_miss_prob}", "yellow")
+#     rank0print("\n")
 
 
 def _avg_prob(probs: list[list[float | None]]):
