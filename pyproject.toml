@@ -9,7 +9,6 @@ dependencies = [
   "tensorboard>=2",
   "torch>=2",
   "tqdm>=4",
-  "scikit-learn>=1.5",
   "polars>=1",
   "python-dotenv>=1",
   "torch-tb-profiler>=0.4",
@@ -22,8 +21,6 @@ dependencies = [
   "eggshell",
   "tokenizers>=0.22",
 ]
-# "transformers>=4.48.2",
-# "tokenizers>=0.21.0",
 
 [tool.ruff]
 # Allow lines to be as long as 120.
