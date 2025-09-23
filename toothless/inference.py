@@ -367,8 +367,8 @@ def beam_search_with_probabilities(
 @dataclass
 class InferResult(JSONWizard):
     left: str
-    right: str
     middle: str
+    right: str
     generated: str
     tokens: list[int]
     probs: list[float]

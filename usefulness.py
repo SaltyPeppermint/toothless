@@ -1,9 +1,12 @@
 import json
 import sys
 from pathlib import Path
+import pprint
 from collections import defaultdict
-from typing import DefaultDict
+
+# from typing import DefaultDict
 import statistics
+from typing import DefaultDict
 
 from tqdm.auto import tqdm
 
@@ -17,72 +20,95 @@ ITER_LIMIT = 6
 
 
 def check_tuple(sample: InferResult) -> dict[str, dict]:
-    left = rise.RecExpr(sample.left)
-    right = rise.RecExpr(sample.right)
+    start = rise.RecExpr(sample.left)
+    target = rise.RecExpr(sample.right)
+
+    print(f"Start:\n{sample.left}")
 
     tuple_report = defaultdict(dict)
 
-    report_str, reached = rise.eqsat_check(left, right, iter_limit=ITER_LIMIT)
+    report_str, goal_reached = rise.eqsat_check(start, target, iter_limit=ITER_LIMIT)
     tuple_report["baseline"]["report"] = json.loads(report_str)["report"]
-    tuple_report["baseline"]["reached"] = reached
+    tuple_report["baseline"]["goal_reached"] = goal_reached
 
     i_limit = min(ITER_LIMIT, tuple_report["baseline"]["report"]["iterations"] - 1)
 
-    middle_str = sample.middle.replace("[var]", "?")
-    report_str_1, report_str_2, reached = rise.eqsat_guide_check(
-        left, right, rise.Guide(middle_str), iter_limit=i_limit
-    )
-    tuple_report["middle"]["report"] = json.loads(report_str_1)["report"]
-    tuple_report["middle"]["reached"] = reached
-    if reached:
-        tuple_report["middle"]["report_2"] = json.loads(report_str_2)["report"]
+    # GT
+    gt_guide_sketch = rise.Guide(sample.middle.replace("[var]", "?"))
+    report_str_1, guide_stuff, goal_reached = rise.eqsat_guide_check(start, gt_guide_sketch, target, iter_limit=i_limit)
+    tuple_report["gt"]["report"] = json.loads(report_str_1)["report"]
+    tuple_report["gt"]["goal_reached"] = goal_reached
+    if guide_stuff is not None:
+        report_str_2, gt_extracted_guide = guide_stuff
+        tuple_report["gt"]["report_2"] = json.loads(report_str_2)["report"]
+        print(f"GT Guide Sketchyfied:\n{gt_guide_sketch}")
+        print(f"Extracted Guide for GT:\n{gt_extracted_guide}")
 
-    right_str = sample.right.replace("[var]", "?")
-    report_str_1, report_str_2, reached = rise.eqsat_two_guide_check(
-        left, rise.Guide(right_str), rise.Guide(middle_str), iter_limit=i_limit
-    )
-    tuple_report["middle_as_sketch"]["report"] = json.loads(report_str_1)["report"]
-    tuple_report["middle_as_sketch"]["reached"] = reached
-    if reached is not None:
-        tuple_report["middle_as_sketch"]["report_2"] = json.loads(report_str_2)["report"]
-
-    report_str_1, report_str_2, reached = rise.eqsat_guide_check(
-        left, right, rise.Guide(sample.generated), iter_limit=i_limit
+    # GENERATED
+    generated_guide_sketch = rise.Guide(sample.generated.replace("[var]", "?"))
+    report_str_1, guide_stuff, goal_reached = rise.eqsat_guide_check(
+        start, generated_guide_sketch, target, iter_limit=i_limit
     )
     tuple_report["generated"]["report"] = json.loads(report_str_1)["report"]
-    tuple_report["generated"]["reached"] = reached
-    if reached:
+    tuple_report["generated"]["goal_reached"] = goal_reached
+    if guide_stuff is not None:
+        report_str_2, generated_extracted_guide = guide_stuff
         tuple_report["generated"]["report_2"] = json.loads(report_str_2)["report"]
+        print(f"Generated Guide Sketchyfied:\n{generated_guide_sketch}")
+        print(f"Extracted Guide for Generated:\n{generated_extracted_guide}")
+
+    # SKETCHIFIED TARGET
+    target_sketch = rise.Guide(sample.right.replace("[var]", "?"))
+    print(f"Target Sketchyfied:\n{target_sketch}")
+    # GT WITH GOAL AS SKETCH
+    report_str_1, guide_stuff, gt_extracted_goal = rise.eqsat_two_guide_check(
+        start, gt_guide_sketch, target_sketch, iter_limit=i_limit
+    )
+    tuple_report["gt_goal_sketch"]["report"] = json.loads(report_str_1)["report"]
+    if guide_stuff is not None:
+        report_str_2, _ = guide_stuff
+        tuple_report["gt_goal_sketch"]["report_2"] = json.loads(report_str_2)["report"]
+    if gt_extracted_goal is not None:
+        tuple_report["gt_goal_sketch"]["goal_reached"] = True
+        print(f"Extracted target for GT with SKETCHGOAL:\n{gt_extracted_goal}")
+    else:
+        tuple_report["gt_goal_sketch"]["goal_reached"] = False
+
+    # GT WITH GOAL AS SKETCH
+    report_str_1, guide_stuff, generated_extracted_target = rise.eqsat_two_guide_check(
+        start, generated_guide_sketch, target_sketch, iter_limit=i_limit
+    )
+    tuple_report["generated_goal_sketch"]["report"] = json.loads(report_str_1)["report"]
+    if guide_stuff is not None:
+        report_str_2, _ = guide_stuff
+        tuple_report["generated_goal_sketch"]["report_2"] = json.loads(report_str_2)["report"]
+    if generated_extracted_target is not None:
+        tuple_report["generated_goal_sketch"]["goal_reached"] = True
+        print(f"Extracted target for Generated with SKETCHGOAL:\n{generated_extracted_target}")
+    else:
+        tuple_report["generated_goal_sketch"]["goal_reached"] = False
+
+    print("---")
 
     return tuple_report
 
 
-def parse_guided_report(
-    report: dict,
-    name: str,
-    stop_reasons: dict[str, DefaultDict[str, int]],
-    goal_reached: DefaultDict[str, int],
-    guide_reached: DefaultDict[str, int],
-    reached_after_guide: DefaultDict[str, int],
-    guide_reduced_mem: DefaultDict[str, int],
-    max_node: dict[str, int],
-):
+def parse_guided_report(report: dict, name: str, summary: dict, max_node: DefaultDict[str, int]):
     max_node[name] = report[name]["report"]["egraph_nodes"]
     if "Other" in report[name]["report"]["stop_reason"]:
         sr = "Goal found"
     else:
         sr = str(list(report[name]["report"]["stop_reason"].keys())[0])
-    stop_reasons[name][sr] += 1
+    summary["stop_reasons"][name][sr] += 1
 
-    if report[name]["reached"]:
-        goal_reached[name] += 1
+    if report[name]["goal_reached"]:
+        summary["goal_reached"][name] += 1
 
     if "report_2" in report[name]:
-        guide_reached[name] += 1
+        summary["guide_reached"][name] += 1
         max_node[name] = max(max_node[name], report[name]["report"]["egraph_nodes"])
-        reached_after_guide[name] += 1
         if max_node[name] < max_node["baseline"]:
-            guide_reduced_mem[name] += 1
+            summary["guide_reduced_mem"][name] += 1
 
 
 if __name__ == "__main__":
@@ -111,97 +137,43 @@ if __name__ == "__main__":
             reports = json.load(f)
 
     max_nodes = []
-    stop_reasons: dict[str, DefaultDict[str, int]] = {
-        "baseline": defaultdict(int),
-        "middle": defaultdict(int),
-        "middle_as_sketch": defaultdict(int),
-        "generated": defaultdict(int),
-    }
+
     guide_reached = defaultdict(int)
-    reached_after_guide = defaultdict(int)
     guide_reduced_mem = defaultdict(int)
     goal_reached = defaultdict(int)
+    summary = {
+        "stop_reasons": {
+            "baseline": defaultdict(int),
+            "gt": defaultdict(int),
+            "gt_goal_sketch": defaultdict(int),
+            "generated": defaultdict(int),
+            "generated_goal_sketch": defaultdict(int),
+        },
+        "guide_reached": defaultdict(int),
+        "guide_reduced_mem": defaultdict(int),
+        "goal_reached": defaultdict(int),
+    }
 
     for report in reports:
-        max_node = {}
+        max_node = defaultdict(int)
 
-        parse_guided_report(
-            report,
-            "baseline",
-            stop_reasons,
-            goal_reached,
-            guide_reached,
-            reached_after_guide,
-            guide_reduced_mem,
-            max_node,
-        )
-        parse_guided_report(
-            report,
-            "middle",
-            stop_reasons,
-            goal_reached,
-            guide_reached,
-            reached_after_guide,
-            guide_reduced_mem,
-            max_node,
-        )
-        parse_guided_report(
-            report,
-            "middle_as_sketch",
-            stop_reasons,
-            goal_reached,
-            guide_reached,
-            reached_after_guide,
-            guide_reduced_mem,
-            max_node,
-        )
-        parse_guided_report(
-            report,
-            "generated",
-            stop_reasons,
-            goal_reached,
-            guide_reached,
-            reached_after_guide,
-            guide_reduced_mem,
-            max_node,
-        )
+        for name in summary["stop_reasons"].keys():
+            parse_guided_report(report, name, summary, max_node)
 
         max_nodes.append(max_node)
 
-    stop_reasons_dict = {k: dict(v) for k, v in stop_reasons.items()}
+    summary = {k: dict(v) for k, v in summary.items()}
+    summary["stop_reasons"] = {k: dict(v) for k, v in summary["stop_reasons"].items()}
 
-    with open(usefulness_path / "node_counts.json", mode="w", encoding="utf-8") as f:
-        json.dump(max_nodes, f)
-
-    with open(usefulness_path / "stop_reasons.json", mode="w", encoding="utf-8") as f:
-        json.dump(stop_reasons_dict, f)
-
-    with open(usefulness_path / "goal_reached.json", mode="w", encoding="utf-8") as f:
-        json.dump(goal_reached, f)
-
-    with open(usefulness_path / "guide_reached.json", mode="w", encoding="utf-8") as f:
-        json.dump(guide_reached, f)
-
-    with open(usefulness_path / "reached_after_guide.json", mode="w", encoding="utf-8") as f:
-        json.dump(reached_after_guide, f)
-
-    with open(usefulness_path / "guide_reduced_mem.json", mode="w", encoding="utf-8") as f:
-        json.dump(guide_reduced_mem, f)
+    with open(usefulness_path / "summary.json", mode="w", encoding="utf-8") as f:
+        json.dump(summary, f)
 
     average_mem = {k: statistics.fmean([d[k] for d in max_nodes]) for k in max_nodes[0]}
 
-    with open(usefulness_path / "average_mem.json", mode="w", encoding="utf-8") as f:
-        json.dump(average_mem, f)
+    # with open(usefulness_path / "average_mem.json", mode="w", encoding="utf-8") as f:
+    #     json.dump(average_mem, f)
 
-    print("---\nSTOP REASONS")
-    print(stop_reasons)
-    print("---\nGOALS REACHED")
-    print(goal_reached)
-    print("---\nGUIDES REACHED")
-    print(guide_reached)
-    print("---\nREACHED AFTER GUIDE")
-    print(reached_after_guide)
-    print("---\nGUIDE REDUCED MEM")
-    print(guide_reduced_mem)
-    print("---\nAVERAGE MEM")
+    print("---\nSummary:")
+    pprint.pp(summary)
+    print("---\nAverage Memory:")
     print(average_mem)

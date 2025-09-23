@@ -166,7 +166,7 @@ resolution-markers = [
     "sys_platform == 'linux'",
 ]
 wheels = [
-    { filename = "eggshell-0.0.1-cp312-abi3-manylinux_2_39_x86_64.whl", hash = "sha256:4a96b5eb972748d7588c6d1eab7d8c0dbe318479b490578ded3f0ae556648e28" },
+    { filename = "eggshell-0.0.1-cp312-abi3-manylinux_2_39_x86_64.whl", hash = "sha256:fedb0457a647ff7d2b380073716dd963f459539197f30384bfb314f8fb78b067" },
 ]
 
 [[package]]
