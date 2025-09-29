@@ -436,31 +436,3 @@ def batch_process_result(
             rank0print(generated)
 
     return batch_gen_triples
-
-
-# def print_distance(distances: list[FirstErrorDistance], ds_name: str):
-#     rank0print(f"\n### AVERAGE DISTANCE IN {ds_name} DATASET ###", "yellow")
-#     n_hits = sum([d.n_hits for d in distances])
-#     rank0print(f"Hits: {n_hits}", "yellow")
-#     n_misses = sum([d.n_misses for d in distances])
-#     rank0print(f"Misses: {n_misses}", "yellow")
-#     perfect_matches = sum([1 for d in distances if d.n_misses == 0])
-#     rank0print(f"Perfect matches: {perfect_matches}", "yellow")
-
-#     avg_hit_prob = _avg_prob([d.hit_probabilities() for d in distances if d])
-#     rank0print(f"Average Hit Probability: {avg_hit_prob}", "yellow")
-#     avg_miss_prob = _avg_prob([d.miss_probabilities() for d in distances if d])
-#     rank0print(f"Average Miss Probability: {avg_miss_prob}", "yellow")
-#     rank0print("\n")
-
-
-def _avg_prob(probs: list[list[float | None]]):
-    avg_prob = 0
-    not_none = 0
-    for i in probs:
-        for j in i:
-            if j:
-                avg_prob += j
-                not_none += 1
-    avg_prob = avg_prob / not_none
-    return avg_prob

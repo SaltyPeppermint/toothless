@@ -1,4 +1,5 @@
 from pathlib import Path
+import json
 
 import torch
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP, MixedPrecision, ShardingStrategy
@@ -7,6 +8,8 @@ import torch.distributed.checkpoint as dcp
 import torch.distributed.checkpoint.state_dict as dcps
 
 import tyro
+from tqdm.auto import tqdm
+
 
 import toothless.inference as infer
 from toothless.utils import count_parameters, cleanup_process_group, rank0print, setup_process_group
@@ -70,21 +73,28 @@ def fsdp_main(rank: int, world_size: int, infer_args: InferArgs, dataset: Triple
     _, eval_dataset = torch.utils.data.random_split(
         dataset, [data_args.split_size, 1 - data_args.split_size], torch.Generator().manual_seed(data_args.rng_seed)
     )
-    unmod_triple = eval_dataset[0]
-    unmod_triple.target_ids = torch.tensor(
-        dataset._tokenize(
-            "(lam (>> f1 (>> (>> transpose (>> (>> transpose transpose) (>> (>> (>> transpose transpose) transpose) transpose))) (>> (>> transpose transpose) transpose))) (>> (lam f2 (>> (>> (lam f3 (lam f4 (lam f5 (lam x3 (app (app map (var f5)) (app (app iterateStream (var f4)) (app (app map (lam mfu26 (app (var f3) (app (var f2) (app (var f1) (var mfu26)))))) (var x3)))))))) transpose) (>> transpose (>> (>> (>> transpose (>> (>> (>> transpose transpose) (>> (>> transpose transpose) (>> transpose transpose))) (>> (>> transpose (>> transpose transpose)) (>> (>> transpose transpose) (>> transpose transpose))))) (>> transpose transpose)) (>> transpose transpose))))) (>> (>> (>> transpose transpose) transpose) transpose)))"
-        ),
-        dtype=torch.long,
-    )
-    triple = [unmod_triple]
-    batch = collator(triple)
-    result = infer.generate_with_probabilities(model, batch, data_args.max_len)
 
-    processed = infer.batch_process_result(
-        dataset.tokenizer, triple, result.tokens.tolist(), result.token_probs.tolist(), 99999, verbose=False
-    )
-    rank0print(f"---\n{processed}")
+    with open("data/frontier7.json") as f:
+        frontier_7_samples = json.loads(f.read())
+    for s in tqdm(frontier_7_samples, desc="Frontier 7 Sample..."):
+        unmod_triple = eval_dataset[0]
+        unmod_triple.target_ids = torch.tensor(
+            dataset._tokenize(s),
+            dtype=torch.long,
+        )
+        triple = [unmod_triple]
+        batch = collator(triple)
+        result = infer.generate_with_probabilities(model, batch, data_args.max_len)
+
+        processed = infer.batch_process_result(
+            dataset.tokenizer,
+            triple,
+            result.tokens.tolist(),
+            result.token_probs.tolist(),
+            99999,
+            verbose=infer_args.verbose,
+        )
+        rank0print(f"---\n{processed}")
 
     cleanup_process_group()
 
