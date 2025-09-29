@@ -15,7 +15,7 @@ from eggshell import rise  # type: ignore
 from toothless.inference import InferResult  # type: ignore
 
 
-MAX_SAMPLES = 5
+MAX_SAMPLES = 5000
 ITER_LIMIT = 6
 
 
@@ -38,7 +38,7 @@ def check_tuple(sample: InferResult) -> dict[str, dict]:
     report_str_1, guide_stuff, goal_reached = rise.eqsat_guide_check(start, gt_guide_sketch, target, iter_limit=i_limit)
     tuple_report["gt"]["report"] = json.loads(report_str_1)["report"]
     tuple_report["gt"]["goal_reached"] = goal_reached
-    if guide_stuff is not None:
+    if guide_stuff:
         report_str_2, gt_extracted_guide = guide_stuff
         tuple_report["gt"]["report_2"] = json.loads(report_str_2)["report"]
         print(f"GT Guide Sketchyfied:\n{gt_guide_sketch}")
@@ -51,7 +51,7 @@ def check_tuple(sample: InferResult) -> dict[str, dict]:
     )
     tuple_report["generated"]["report"] = json.loads(report_str_1)["report"]
     tuple_report["generated"]["goal_reached"] = goal_reached
-    if guide_stuff is not None:
+    if guide_stuff:
         report_str_2, generated_extracted_guide = guide_stuff
         tuple_report["generated"]["report_2"] = json.loads(report_str_2)["report"]
         print(f"Generated Guide Sketchyfied:\n{generated_guide_sketch}")
@@ -65,10 +65,10 @@ def check_tuple(sample: InferResult) -> dict[str, dict]:
         start, gt_guide_sketch, target_sketch, iter_limit=i_limit
     )
     tuple_report["gt_goal_sketch"]["report"] = json.loads(report_str_1)["report"]
-    if guide_stuff is not None:
+    if guide_stuff:
         report_str_2, _ = guide_stuff
         tuple_report["gt_goal_sketch"]["report_2"] = json.loads(report_str_2)["report"]
-    if gt_extracted_goal is not None:
+    if gt_extracted_goal:
         tuple_report["gt_goal_sketch"]["goal_reached"] = True
         print(f"Extracted target for GT with SKETCHGOAL:\n{gt_extracted_goal}")
     else:
@@ -79,10 +79,10 @@ def check_tuple(sample: InferResult) -> dict[str, dict]:
         start, generated_guide_sketch, target_sketch, iter_limit=i_limit
     )
     tuple_report["generated_goal_sketch"]["report"] = json.loads(report_str_1)["report"]
-    if guide_stuff is not None:
+    if guide_stuff:
         report_str_2, _ = guide_stuff
         tuple_report["generated_goal_sketch"]["report_2"] = json.loads(report_str_2)["report"]
-    if generated_extracted_target is not None:
+    if generated_extracted_target:
         tuple_report["generated_goal_sketch"]["goal_reached"] = True
         print(f"Extracted target for Generated with SKETCHGOAL:\n{generated_extracted_target}")
     else:

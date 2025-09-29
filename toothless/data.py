@@ -24,7 +24,7 @@ class Triple:
 
 
 class TripleDataSet(Dataset[Triple]):
-    def __init__(self, conf: DataArgs):
+    def __init__(self, conf: DataArgs, tokenizer_path: Path | None = None):
         """
         :param k represents the max relative distance
         """
@@ -38,17 +38,19 @@ class TripleDataSet(Dataset[Triple]):
         self.index_table_cache_path = self.cache / "index_table_cache.csv"
         self.index_table = self._iterate_samples()
 
+        if tokenizer_path:
+            print("LOADING TOKENIZER FROM FILE")
+            self.tokenizer = Tokenizer.from_file(str(tokenizer_path))
+        else:
+            self.tokenizer = _build_tokenizer(self.index_table, conf.tokenizer_samples, conf.force_reload)
         self.tokenizer_path = self.cache / "tokenizer.json"
-        self.tokenizer = _build_tokenizer(
-            self.index_table, self.tokenizer_path, conf.tokenizer_samples, conf.force_reload
-        )
+
         self.pad_token_id = self.tokenizer.token_to_id("[PAD]")
         self.bos_token_id = self.tokenizer.token_to_id("[CLS]")
         self.eos_token_id = self.tokenizer.token_to_id("[SEP]")
         assert self.pad_token_id == 0
         assert self.bos_token_id == 1
         assert self.eos_token_id == 2
-        self.tokenizer.save(str(self.tokenizer_path))
 
     def _iterate_samples(self) -> pl.DataFrame:
         if self.index_table_cache_path.is_file() and not self.conf.force_reload:
@@ -99,7 +101,7 @@ class TripleDataSet(Dataset[Triple]):
 
     def __len__(self) -> int:
         total_samples = self.index_table["to"].max()
-        if self.conf.n_samples is not None:
+        if self.conf.n_samples:
             return min(total_samples, self.conf.n_samples)  # pyright: ignore[reportArgumentType]
         return total_samples  # type: ignore
 
@@ -122,10 +124,7 @@ def _get_tokenizer_training_corpus(index_table: pl.DataFrame, n_samples: int):
             yield goal["expression"]
 
 
-def _build_tokenizer(index_table: pl.DataFrame, tokenizer_path: Path, n_samples: int, force_reload: bool) -> Tokenizer:
-    if tokenizer_path.is_file() and not force_reload:
-        return Tokenizer.from_file(str(tokenizer_path))
-
+def _build_tokenizer(index_table: pl.DataFrame, n_samples: int, force_reload: bool) -> Tokenizer:
     tokenizer = Tokenizer(models.BPE())
 
     tokenizer.normalizer = normalizers.Sequence(

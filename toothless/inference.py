@@ -43,9 +43,9 @@ class GenerationResult:
     def to_dict(self) -> dict[str, list]:
         """Convert to dictionary for easy serialization."""
         result = {"tokens": self.tokens.tolist(), "token_probs": self.token_probs.tolist()}
-        if self.sequence_probs is not None:
+        if self.sequence_probs:
             result["sequence_probs"] = self.sequence_probs.tolist()
-        if self.attention_weights is not None:
+        if self.attention_weights:
             result["attention_weights"] = self.attention_weights.tolist()
         return result
 
@@ -121,7 +121,7 @@ def generate_with_probabilities(
                 next_token_logits = next_token_logits / temperature
 
             # Apply top-k filtering
-            if top_k is not None:
+            if top_k:
                 top_k_logits, top_k_indices = torch.topk(next_token_logits, top_k, dim=-1)
                 # Set non-top-k logits to -inf
                 filtered_logits = torch.full_like(next_token_logits, float("-inf"))
@@ -132,7 +132,7 @@ def generate_with_probabilities(
             probs = torch.softmax(next_token_logits, dim=-1)
 
         # Apply top-p (nucleus) filtering
-        if top_p is not None:
+        if top_p:
             sorted_probs, sorted_indices = torch.sort(probs, descending=True, dim=-1)
             cumulative_probs = torch.cumsum(sorted_probs, dim=-1)
 
@@ -379,11 +379,12 @@ def batch_process_result(
     triples: list[Triple],
     batch_ids: list[list[int]],
     batch_probs: list[list[float]],
-    path: Path,
     id_offset: int,
-    verbose: bool,
+    verbose: bool = False,
+    path: Path | None = None,
 ) -> list[InferResult]:
-    path = path.absolute()
+    if path:
+        path = path.absolute()
 
     batch_gen_triples = []
     for i, (triple, ids, token_probs) in enumerate(zip(triples, batch_ids, batch_probs)):
@@ -396,10 +397,11 @@ def batch_process_result(
         target_tokens = tokenizer.decode(triple.target_ids.tolist())
         target = rise.RecExpr(target_tokens)
 
-        start.to_dot(f"{sample_id} left", str(path / f"{sample_id}_left"))
-        guide.to_dot(f"{sample_id} middle", str(path / f"{sample_id}_middle"))
-        guide.to_dot(f"{sample_id} middle", str(path / f"{sample_id}_middle_t"), transparent=True)
-        target.to_dot(f"{sample_id} right", str(path / f"{sample_id}_right"))
+        if path:
+            start.to_dot(f"{sample_id} left", str(path / f"{sample_id}_left"))
+            guide.to_dot(f"{sample_id} middle", str(path / f"{sample_id}_middle"))
+            guide.to_dot(f"{sample_id} middle", str(path / f"{sample_id}_middle_t"), transparent=True)
+            target.to_dot(f"{sample_id} right", str(path / f"{sample_id}_right"))
 
         if verbose:
             rank0print("----------")
@@ -424,8 +426,9 @@ def batch_process_result(
             rank0print(e, "red")
             continue
 
-        generated.to_dot(f"{sample_id} generated", str(path / f"{sample_id}_generated"))
-        generated.to_dot(f"{sample_id} generated", str(path / f"{sample_id}_generated_t"), transparent=True)
+        if path:
+            generated.to_dot(f"{sample_id} generated", str(path / f"{sample_id}_generated"))
+            generated.to_dot(f"{sample_id} generated", str(path / f"{sample_id}_generated_t"), transparent=True)
         batch_gen_triples.append(InferResult(str(start), str(guide), str(target), str(generated), ids, token_probs))
 
         if verbose:
@@ -456,7 +459,7 @@ def _avg_prob(probs: list[list[float | None]]):
     not_none = 0
     for i in probs:
         for j in i:
-            if j is not None:
+            if j:
                 avg_prob += j
                 not_none += 1
     avg_prob = avg_prob / not_none

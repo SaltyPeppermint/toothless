@@ -1,5 +1,4 @@
 uv run infer.py \
-    --infer_data "data/infer_data.json" \
     --folder "models/25-09-17-16:34:00" \
     --model-suffix "0" \
     --n-train-data 4096 \

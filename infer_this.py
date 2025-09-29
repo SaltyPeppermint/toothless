@@ -3,19 +3,15 @@ from pathlib import Path
 import torch
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP, MixedPrecision, ShardingStrategy
 import torch.multiprocessing as mp
-from torch.utils.data import Subset
 import torch.distributed.checkpoint as dcp
 import torch.distributed.checkpoint.state_dict as dcps
 
 import tyro
-from tqdm.auto import tqdm
-from tokenizers import Tokenizer
-
 
 import toothless.inference as infer
 from toothless.utils import count_parameters, cleanup_process_group, rank0print, setup_process_group
 from toothless.collators import TripleDualCollator
-from toothless.data import TripleDataSet, Triple
+from toothless.data import TripleDataSet
 from toothless.model import DualTransformer
 from toothless.args import DataArgs, InferArgs, ModelArgs
 
@@ -71,72 +67,26 @@ def fsdp_main(rank: int, world_size: int, infer_args: InferArgs, dataset: Triple
 
     collator = TripleDualCollator(data_args.max_len)
 
-    # Running inference on dataset samples
-    train_dataset, eval_dataset = torch.utils.data.random_split(
+    _, eval_dataset = torch.utils.data.random_split(
         dataset, [data_args.split_size, 1 - data_args.split_size], torch.Generator().manual_seed(data_args.rng_seed)
     )
-
-    train_gen_triples = _batch_infer(
-        data_args, infer_args, dataset.tokenizer, model, collator, train_dataset, "train", eval_folder
+    unmod_triple = eval_dataset[0]
+    unmod_triple.target_ids = torch.tensor(
+        dataset._tokenize(
+            "(lam (>> f1 (>> (>> transpose (>> (>> transpose transpose) (>> (>> (>> transpose transpose) transpose) transpose))) (>> (>> transpose transpose) transpose))) (>> (lam f2 (>> (>> (lam f3 (lam f4 (lam f5 (lam x3 (app (app map (var f5)) (app (app iterateStream (var f4)) (app (app map (lam mfu26 (app (var f3) (app (var f2) (app (var f1) (var mfu26)))))) (var x3)))))))) transpose) (>> transpose (>> (>> (>> transpose (>> (>> (>> transpose transpose) (>> (>> transpose transpose) (>> transpose transpose))) (>> (>> transpose (>> transpose transpose)) (>> (>> transpose transpose) (>> transpose transpose))))) (>> transpose transpose)) (>> transpose transpose))))) (>> (>> (>> transpose transpose) transpose) transpose)))"
+        ),
+        dtype=torch.long,
     )
-    with open(eval_folder / "train_gen_triples.json", mode="w", encoding="utf-8") as f:
-        f.write(infer.InferResult.list_to_json(train_gen_triples))
-    del train_gen_triples
-    # infer.print_distance(train_distances, "TRAIN")
+    triple = [unmod_triple]
+    batch = collator(triple)
+    result = infer.generate_with_probabilities(model, batch, data_args.max_len)
 
-    eval_gen_triples = _batch_infer(
-        data_args, infer_args, dataset.tokenizer, model, collator, eval_dataset, "eval", eval_folder
+    processed = infer.batch_process_result(
+        dataset.tokenizer, triple, result.tokens.tolist(), result.token_probs.tolist(), 99999, verbose=False
     )
-    with open(eval_folder / "eval_gen_triples.json", mode="w", encoding="utf-8") as f:
-        f.write(infer.InferResult.list_to_json(eval_gen_triples))
-    del eval_gen_triples
-    # infer.print_distance(eval_distances, "EVAL")
+    rank0print(f"---\n{processed}")
 
     cleanup_process_group()
-
-
-def _batch_infer(
-    data_args: DataArgs,
-    infer_args: InferArgs,
-    tokenizer: Tokenizer,
-    model: FSDP,
-    collator: TripleDualCollator,
-    dataset: Subset[Triple],
-    ds_name: str,
-    eval_folder: Path,
-) -> list[infer.InferResult]:
-    if ds_name == "eval":
-        n = infer_args.n_eval_data if infer_args.n_eval_data else len(dataset)
-    elif ds_name == "train":
-        n = infer_args.n_train_data if infer_args.n_train_data else len(dataset)
-    else:
-        raise ValueError("Unknown Dataset name")
-
-    rank0print(f"\n=================\nRunning inference on {n} samples of {ds_name} dataset ...")
-    gen_triples = []
-
-    n = infer_args.n_eval_data if infer_args.n_eval_data else len(dataset)
-
-    for i in tqdm(range(0, n, infer_args.batch_size), desc=f"Inference Batch (Batch Size {infer_args.batch_size})"):
-        triples = [dataset[i] for i in range(i, i + infer_args.batch_size)]
-        batch = collator(triples)
-        result = infer.generate_with_probabilities(model, batch, data_args.max_len)
-
-        p = Path(eval_folder / "viz/asts/")
-        p.mkdir(parents=True, exist_ok=True)
-        batch_gen_triples = infer.batch_process_result(
-            tokenizer,
-            triples,
-            result.tokens.tolist(),
-            result.token_probs.tolist(),
-            i,
-            verbose=infer_args.verbose,
-            path=p,
-        )
-        gen_triples.extend(batch_gen_triples)
-        del batch, result
-
-    return gen_triples
 
 
 if __name__ == "__main__":

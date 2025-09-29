@@ -163,7 +163,7 @@ def profil_model(
     # Move batch to device
     batch = {k: v.to(rank) for k, v in batch.items()}
 
-    if writer is not None:
+    if writer:
         writer.add_graph(model, batch)
 
     logits = model(batch)
@@ -227,7 +227,7 @@ def train(
             cosine_scheduler.step()  # Cosine decay
             last_lr = cosine_scheduler.get_last_lr()
 
-        if writer is not None:
+        if writer:
             writer.add_scalar("Train/batch-loss", loss, batch_idx + epoch * len(dataloader))
             writer.add_scalar("Train/batch-LR", last_lr[-1], batch_idx + epoch * len(dataloader))
             writer.add_scalar("Train/batch-tokens", num_tokens, batch_idx + epoch * len(dataloader))
@@ -238,7 +238,7 @@ def train(
 
     dist.all_reduce(ddp_loss, op=dist.ReduceOp.SUM)
     train_loss = ddp_loss[0] / ddp_loss[1]
-    if writer is not None:
+    if writer:
         writer.add_scalar("Train/epoch-loss", train_loss, epoch + 1)
 
     rank0print(f"Epoch: {epoch + 1}/{train_args.epochs} \tTrain Loss: {train_loss:.6f}")
@@ -273,7 +273,7 @@ def evalulate(
 
     dist.all_reduce(ddp_loss, op=dist.ReduceOp.SUM)
     eval_loss = ddp_loss[0] / ddp_loss[1]
-    if writer is not None:
+    if writer:
         writer.add_scalar("Eval/epoch-loss", eval_loss, epoch + 1)
 
     rank0print(f"Epoch: {epoch + 1}/{max_epochs} \tValidation loss: {eval_loss:.4f}")

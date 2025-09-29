@@ -54,10 +54,9 @@ class FullArgs(JSONWizard):
 
 @dataclass
 class InferArgs(JSONWizard):
-    infer_data: str
     folder: str
-    n_train_data: int | None
-    n_eval_data: int | None
     batch_size: int
     model_suffix: str
+    n_train_data: int | None = field(default=None)
+    n_eval_data: int | None = field(default=None)
     verbose: bool = field(default=False)
