@@ -98,7 +98,9 @@ def parse_guided_report(report: dict, name: str, summary: dict, max_node: Defaul
     if "Other" in report[name]["report"]["stop_reason"]:
         sr = "Goal found"
     else:
-        sr = str(list(report[name]["report"]["stop_reason"].keys())[0])
+        sr = report[name]["report"]["stop_reason"]
+        if isinstance(sr, dict):
+            sr = list(sr.keys())[0]
     summary["stop_reasons"][name][sr] += 1
 
     if report[name]["goal_reached"]:
