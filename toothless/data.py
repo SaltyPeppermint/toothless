@@ -113,19 +113,15 @@ class TripleDataSet(Dataset[Triple]):
 def _get_tokenizer_training_corpus(index_table: pl.DataFrame, n_samples: int):
     i = 0
     for entry in index_table.iter_rows(named=True):
-        if i > n_samples:
-            break
         with open(str(entry["path"]), mode="r", encoding="utf-8") as f:
             file = json.load(f)
-        if i == 0:
-            i += 1
-            yield file["start_expr"]
-
-        i += 1
-        yield file["midpoint"]["midpoint"]["expression"]
-        for goal in file["midpoint"]["goals"]:
-            i += 1
-            yield goal["expression"]
+        chain = file["chain"]
+        if len(chain) > 3:  # Useful chain fo len at least 3
+            for term in chain:
+                yield term
+                i += 1
+                if i > n_samples:
+                    return
 
 
 def _build_tokenizer(index_table: pl.DataFrame, n_samples: int, force_reload: bool) -> Tokenizer:
