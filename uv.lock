@@ -155,7 +155,7 @@ resolution-markers = [
     "sys_platform == 'darwin'",
 ]
 wheels = [
-    { filename = "eggshell-0.0.1-cp312-abi3-macosx_11_0_arm64.whl", hash = "sha256:19e75e48de40eb8ad978dae53a14e0e99c8d41a661c1ca9b272a18889d067424" },
+    { filename = "eggshell-0.0.1-cp312-abi3-macosx_11_0_arm64.whl", hash = "sha256:d42ccdf6191384747d40a60a7c39e633490223e47aa23f876af21bb4d5ee2b08" },
 ]
 
 [[package]]
@@ -166,7 +166,7 @@ resolution-markers = [
     "sys_platform == 'linux'",
 ]
 wheels = [
-    { filename = "eggshell-0.0.1-cp312-abi3-manylinux_2_39_x86_64.whl", hash = "sha256:9f5a4eee68b60298b169c6f363fc488af732164ddeee059ce34616a5e1f4b1fd" },
+    { filename = "eggshell-0.0.1-cp312-abi3-manylinux_2_39_x86_64.whl", hash = "sha256:3fa636d01734d5aecf90291e1138bcb36796188717c39539032407ad685674f1" },
 ]
 
 [[package]]
