@@ -65,10 +65,12 @@ class TripleDataSet(Dataset[Triple]):
         for batch_file in tqdm(json_files, desc="Enumerating tripples"):
             with open(batch_file, mode="r", encoding="utf-8") as f:
                 file = json.load(f)
-            j = i + len(file["midpoint"]["goals"])
-            entries.append([i, j, str(batch_file)])
+            chain = file["chain"]
+            if len(chain) > 3:  # Useful chain fo len at least 3
+                j = i + len(chain) - 2
+                entries.append([i, j, str(batch_file)])
+                i = j
 
-            i = j
         df = pl.DataFrame(entries, schema=SCHEMA, orient="row")
         df.write_csv(self.index_table_cache_path)
 
@@ -89,9 +91,11 @@ class TripleDataSet(Dataset[Triple]):
 
         with open(str(result["path"]), mode="r", encoding="utf-8") as f:
             file = json.load(f)
-        start = file["start_expr"]
-        guide = file["midpoint"]["midpoint"]["expression"]
-        target = file["midpoint"]["goals"][idx - result["from"]]["expression"]
+        offset = idx - result["from"]
+
+        start = file["chain"][offset]
+        guide = file["chain"][offset + 1]
+        target = file["chain"][offset + 2]
 
         return Triple(
             torch.tensor(self._tokenize(start), dtype=torch.long),
