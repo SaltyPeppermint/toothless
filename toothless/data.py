@@ -67,7 +67,7 @@ class TripleDataSet(Dataset[Triple]):
                 file = json.load(f)
             chain = file["chain"]
             if len(chain) > 3:  # Useful chain fo len at least 3
-                j = i + len(chain) - 2
+                j = i + len(chain) - 2  # Triples in chain
                 entries.append([i, j, str(batch_file)])
                 i = j
 
@@ -110,6 +110,7 @@ class TripleDataSet(Dataset[Triple]):
         return total_samples  # type: ignore
 
 
+# Same logic as the loop in _iterate_samples
 def _get_tokenizer_training_corpus(index_table: pl.DataFrame, n_samples: int):
     i = 0
     for entry in index_table.iter_rows(named=True):
