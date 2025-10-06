@@ -1,5 +1,5 @@
 uv run infer.py \
-    --folder "models/25-09-17-16:34:00" \
+    --folder "models/25-10-06-12:54:16" \
     --model-suffix "0" \
     --n-train-data 4096 \
     --n-eval-data 4096 \

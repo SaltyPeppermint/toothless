@@ -30,19 +30,15 @@ singularity exec --nv --bind /beegfs:/mnt /scratch/heinimann/container.sif \
     git clone https://github.com/SaltyPeppermint/toothless /tmp/toothless
 
 singularity exec --nv --bind /beegfs:/mnt /scratch/heinimann/container.sif \
-    /venv/bin/python3 /tmp/toothless/train.py \
-    --data-path "/mnt/scratch/heinimann/data/generated_samples/rise/start_and_goal-2025-08-27T13:10:58.282370017+02:00/0" \
-    --cache-dir "/mnt/scratch/heinimann/cache" \
-    --sample-cache-dir "/tmp/sample_cache" \
-    --output-dir "/mnt/home/users/h/heinimann/models" \
-    --run-log-dir "/mnt/home/users/h/heinimann/runs" \
-    --save_model_end True \
-    --batch-size 64 \
-    --logging_steps 1 \
-    --num-layers 12 \
-    --sample-distance 8 \
-    --epochs 1 \
-    --warmup-steps 500
-# --data-limit 1000000
-
-# /venv/bin/torchrun --nproc_per_node 1 --nnodes 1 --node_rank 0 --master_addr localhost --master_port 6601 \ &
+    /venv/bin/python3 train.py \
+    --train.save-model-end \
+    --train.logging-steps 1 \
+    --train.epochs 1 \
+    --train.batch-size 128 \
+    --train.warmup-steps 64 \
+    --model.num-layers 12 \
+    --model.head-dim 64 \
+    --model.output-dir "models" \
+    --data.max-len 512 \
+    --data.n-samples 2000000 \
+    --data.data-path "data/start_and_goal-2025-10-02T23:08:10.859631049+02:00/0"

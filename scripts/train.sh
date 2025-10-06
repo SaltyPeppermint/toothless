@@ -9,6 +9,4 @@ uv run train.py \
     --model.output-dir "models" \
     --data.max-len 512 \
     --data.n-samples 2000000 \
-    --data.data-path "data/start_and_goal-2025-10-02T23:08:10.859631049+02:00/0" \
-
-#torchrun --nproc_per_node 1 --nnodes 1 --node_rank 0 --master_addr localhost --master_port 6601
+    --data.data-path "data/start_and_goal-2025-10-02T23:08:10.859631049+02:00/0"
