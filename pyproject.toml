@@ -3,7 +3,7 @@ name = "toothless"
 version = "0.1.0"
 description = "ML for EGraphs"
 readme = "README.md"
-requires-python = ">=3.13"
+requires-python = ">=3.12"
 dependencies = [
   "matplotlib>=3",
   "tensorboard>=2",

@@ -34,13 +34,14 @@ def fsdp_main(rank: int, world_size: int, infer_args: InferArgs, dataset: Triple
         model_args = ModelArgs.from_json(f.read())
     assert isinstance(model_args, ModelArgs)
     assert isinstance(data_args, DataArgs)
+    assert vocab_size <= model_args.vocab_size
 
     eval_folder = Path(infer_args.folder) / "eval"
     eval_folder.mkdir(exist_ok=True, parents=True)
 
     # Construct Base Model
 
-    model = DualTransformer(model_args, vocab_size)
+    model = DualTransformer(model_args)
     rank0print("Base model ready")
 
     # FSDP model and Mixed Precision Config
@@ -56,7 +57,7 @@ def fsdp_main(rank: int, world_size: int, infer_args: InferArgs, dataset: Triple
     )
 
     model_state_dict = dcps.get_model_state_dict(model)
-    dcp.load(state_dict=model_state_dict, checkpoint_id=infer_args.folder + f"/weights/{infer_args.model_suffix}")
+    dcp.load(state_dict=model_state_dict, checkpoint_id=infer_args.folder + f"/weights/{infer_args.model_suffix}")  # pyright: ignore[reportPrivateImportUsage]
     dcps.set_model_state_dict(model, model_state_dict)
 
     model.eval()
@@ -110,5 +111,5 @@ if __name__ == "__main__":
 
     world_size = torch.cuda.device_count()
 
-    mp.spawn(fsdp_main, args=(world_size, infer_args, dataset), nprocs=world_size, join=True)
+    mp.spawn(fsdp_main, args=(world_size, infer_args, dataset), nprocs=world_size, join=True)  # pyright: ignore[reportPrivateImportUsage]
     print("DONE")

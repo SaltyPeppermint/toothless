@@ -10,15 +10,15 @@ from .args import ModelArgs
 
 
 class DualTransformer(nn.Module):
-    def __init__(self, conf: ModelArgs, vocab_size: int, pad_token_id: int = 0):
+    def __init__(self, conf: ModelArgs = ModelArgs(), pad_token_id: int = 0):
         super(DualTransformer, self).__init__()
 
         self.d_model = conf.d_model
         self.pad_token_id = pad_token_id
 
-        self.l_embedding = nn.Embedding(vocab_size, conf.d_model)
-        self.target_embedding = nn.Embedding(vocab_size, conf.d_model)
-        self.tgt_embedding = nn.Embedding(vocab_size, conf.d_model)
+        self.l_embedding = nn.Embedding(conf.vocab_size, conf.d_model)
+        self.target_embedding = nn.Embedding(conf.vocab_size, conf.d_model)
+        self.tgt_embedding = nn.Embedding(conf.vocab_size, conf.d_model)
 
         # Encoders
         self.start_encoder = nn.ModuleList([EncoderLayer(conf) for _ in range(conf.num_layers)])
@@ -28,7 +28,7 @@ class DualTransformer(nn.Module):
         self.decoder = nn.ModuleList([DualDecoderLayer(conf) for _ in range(conf.num_layers)])
 
         # Output projection
-        self.output_proj = nn.Linear(conf.d_model, vocab_size)
+        self.output_proj = nn.Linear(conf.d_model, conf.vocab_size)
         self.output_norm = nn.RMSNorm(conf.d_model)
 
         for p in self.parameters():

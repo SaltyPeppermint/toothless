@@ -32,10 +32,12 @@ def fsdp_main(rank: int, world_size: int, args: FullArgs, dataset: TripleDataSet
     rank0print("Distributed Network ready")
     torch.cuda.set_device(rank)
 
-    save_folder = get_save_folder(args.model, start_time_str)
+    save_folder = get_save_folder(args.train, start_time_str)
 
     # Load Data
     vocab_size = dataset.tokenizer.get_vocab_size()
+    assert vocab_size <= args.model.vocab_size
+
     collator = TripleDualCollator(args.data.max_len)
     train_dataloader, eval_dataloader = mk_loaders(
         rank, world_size, dataset, collator, args.data, args.train.batch_size
@@ -120,7 +122,7 @@ def fsdp_main(rank: int, world_size: int, args: FullArgs, dataset: TripleDataSet
 
         # use a barrier to make sure training is done on all ranks
         model_state_dict, _optimizer_state_dict = get_state_dict(model, optimizer)
-        _checkpoint_future = dcp.async_save(model_state_dict, checkpoint_id=save_folder / "weights" / f"{epoch}")
+        _checkpoint_future = dcp.async_save(model_state_dict, checkpoint_id=save_folder / "weights" / f"{epoch}")  # pyright: ignore[reportPrivateImportUsage]
 
         # Optionally, evaluate the model on the validation set after each epoch
         if args.train.eval_each_epoch:
@@ -130,7 +132,7 @@ def fsdp_main(rank: int, world_size: int, args: FullArgs, dataset: TripleDataSet
             if eval_loss < best_eval_loss:
                 best_eval_loss = eval_loss
                 model_state_dict, _optimizer_state_dict = get_state_dict(model, optimizer)
-                _checkpoint_future = dcp.async_save(
+                _checkpoint_future = dcp.async_save(  # pyright: ignore[reportPrivateImportUsage]
                     model_state_dict, checkpoint_id=save_folder / "weights" / "best_eval"
                 )
 
@@ -144,7 +146,7 @@ def fsdp_main(rank: int, world_size: int, args: FullArgs, dataset: TripleDataSet
     rank0print(f"CUDA event elapsed time: {init_start_event.elapsed_time(init_end_event) / 1000} sec")
 
     model_state_dict, _optimizer_state_dict = get_state_dict(model, optimizer)
-    _checkpoint_future = dcp.async_save(model_state_dict, checkpoint_id=save_folder / "weights" / "final")
+    _checkpoint_future = dcp.async_save(model_state_dict, checkpoint_id=save_folder / "weights" / "final")  # pyright: ignore[reportPrivateImportUsage]
 
     cleanup_process_group()
 
@@ -287,7 +289,7 @@ if __name__ == "__main__":
 
     start_time_str = start_time.strftime("%y-%m-%d-%H:%M:%S")
 
-    save_folder = get_save_folder(args.model, start_time_str)
+    save_folder = get_save_folder(args.train, start_time_str)
     save_folder.mkdir(exist_ok=True, parents=True)
 
     with open(save_folder / "model_args.json", mode="w", encoding="utf-8") as f:
@@ -304,7 +306,7 @@ if __name__ == "__main__":
 
     world_size = torch.cuda.device_count()
 
-    mp.spawn(fsdp_main, args=(world_size, args, dataset, start_time_str), nprocs=world_size, join=True)
+    mp.spawn(fsdp_main, args=(world_size, args, dataset, start_time_str), nprocs=world_size, join=True)  # pyright: ignore[reportPrivateImportUsage]
 
     (save_folder / "FINISHED").touch()
     print("DONE")

@@ -9,11 +9,11 @@ from torch import nn, Tensor
 from termcolor import cprint
 from prettytable import PrettyTable
 
-from toothless.args import ModelArgs
+from toothless.args import TrainArgs
 
 
-def get_save_folder(model_args: ModelArgs, start_time_str: str) -> Path:
-    return Path(model_args.output_dir) / start_time_str
+def get_save_folder(train_args: TrainArgs, start_time_str: str) -> Path:
+    return Path(train_args.output_dir) / start_time_str
 
 
 def count_parameters(model: nn.Module) -> tuple[PrettyTable, int]:

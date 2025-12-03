@@ -5,9 +5,9 @@ from dataclass_wizard import JSONWizard
 
 @dataclass
 class ModelArgs(JSONWizard):
-    output_dir: str = field(default="model")
     d_model: int = field(default=768, metadata={"help": "Hidden state dimension size."})
     num_layers: int = field(default=12)
+    vocab_size: int = field(default=64)
     head_dim: int = field(default=64)
     dim_feed_forward: int = field(default=3072, metadata={"help": "Feed forward dimension size."})
     dropout: float = field(default=0.1)
@@ -21,7 +21,7 @@ class DataArgs(JSONWizard):
     cache_dir: str = field(default="cache")
     split_size: float = field(default=0.9, metadata={"help": "Train/Test split ratio."})
     rng_seed: int = field(default=42)
-    max_len: int = field(default=256)
+    max_len: int = field(default=512)
     n_samples: int | None = field(default=None)
     tokenizer_samples: int = field(default=1_000_000)
     force_reload: bool = field(default=False)
@@ -29,7 +29,8 @@ class DataArgs(JSONWizard):
 
 @dataclass
 class TrainArgs(JSONWizard):
-    epochs: int = field(default=4)
+    output_dir: str = field(default="model")
+    epochs: int = field(default=1)
     batch_size: int = field(default=16)
     learning_rate: float = field(default=1e-5)
     weight_decay: float = field(default=0.1)
