@@ -14,12 +14,13 @@ dependencies = [
   "torch-tb-profiler>=0.4",
   "standard-imghdr>=3",
   "prettytable>=3",
-  "dataclass-wizard>=0.35",
+  "dataclass-wizard>=0.39",
   "termcolor>=3",
-  "tyro>=0.9",
+  "tyro>=1",
   "plotly>=6",
   # "eggshell",
   "tokenizers>=0.22",
+  "transformers>=4",
 ]
 
 [tool.setuptools]
