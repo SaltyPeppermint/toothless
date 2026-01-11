@@ -156,37 +156,6 @@ wheels = [
 ]
 
 [[package]]
-name = "eggshell"
-version = "0.0.1"
-source = { path = "cache/eggshell-0.0.1-cp312-abi3-macosx_11_0_arm64.whl" }
-resolution-markers = [
-    "sys_platform == 'darwin'",
-]
-wheels = [
-    { filename = "eggshell-0.0.1-cp312-abi3-macosx_11_0_arm64.whl", hash = "sha256:7b59d2c00df792e601658ca790ee6f550ccd52eb660ebf291852be8ccdef2314" },
-]
-
-[[package]]
-name = "eggshell"
-version = "0.0.1"
-source = { path = "cache/eggshell-0.0.1-cp312-abi3-manylinux_2_39_x86_64.whl" }
-resolution-markers = [
-    "sys_platform == 'linux'",
-]
-wheels = [
-    { filename = "eggshell-0.0.1-cp312-abi3-manylinux_2_39_x86_64.whl", hash = "sha256:67f095f3f7d5b528eff144b74fb2ccd83179914004c67884c25a388d7297a001" },
-]
-
-[[package]]
-name = "eggshell"
-version = "1.0"
-source = { registry = "https://pypi.org/simple" }
-resolution-markers = [
-    "sys_platform != 'darwin' and sys_platform != 'linux'",
-]
-sdist = { url = "https://files.pythonhosted.org/packages/3c/0b/64fefa67e8f37d7ae62ba654862f41e1716edc6ad7e5c8b00aa005cc288d/eggshell-1.0.tar.gz", hash = "sha256:bd44d3bae3e1a6821bb56a4a56cb042a54ac6189f69fe7472de62e68fd6969de", size = 1152, upload-time = "2014-09-29T18:59:01.141Z" }
-
-[[package]]
 name = "filelock"
 version = "3.20.0"
 source = { registry = "https://pypi.org/simple" }
@@ -1262,9 +1231,6 @@ version = "0.1.0"
 source = { virtual = "." }
 dependencies = [
     { name = "dataclass-wizard" },
-    { name = "eggshell", version = "0.0.1", source = { path = "cache/eggshell-0.0.1-cp312-abi3-macosx_11_0_arm64.whl" }, marker = "sys_platform == 'darwin'" },
-    { name = "eggshell", version = "0.0.1", source = { path = "cache/eggshell-0.0.1-cp312-abi3-manylinux_2_39_x86_64.whl" }, marker = "sys_platform == 'linux'" },
-    { name = "eggshell", version = "1.0", source = { registry = "https://pypi.org/simple" }, marker = "sys_platform != 'darwin' and sys_platform != 'linux'" },
     { name = "matplotlib" },
     { name = "plotly" },
     { name = "polars" },
@@ -1283,9 +1249,6 @@ dependencies = [
 [package.metadata]
 requires-dist = [
     { name = "dataclass-wizard", specifier = ">=0.35" },
-    { name = "eggshell", marker = "sys_platform != 'darwin' and sys_platform != 'linux'" },
-    { name = "eggshell", marker = "sys_platform == 'darwin'", path = "cache/eggshell-0.0.1-cp312-abi3-macosx_11_0_arm64.whl" },
-    { name = "eggshell", marker = "sys_platform == 'linux'", path = "cache/eggshell-0.0.1-cp312-abi3-manylinux_2_39_x86_64.whl" },
     { name = "matplotlib", specifier = ">=3" },
     { name = "plotly", specifier = ">=6" },
     { name = "polars", specifier = ">=1" },

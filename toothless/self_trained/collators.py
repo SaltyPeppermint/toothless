@@ -3,11 +3,11 @@ from typing import Sequence
 import torch
 import torch.nn.functional as F
 from torch import Tensor
-from torch.utils.data.distributed import DistributedSampler
 from torch.utils.data import DataLoader
+from torch.utils.data.distributed import DistributedSampler
 
-from .data import TripleDataSet, Triple
 from .args import DataArgs
+from .data import Triple, TripleDataSet
 
 
 class TripleCollator:
@@ -26,7 +26,9 @@ class TripleCollator:
             current_length = tensor.shape[0]
 
             if current_length > self.target_length:
-                raise ValueError(f"Tensor length {current_length} exceeds target length {self.target_length}")
+                raise ValueError(
+                    f"Tensor length {current_length} exceeds target length {self.target_length}"
+                )
 
             mask = torch.ones(self.target_length, dtype=torch.bool)
             mask[current_length:] = False
@@ -105,7 +107,9 @@ def mk_loaders(
     )
 
     # Create samplers
-    train_sampler = DistributedSampler(train_dataset, rank=rank, num_replicas=world_size, shuffle=shuffle)
+    train_sampler = DistributedSampler(
+        train_dataset, rank=rank, num_replicas=world_size, shuffle=shuffle
+    )
     eval_sampler = DistributedSampler(eval_dataset, rank=rank, num_replicas=world_size)
 
     # Create the dataloaders

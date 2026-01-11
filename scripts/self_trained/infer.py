@@ -1,23 +1,27 @@
 from pathlib import Path
 
 import torch
-from torch.distributed.fsdp import FullyShardedDataParallel as FSDP, MixedPrecision, ShardingStrategy
-import torch.multiprocessing as mp
-from torch.utils.data import Subset
 import torch.distributed.checkpoint as dcp
 import torch.distributed.checkpoint.state_dict as dcps
-
+import torch.multiprocessing as mp
 import tyro
-from tqdm.auto import tqdm
 from tokenizers import Tokenizer
+from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
+from torch.distributed.fsdp import MixedPrecision, ShardingStrategy
+from torch.utils.data import Subset
+from tqdm.auto import tqdm
 
-
-import toothless.inference as infer
-from toothless.utils import count_parameters, cleanup_process_group, rank0print, setup_process_group
-from toothless.collators import TripleDualCollator
-from toothless.data import TripleDataSet, Triple
-from toothless.model import DualTransformer
-from toothless.args import DataArgs, InferArgs, ModelArgs
+import toothless.self_trained.inference as infer
+from toothless.self_trained.args import DataArgs, InferArgs, ModelArgs
+from toothless.self_trained.collators import TripleDualCollator
+from toothless.self_trained.data import Triple, TripleDataSet
+from toothless.self_trained.model import DualTransformer
+from toothless.self_trained.utils import (
+    cleanup_process_group,
+    count_parameters,
+    rank0print,
+    setup_process_group,
+)
 
 torch.set_float32_matmul_precision("high")
 
@@ -57,7 +61,10 @@ def fsdp_main(rank: int, world_size: int, infer_args: InferArgs, dataset: Triple
     )
 
     model_state_dict = dcps.get_model_state_dict(model)
-    dcp.load(state_dict=model_state_dict, checkpoint_id=infer_args.folder + f"/weights/{infer_args.model_suffix}")  # pyright: ignore[reportPrivateImportUsage]
+    dcp.load(  # pyright: ignore[reportPrivateImportUsage]
+        state_dict=model_state_dict,
+        checkpoint_id=infer_args.folder + f"/weights/{infer_args.model_suffix}",
+    )
     dcps.set_model_state_dict(model, model_state_dict)
 
     model.eval()
@@ -73,11 +80,20 @@ def fsdp_main(rank: int, world_size: int, infer_args: InferArgs, dataset: Triple
 
     # Running inference on dataset samples
     train_dataset, eval_dataset = torch.utils.data.random_split(
-        dataset, [data_args.split_size, 1 - data_args.split_size], torch.Generator().manual_seed(data_args.rng_seed)
+        dataset,
+        [data_args.split_size, 1 - data_args.split_size],
+        torch.Generator().manual_seed(data_args.rng_seed),
     )
 
     train_gen_triples = _batch_infer(
-        data_args, infer_args, dataset.tokenizer, model, collator, train_dataset, "train", eval_folder
+        data_args,
+        infer_args,
+        dataset.tokenizer,
+        model,
+        collator,
+        train_dataset,
+        "train",
+        eval_folder,
     )
     with open(eval_folder / "train_gen_triples.json", mode="w", encoding="utf-8") as f:
         f.write(infer.InferResult.list_to_json(train_gen_triples))
@@ -117,7 +133,10 @@ def _batch_infer(
 
     n = infer_args.n_eval_data if infer_args.n_eval_data else len(dataset)
 
-    for i in tqdm(range(0, n, infer_args.batch_size), desc=f"Inference Batch (Batch Size {infer_args.batch_size})"):
+    for i in tqdm(
+        range(0, n, infer_args.batch_size),
+        desc=f"Inference Batch (Batch Size {infer_args.batch_size})",
+    ):
         triples = [dataset[i] for i in range(i, i + infer_args.batch_size)]
         batch = collator(triples)
         result = infer.generate_with_probabilities(model, batch, data_args.max_len)

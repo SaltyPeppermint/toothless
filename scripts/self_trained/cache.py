@@ -1,8 +1,7 @@
 import tyro
 
-from toothless.data import TripleDataSet
-from toothless.args import DataArgs
-
+from toothless.self_trained.args import DataArgs
+from toothless.self_trained.data import TripleDataSet
 
 if __name__ == "__main__":
     data_args = tyro.cli(DataArgs)

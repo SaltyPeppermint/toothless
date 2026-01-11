@@ -1,3 +1,4 @@
+uv pip install -e .
 uv run infer.py \
     --folder "models/25-10-06-12:54:16" \
     --model-suffix "0" \

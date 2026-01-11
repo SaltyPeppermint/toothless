@@ -1,33 +1,39 @@
 import copy
-from pathlib import Path
 from datetime import datetime
+from pathlib import Path
 
 import torch
-import torch.multiprocessing as mp
 import torch.distributed as dist
 import torch.distributed.checkpoint as dcp
-
+import torch.multiprocessing as mp
+import tyro
 from torch import nn, optim
+from torch.distributed.checkpoint.state_dict import get_state_dict
+from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
+from torch.distributed.fsdp import MixedPrecision, ShardingStrategy
 from torch.nn import CrossEntropyLoss
 from torch.optim.lr_scheduler import CosineAnnealingLR, LinearLR
-from torch.distributed.fsdp import FullyShardedDataParallel as FSDP, MixedPrecision, ShardingStrategy
+from torch.profiler import ProfilerActivity, profile
 from torch.utils.data import DataLoader
 from torch.utils.tensorboard.writer import SummaryWriter
-from torch.profiler import profile, ProfilerActivity
-from torch.distributed.checkpoint.state_dict import get_state_dict
-
 from tqdm.auto import tqdm
-import tyro
 
-from toothless.collators import TripleDualCollator, mk_loaders
-from toothless.utils import cleanup_process_group, rank0print, setup_process_group
-from toothless.data import TripleDataSet, Triple
-from toothless.model import DualTransformer
-from toothless.utils import count_parameters, get_save_folder
-from toothless.args import TrainArgs, FullArgs
+from toothless.self_trained.args import FullArgs, TrainArgs
+from toothless.self_trained.collators import TripleDualCollator, mk_loaders
+from toothless.self_trained.data import Triple, TripleDataSet
+from toothless.self_trained.model import DualTransformer
+from toothless.self_trained.utils import (
+    cleanup_process_group,
+    count_parameters,
+    get_save_folder,
+    rank0print,
+    setup_process_group,
+)
 
 
-def fsdp_main(rank: int, world_size: int, args: FullArgs, dataset: TripleDataSet, start_time_str: str):
+def fsdp_main(
+    rank: int, world_size: int, args: FullArgs, dataset: TripleDataSet, start_time_str: str
+):
     setup_process_group(rank, world_size)
     rank0print("Distributed Network ready")
     torch.cuda.set_device(rank)
@@ -122,12 +128,20 @@ def fsdp_main(rank: int, world_size: int, args: FullArgs, dataset: TripleDataSet
 
         # use a barrier to make sure training is done on all ranks
         model_state_dict, _optimizer_state_dict = get_state_dict(model, optimizer)
-        _checkpoint_future = dcp.async_save(model_state_dict, checkpoint_id=save_folder / "weights" / f"{epoch}")  # pyright: ignore[reportPrivateImportUsage]
+        _checkpoint_future = dcp.async_save(  # pyright: ignore[reportPrivateImportUsage]
+            model_state_dict, checkpoint_id=save_folder / "weights" / f"{epoch}"
+        )
 
         # Optionally, evaluate the model on the validation set after each epoch
         if args.train.eval_each_epoch:
             eval_loss = evalulate(
-                rank, model, copy.deepcopy(eval_dataloader), criterion, epoch, args.train.epochs, writer
+                rank,
+                model,
+                copy.deepcopy(eval_dataloader),
+                criterion,
+                epoch,
+                args.train.epochs,
+                writer,
             )
             if eval_loss < best_eval_loss:
                 best_eval_loss = eval_loss
@@ -143,10 +157,14 @@ def fsdp_main(rank: int, world_size: int, args: FullArgs, dataset: TripleDataSet
 
     if rank == 0:
         init_end_event.synchronize()
-    rank0print(f"CUDA event elapsed time: {init_start_event.elapsed_time(init_end_event) / 1000} sec")
+    rank0print(
+        f"CUDA event elapsed time: {init_start_event.elapsed_time(init_end_event) / 1000} sec"
+    )
 
     model_state_dict, _optimizer_state_dict = get_state_dict(model, optimizer)
-    _checkpoint_future = dcp.async_save(model_state_dict, checkpoint_id=save_folder / "weights" / "final")  # pyright: ignore[reportPrivateImportUsage]
+    _checkpoint_future = dcp.async_save(  # pyright: ignore[reportPrivateImportUsage]
+        model_state_dict, checkpoint_id=save_folder / "weights" / "final"
+    )
 
     cleanup_process_group()
 
@@ -176,7 +194,9 @@ def profil_model(
     loss.backward()
 
     # Forward pass
-    with profile(activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA], record_shapes=True) as prof:
+    with profile(
+        activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA], record_shapes=True
+    ) as prof:
         logits = model(batch)
         # Teacher forcing and Flatten for cross entropy
         shifted_logits = logits[:, :-1, :].reshape(-1, logits.shape[2])  # Remove last prediction
@@ -202,7 +222,9 @@ def train(
     model.train()
     ddp_loss = torch.zeros(2).to(rank)
 
-    for batch_idx, batch in enumerate(tqdm(dataloader, desc=f"Training Epoch {epoch + 1}/{train_args.epochs}")):
+    for batch_idx, batch in enumerate(
+        tqdm(dataloader, desc=f"Training Epoch {epoch + 1}/{train_args.epochs}")
+    ):
         num_tokens = sum([len(seq) for seq in batch["guide_ids"]])
         batch = {k: v.to(rank) for k, v in batch.items()}
 
@@ -266,7 +288,9 @@ def evalulate(
             logits = model(batch)
 
             # Teacher forcing and Flatten for cross entropy
-            shifted_logits = logits[:, :-1, :].reshape(-1, logits.shape[2])  # Remove last prediction
+            shifted_logits = logits[:, :-1, :].reshape(
+                -1, logits.shape[2]
+            )  # Remove last prediction
             shifted_labels = batch["guide_ids"][:, 1:].reshape(-1)  # Remove first token (BOS)
 
             loss = criterion(shifted_logits, shifted_labels)
@@ -306,7 +330,9 @@ if __name__ == "__main__":
 
     world_size = torch.cuda.device_count()
 
-    mp.spawn(fsdp_main, args=(world_size, args, dataset, start_time_str), nprocs=world_size, join=True)  # pyright: ignore[reportPrivateImportUsage]
+    mp.spawn(  # pyright: ignore[reportPrivateImportUsage]
+        fsdp_main, args=(world_size, args, dataset, start_time_str), nprocs=world_size, join=True
+    )
 
     (save_folder / "FINISHED").touch()
     print("DONE")

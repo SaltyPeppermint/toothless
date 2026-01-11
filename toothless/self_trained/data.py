@@ -1,17 +1,15 @@
 import json
-from pathlib import Path
 from dataclasses import dataclass
+from pathlib import Path
 
-import torch
-from torch.utils.data import Dataset
-
-from tokenizers import models, normalizers, pre_tokenizers, processors, trainers, Tokenizer
-import tokenizers
-from tqdm.auto import tqdm
 import polars as pl
+import tokenizers
+import torch
+from tokenizers import Tokenizer, models, normalizers, pre_tokenizers, processors, trainers
+from torch.utils.data import Dataset
+from tqdm.auto import tqdm
 
 from .args import DataArgs
-
 
 SCHEMA = {"from": pl.UInt64, "to": pl.UInt64, "path": pl.String}
 
@@ -42,7 +40,9 @@ class TripleDataSet(Dataset[Triple]):
             print("LOADING TOKENIZER FROM FILE")
             self.tokenizer = Tokenizer.from_file(str(tokenizer_path))
         else:
-            self.tokenizer = _build_tokenizer(self.index_table, conf.tokenizer_samples, conf.force_reload)
+            self.tokenizer = _build_tokenizer(
+                self.index_table, conf.tokenizer_samples, conf.force_reload
+            )
         self.tokenizer_path = self.cache / "tokenizer.json"
 
         self.pad_token_id = self.tokenizer.token_to_id("[PAD]")
@@ -87,7 +87,9 @@ class TripleDataSet(Dataset[Triple]):
         return ids
 
     def __getitem__(self, idx: int) -> Triple:
-        result = self.index_table.filter((pl.col("from") <= idx) & (idx < pl.col("to"))).row(0, named=True)
+        result = self.index_table.filter((pl.col("from") <= idx) & (idx < pl.col("to"))).row(
+            0, named=True
+        )
 
         with open(str(result["path"]), mode="r", encoding="utf-8") as f:
             file = json.load(f)
@@ -139,7 +141,9 @@ def _build_tokenizer(index_table: pl.DataFrame, n_samples: int, force_reload: bo
         ]
     )  # pyright: ignore[reportAttributeAccessIssue]
     tokenizer.post_processor = processors.TemplateProcessing(
-        single="[CLS] $A [SEP]", pair="[CLS] $A [SEP] $B:1 [SEP]:1", special_tokens=[("[CLS]", 1), ("[SEP]", 2)]
+        single="[CLS] $A [SEP]",
+        pair="[CLS] $A [SEP] $B:1 [SEP]:1",
+        special_tokens=[("[CLS]", 1), ("[SEP]", 2)],
     )  # pyright: ignore[reportAttributeAccessIssue]
 
     trainer = trainers.BpeTrainer(vocab_size=25000, special_tokens=["[PAD]", "[CLS]", "[SEP]"])  # pyright: ignore[reportCallIssue]

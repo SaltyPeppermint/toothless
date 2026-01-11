@@ -1,22 +1,19 @@
-from pathlib import Path
 from dataclasses import dataclass
-
+from pathlib import Path
 
 import torch
+from dataclass_wizard import JSONWizard
+from eggshell import (  # pyright: ignore
+    EggshellException,  # type: ignore
+    rise,  # type: ignore
+)
+from tokenizers import Tokenizer
 from torch import Tensor
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 
-from dataclass_wizard import JSONWizard
-from tokenizers import Tokenizer
-
-
-from eggshell import EggshellException  # type: ignore
-from eggshell import rise  # type: ignore
-
-from toothless.model import DualTransformer
-
-from .utils import rank0print
 from .data import Triple
+from .model import DualTransformer
+from .utils import rank0print
 
 
 @dataclass
@@ -50,7 +47,9 @@ class GenerationResult:
         return result
 
 
-def create_padding_mask(input_ids: Tensor, pad_token_id: int = 0, device: torch.device | None = None) -> Tensor:
+def create_padding_mask(
+    input_ids: Tensor, pad_token_id: int = 0, device: torch.device | None = None
+) -> Tensor:
     """
     Creates a padding mask for attention mechanisms.
     """
@@ -101,7 +100,9 @@ def generate_with_probabilities(
 
     # Initialize generation with all start tokens
     generated_tokens = torch.full((batch_size, 1), start_token, device=device, dtype=torch.long)
-    token_probabilities = torch.zeros((batch_size, max_len + 1), device=device)  # +1 for start token
+    token_probabilities = torch.zeros(
+        (batch_size, max_len + 1), device=device
+    )  # +1 for start token
     token_probabilities[:, 0] = 1.0  # Start token has probability 1.0
 
     finished = torch.zeros(batch_size, dtype=torch.bool, device=device)
@@ -111,7 +112,12 @@ def generate_with_probabilities(
             tgt_mask = create_padding_mask(generated_tokens, pad_token_id=pad_token)
             # Get logits for current sequence
             logits = model.decode(
-                generated_tokens, tgt_mask, start_mem, batch["start_mask"], target_mem, batch["target_mask"]
+                generated_tokens,
+                tgt_mask,
+                start_mem,
+                batch["start_mask"],
+                target_mem,
+                batch["target_mask"],
             )
 
             next_token_logits = logits[:, -1, :]  # Last position logits
@@ -167,7 +173,9 @@ def generate_with_probabilities(
 
         # Update generated tokens for non-finished sequences
         next_token_masked = next_token.squeeze(-1)
-        next_token_masked = torch.where(finished, torch.zeros_like(next_token_masked), next_token_masked)
+        next_token_masked = torch.where(
+            finished, torch.zeros_like(next_token_masked), next_token_masked
+        )
         generated_tokens = torch.cat([generated_tokens, next_token_masked.unsqueeze(-1)], dim=1)
 
         # Check for end tokens, set flag if finished
@@ -183,7 +191,9 @@ def generate_with_probabilities(
     sequence_probs = torch.exp(sequence_log_probs)
 
     return GenerationResult(
-        tokens=generated_tokens, token_probs=token_probabilities[:, :actual_length], sequence_probs=sequence_probs
+        tokens=generated_tokens,
+        token_probs=token_probabilities[:, :actual_length],
+        sequence_probs=sequence_probs,
     )
 
 
@@ -228,7 +238,9 @@ def beam_search_with_probabilities(
     # Initialize beams for each batch element
     beams = torch.full((batch_size, beam_size, 1), start_token, device=device, dtype=torch.long)
     beam_scores = torch.zeros(batch_size, beam_size, device=device)
-    beam_token_probs = torch.ones((batch_size, beam_size, 1), device=device)  # Start with probability 1.0
+    beam_token_probs = torch.ones(
+        (batch_size, beam_size, 1), device=device
+    )  # Start with probability 1.0
 
     # Track finished beams
     finished_beams = torch.zeros(batch_size, beam_size, dtype=torch.bool, device=device)
@@ -360,7 +372,9 @@ def beam_search_with_probabilities(
         padded_probs[i, : len(probs)] = probs
 
     return GenerationResult(
-        tokens=padded_tokens, token_probs=padded_probs, sequence_probs=torch.stack(result_sequence_probs)
+        tokens=padded_tokens,
+        token_probs=padded_probs,
+        sequence_probs=torch.stack(result_sequence_probs),
     )
 
 
@@ -400,7 +414,9 @@ def batch_process_result(
         if path:
             start.to_dot(f"{sample_id} left", str(path / f"{sample_id}_left"))
             guide.to_dot(f"{sample_id} middle", str(path / f"{sample_id}_middle"))
-            guide.to_dot(f"{sample_id} middle", str(path / f"{sample_id}_middle_t"), transparent=True)
+            guide.to_dot(
+                f"{sample_id} middle", str(path / f"{sample_id}_middle_t"), transparent=True
+            )
             target.to_dot(f"{sample_id} right", str(path / f"{sample_id}_right"))
 
         if verbose:
@@ -428,8 +444,12 @@ def batch_process_result(
 
         if path:
             generated.to_dot(f"{sample_id} generated", str(path / f"{sample_id}_generated"))
-            generated.to_dot(f"{sample_id} generated", str(path / f"{sample_id}_generated_t"), transparent=True)
-        batch_gen_triples.append(InferResult(str(start), str(guide), str(target), str(generated), ids, token_probs))
+            generated.to_dot(
+                f"{sample_id} generated", str(path / f"{sample_id}_generated_t"), transparent=True
+            )
+        batch_gen_triples.append(
+            InferResult(str(start), str(guide), str(target), str(generated), ids, token_probs)
+        )
 
         if verbose:
             rank0print("GENERATED:", "green")

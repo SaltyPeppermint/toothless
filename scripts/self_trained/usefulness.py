@@ -1,19 +1,15 @@
 import json
-import sys
-from pathlib import Path
 import pprint
-from collections import defaultdict
-
-# from typing import DefaultDict
 import statistics
+import sys
+from collections import defaultdict
+from pathlib import Path
 from typing import DefaultDict
 
+from eggshell import rise  # type: ignore
 from tqdm.auto import tqdm
 
-from eggshell import rise  # type: ignore
-
-from toothless.inference import InferResult  # type: ignore
-
+from toothless.self_trained.inference import InferResult
 
 MAX_SAMPLES = 5000
 ITER_LIMIT = 6
@@ -35,7 +31,9 @@ def check_tuple(sample: InferResult) -> dict[str, dict]:
 
     # GT
     gt_guide_sketch = rise.Guide(sample.middle.replace("[var]", "?"))
-    report_str_1, guide_stuff, goal_reached = rise.eqsat_guide_check(start, gt_guide_sketch, target, iter_limit=i_limit)
+    report_str_1, guide_stuff, goal_reached = rise.eqsat_guide_check(
+        start, gt_guide_sketch, target, iter_limit=i_limit
+    )
     tuple_report["gt"]["report"] = json.loads(report_str_1)["report"]
     tuple_report["gt"]["goal_reached"] = goal_reached
     if guide_stuff:

@@ -4,12 +4,11 @@ from pathlib import Path
 
 import torch
 import torch.distributed as dist
-from torch import nn, Tensor
-
-from termcolor import cprint
 from prettytable import PrettyTable
+from termcolor import cprint
+from torch import Tensor, nn
 
-from toothless.args import TrainArgs
+from .args import TrainArgs
 
 
 def get_save_folder(train_args: TrainArgs, start_time_str: str) -> Path:

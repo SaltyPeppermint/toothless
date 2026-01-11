@@ -18,9 +18,12 @@ dependencies = [
   "termcolor>=3",
   "tyro>=0.9",
   "plotly>=6",
-  "eggshell",
+  # "eggshell",
   "tokenizers>=0.22",
 ]
+
+[tool.setuptools]
+packages = ["toothless"]
 
 [tool.ruff]
 # Allow lines to be as long as 120.

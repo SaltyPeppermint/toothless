@@ -1,3 +1,4 @@
+uv pip install -e .
 uv run train.py \
     --train.logging-steps 1 \
     --train.batch-size 128 \

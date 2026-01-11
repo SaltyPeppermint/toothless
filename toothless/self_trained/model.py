@@ -1,12 +1,11 @@
 import math
 
 import torch
-from torch import Tensor
-from torch import nn
+from torch import Tensor, nn
 
-from .layers.encoder import EncoderLayer
-from .layers.decoder import DecoderLayer, DualDecoderLayer
 from .args import ModelArgs
+from .layers.decoder import DecoderLayer, DualDecoderLayer
+from .layers.encoder import EncoderLayer
 
 
 class DualTransformer(nn.Module):
@@ -86,7 +85,12 @@ class DualTransformer(nn.Module):
         target_mem = self.target_encode(batch["target_ids"], batch["target_mask"])
         # Decode and project to vocabulary
         return self.decode(
-            batch["guide_ids"], batch["guide_mask"], start_mem, batch["start_mask"], target_mem, batch["target_mask"]
+            batch["guide_ids"],
+            batch["guide_mask"],
+            start_mem,
+            batch["start_mask"],
+            target_mem,
+            batch["target_mask"],
         )
 
 
